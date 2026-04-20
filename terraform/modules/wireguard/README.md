@@ -5,8 +5,8 @@
 
 | Name | Version |
 |------|---------|
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | = 1.12.2 |
-| <a name="requirement_aws"></a> [aws](#requirement\_aws) | = 6.36.0 |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | = 1.14.8 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | = 6.41.0 |
 | <a name="requirement_null"></a> [null](#requirement\_null) | = 3.2.4 |
 | <a name="requirement_tls"></a> [tls](#requirement\_tls) | = 4.0.3 |
 
@@ -14,7 +14,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | = 6.36.0 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | = 6.41.0 |
 | <a name="provider_null"></a> [null](#provider\_null) | = 3.2.4 |
 | <a name="provider_tls"></a> [tls](#provider\_tls) | = 4.0.3 |
 
@@ -26,23 +26,23 @@ No modules.
 
 | Name | Type |
 |------|------|
-| [aws_eip.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/eip) | resource |
-| [aws_eip_association.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/eip_association) | resource |
-| [aws_iam_instance_profile.wireguard_profile](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/iam_instance_profile) | resource |
-| [aws_iam_policy.wireguard_policy](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/iam_policy) | resource |
-| [aws_iam_role.wireguard_role](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/iam_role) | resource |
-| [aws_iam_role_policy_attachment.wireguard_roleattach](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/iam_role_policy_attachment) | resource |
-| [aws_instance.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/instance) | resource |
-| [aws_key_pair.ssh](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/key_pair) | resource |
-| [aws_launch_template.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/launch_template) | resource |
-| [aws_s3_bucket.health_check](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/s3_bucket) | resource |
-| [aws_security_group.sg_wireguard_external](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/security_group) | resource |
-| [aws_ssm_parameter.ssh_private_key](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/resources/ssm_parameter) | resource |
+| [aws_eip.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/eip) | resource |
+| [aws_eip_association.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/eip_association) | resource |
+| [aws_iam_instance_profile.wireguard_profile](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/iam_instance_profile) | resource |
+| [aws_iam_policy.wireguard_policy](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/iam_policy) | resource |
+| [aws_iam_role.wireguard_role](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy_attachment.wireguard_roleattach](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_instance.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/instance) | resource |
+| [aws_key_pair.ssh](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/key_pair) | resource |
+| [aws_launch_template.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/launch_template) | resource |
+| [aws_s3_bucket.health_check](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_bucket) | resource |
+| [aws_security_group.sg_wireguard_external](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/security_group) | resource |
+| [aws_ssm_parameter.ssh_private_key](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/ssm_parameter) | resource |
 | [null_resource.status_check](https://registry.terraform.io/providers/hashicorp/null/3.2.4/docs/resources/resource) | resource |
 | [tls_private_key.ssh](https://registry.terraform.io/providers/hashicorp/tls/4.0.3/docs/resources/private_key) | resource |
-| [aws_iam_policy_document.ec2_assume_role](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/data-sources/iam_policy_document) | data source |
-| [aws_iam_policy_document.wireguard_policy_doc](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/data-sources/iam_policy_document) | data source |
-| [aws_ssm_parameter.wg_server_private_key](https://registry.terraform.io/providers/hashicorp/aws/6.36.0/docs/data-sources/ssm_parameter) | data source |
+| [aws_iam_policy_document.ec2_assume_role](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.wireguard_policy_doc](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_ssm_parameter.wg_server_private_key](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/ssm_parameter) | data source |
 
 ## Inputs
 
