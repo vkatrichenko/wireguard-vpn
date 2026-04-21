@@ -5,7 +5,7 @@ module "network" {
   vpc_name     = local.vpc_name
   vpc_cidr     = local.vpc_cidr
   tags         = local.default_tags
-  ports        = [22, 80, 443, 5000]
+  ports        = [22]
 }
 
 module "wireguard" {

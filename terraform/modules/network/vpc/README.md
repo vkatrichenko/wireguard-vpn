@@ -33,8 +33,9 @@
 |------|-------------|------|---------|:--------:|
 | <a name="input_create_database_subnets"></a> [create\_database\_subnets](#input\_create\_database\_subnets) | Whether to create database subnets | `bool` | `false` | no |
 | <a name="input_create_intra_subnets"></a> [create\_intra\_subnets](#input\_create\_intra\_subnets) | Whether to create intra subnets | `bool` | `false` | no |
+| <a name="input_enable_nat_gateway"></a> [enable\_nat\_gateway](#input\_enable\_nat\_gateway) | Enable a single NAT gateway for private subnet outbound internet access | `bool` | `false` | no |
 | <a name="input_env"></a> [env](#input\_env) | Deployment environment name | `string` | `""` | no |
-| <a name="input_ports"></a> [ports](#input\_ports) | List of ports to be used for security group ingress rules | `list(string)` | n/a | yes |
+| <a name="input_ports"></a> [ports](#input\_ports) | List of ports to be used for security group ingress rules | `list(number)` | n/a | yes |
 | <a name="input_project_name"></a> [project\_name](#input\_project\_name) | Name of the project | `string` | n/a | yes |
 | <a name="input_tags"></a> [tags](#input\_tags) | Map of tags to apply to resources | `map(string)` | n/a | yes |
 | <a name="input_vpc_cidr"></a> [vpc\_cidr](#input\_vpc\_cidr) | CIDR block for the VPC | `string` | n/a | yes |

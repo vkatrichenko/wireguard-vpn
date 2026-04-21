@@ -1,7 +1,7 @@
 # Functional Specification: Network Foundation
 
 - **Roadmap Item:** Network Foundation — VPC, subnets, security group, and S3 remote state backend
-- **Status:** Draft
+- **Status:** Completed
 - **Author:** Poe
 
 ---
@@ -26,17 +26,16 @@ The network foundation provides the core AWS infrastructure layer that the WireG
     - [x] 3 public subnets are created across 3 AZs (us-east-1a/b/c): `10.23.1.0/24`, `10.23.2.0/24`, `10.23.3.0/24`.
     - [x] 3 private subnets are created across 3 AZs: `10.23.11.0/24`, `10.23.12.0/24`, `10.23.13.0/24`.
     - [x] An internet gateway is attached to the VPC with a default route (0.0.0.0/0) for public subnets.
-    - [x] A single NAT gateway is provisioned in the first public subnet for cost optimization in test environment.
-    - [x] Private subnets route outbound traffic through the NAT gateway.
+    - [x] NAT gateway is optional via `enable_nat_gateway` variable (disabled by default for cost savings; private subnets remain but without outbound internet access).
     - [x] DNS hostnames and DNS support are enabled on the VPC.
-    - [x] All subnets are tagged with `Role` (public/private) and Kubernetes-readiness tags.
+    - [x] All subnets are tagged with `Role` (public/private). Vestigial Kubernetes tags removed.
 
 ### 2.2. Security Group
 
 - A general-purpose security group is created for the VPC.
   - **Acceptance Criteria:**
     - [x] Security group named `wireguard-vpn-test-general` is created in the VPC.
-    - [x] Ingress rules allow TCP ports 22, 80, 443, and 5000 from 0.0.0.0/0.
+    - [x] Ingress rules allow TCP port 22 (SSH) from 0.0.0.0/0. Unused ports 80, 443, 5000 removed.
     - [x] Egress allows all traffic (protocol -1) to 0.0.0.0/0.
 
 ### 2.3. S3 Remote State Backend
@@ -50,7 +49,7 @@ The network foundation provides the core AWS infrastructure layer that the WireG
     - [x] `prevent_destroy = true` lifecycle rule prevents accidental deletion.
     - [x] The main root module uses this bucket as its S3 backend with native locking (`use_lockfile = true`).
     - [x] No DynamoDB lock table — state locking is handled natively by S3.
-    - [ ] All public access is blocked via `aws_s3_bucket_public_access_block` with all four settings enabled.
+    - [x] All public access is blocked via `aws_s3_bucket_public_access_block` with all four settings enabled.
 
 ---
 

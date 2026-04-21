@@ -8,10 +8,10 @@ _This roadmap outlines our strategic direction based on user needs and project g
 
 _The highest priority features that form the core foundation — a deployable AWS network with remote state management._
 
-- [ ] **Network Foundation**
-  - [ ] **VPC & Subnets:** Provision a dedicated VPC with public subnets and routing tables, providing the network layer for the VPN server.
-  - [ ] **Default Security Group:** Lock down the default VPC security group to deny all traffic, enforcing explicit allow-rules only.
-  - [ ] **S3 Remote State Backend:** Bootstrap an S3 bucket with native locking for Terraform state, enabling safe, reproducible infrastructure management.
+- [x] **Network Foundation**
+  - [x] **VPC & Subnets:** Provision a dedicated VPC with public subnets and routing tables, providing the network layer for the VPN server.
+  - [x] **Default Security Group:** Lock down the default VPC security group to deny all traffic, enforcing explicit allow-rules only.
+  - [x] **S3 Remote State Backend:** Bootstrap an S3 bucket with native locking for Terraform state, enabling safe, reproducible infrastructure management.
 
 - [ ] **Project Scaffolding**
   - [ ] **Provider & Version Pinning:** Pin exact Terraform and AWS provider versions to ensure reproducible builds across environments.
