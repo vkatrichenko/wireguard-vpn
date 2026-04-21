@@ -1,0 +1,42 @@
+module "network" {
+  source       = "../modules/network/vpc"
+  project_name = local.project_name
+  env          = local.environment
+  vpc_name     = local.vpc_name
+  vpc_cidr     = local.vpc_cidr
+  tags         = local.default_tags
+  ports        = [22, 80, 443, 5000]
+}
+
+module "wireguard" {
+  source = "../modules/wireguard"
+
+  project_name                = local.project_name
+  env                         = local.environment
+  ami_id                      = data.aws_ami.ubuntu_2404.id # Ubuntu Server 24.04 x86
+  vpc_id                      = module.network.vpc_id
+  subnet_id                   = module.network.public_subnets[0]
+  wg_server_net               = "172.16.15.1/24"
+  wg_server_private_key_param = "/config/${local.project_name}/default-private-key"
+  # $ wg genkey | tee privatekey | wg pubkey > publickey
+  # [Interface]
+  # PrivateKey = // user private key
+  # ListenPort = 51820
+  # Address = 10.22.123.13/32 //change subnet
+  # DNS = 10.22.0.2
+
+  # [Peer]
+  # PublicKey = wireguard part, DO NOT CHANGE
+  # AllowedIPs = 10.22.0.0/16
+  # Endpoint = 54.245.26.247:51820
+
+  clients_config = [
+    { "172.16.15.5/32" = "AxHZHMTmLYoAmuQtKo7PjWCJTi9+AFlkFBdc7mQ+PjE=" }, # vkatrychenkoб
+    # { "10.222.123.9/32" = "user public key" },
+  ]
+  # additional_security_group_ids = [
+  #   module.development_custom_security_groups["dev_SELF"].security_group_id
+  # ]
+
+  tags = local.default_tags
+}

@@ -1,0 +1,78 @@
+#! /bin/bash
+
+# Wait for background updates to finish (unattended-upgrades)
+echo "Waiting for apt lock..."
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
+  sleep 5
+done
+
+# Upgrade system and install required packages
+apt-get update -y
+apt-get install -y wireguard wireguard-tools unzip curl
+
+# Install awscli
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+./aws/install
+
+# Create WireGuard config directory
+mkdir -p /etc/wireguard
+
+# Generate wg0.conf
+cat > /etc/wireguard/wg0.conf <<EOF
+[Interface]
+Address = ${wg_server_net}
+PrivateKey = ${wg_server_private_key}
+ListenPort = ${wg_server_port}
+PostUp = iptables -I INPUT -p udp --dport 51820 -j ACCEPT
+PostUp = iptables -I FORWARD -i ENI -o wg0 -j ACCEPT
+PostUp = iptables -I FORWARD -i wg0 -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -o ENI -j MASQUERADE
+PostUp = ip6tables -I FORWARD -i wg0 -j ACCEPT
+PostUp = ip6tables -t nat -A POSTROUTING -o ENI -j MASQUERADE
+PostDown = iptables -D INPUT -p udp --dport 51820 -j ACCEPT
+PostDown = iptables -D FORWARD -i ENI -o wg0 -j ACCEPT
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -o ENI -j MASQUERADE
+PostDown = ip6tables -D FORWARD -i wg0 -j ACCEPT
+PostDown = ip6tables -t nat -D POSTROUTING -o ENI -j MASQUERADE
+
+${peers}
+EOF
+
+# Make sure we replace the "ENI" placeholder with the actual network interface name
+export ENI=$(ip route get 8.8.8.8 | grep 8.8.8.8 | awk '{print $5}')
+sudo sed -i "s/ENI/$ENI/g" /etc/wireguard/wg0.conf
+
+# Enable IP forwarding
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+sysctl -p
+
+
+# Start WireGuard
+systemctl enable wg-quick@wg0.service
+systemctl start wg-quick@wg0.service
+
+# 1. Get the IMDSv2 Token
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+
+# 2. Use the token to get the Instance ID
+INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/instance-id)
+echo $INSTANCE_ID > /tmp/instance-id
+
+# Check WireGuard status twice with a 10s delay
+for i in {1..2}; do
+  if systemctl is-active --quiet wg-quick@wg0.service; then
+    echo "WireGuard is active on attempt $i. Signaling S3..." > /tmp/ready
+    aws s3 cp /tmp/ready s3://${health_check_bucket}/$INSTANCE_ID.ready
+    exit 0
+  fi
+  
+  if [ $i -lt 2 ]; then
+    echo "WireGuard not active yet. Retrying in 10 seconds..."
+    sleep 10
+  fi
+done
+
+echo "WireGuard failed to start after 2 attempts."
+exit 1
