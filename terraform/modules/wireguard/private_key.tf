@@ -17,7 +17,7 @@ resource "aws_key_pair" "ssh" {
 # Store the private key in SSM Parameter Store (encrypted)
 resource "aws_ssm_parameter" "ssh_private_key" {
   count       = var.preconfigured_ssh_key_id != null ? 0 : 1
-  name        = "/config/wireguard/ssh/private-key"
+  name        = "/config/${var.project_name}/ssh/private-key"
   description = "SSH private key for EC2 access"
   type        = "SecureString"
   value       = tls_private_key.ssh[0].private_key_pem
