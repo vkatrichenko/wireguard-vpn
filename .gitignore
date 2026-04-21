@@ -227,7 +227,7 @@ backend/fincrediblizer/src/matcher-lambda/step-function-definition-standard.json
 backend/fincrediblizer/src/matcher-lambda/step-function-definition.json
 backend/fincrediblizer/src/matcher-lambda/step-function-definition-jsonata.json
 backend/fincrediblizer/src/matcher-lambda/step_function_definition.json
-CLAUDE.md
+# CLAUDE.md
 
 # EDA Analysis Results
 backend/fincrediblizer/src/eda/output/**
