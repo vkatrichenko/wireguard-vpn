@@ -221,6 +221,11 @@ resources/
 
 #JS related
 /frontend/node_modules
+
+# Next.js dashboard
+/dashboard/node_modules
+/dashboard/.next
+/dashboard/next-env.d.ts
 backend/fincrediblizer/src/matcher-lambda/STEP_FUNCTION_FIXES.md
 backend/fincrediblizer/src/matcher-lambda/STEP_FUNCTION_SETUP.md
 backend/fincrediblizer/src/matcher-lambda/step-function-definition-standard.json
