@@ -18,6 +18,7 @@
 
 | Name | Source | Version |
 |------|--------|---------|
+| <a name="module_dashboard"></a> [dashboard](#module\_dashboard) | ../modules/dashboard | n/a |
 | <a name="module_network"></a> [network](#module\_network) | ../modules/network/vpc | n/a |
 | <a name="module_wireguard"></a> [wireguard](#module\_wireguard) | ../modules/wireguard | n/a |
 

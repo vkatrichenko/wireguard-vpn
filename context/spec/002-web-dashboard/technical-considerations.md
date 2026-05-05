@@ -1,37 +1,56 @@
 # Technical Specification: Web Dashboard for WireGuard VPN
 
 - **Functional Specification:** [`functional-spec.md`](./functional-spec.md)
-- **Status:** Draft
+- **Status:** Draft (v3 — Go binary, VPN-only access)
 - **Author(s):** Vladyslav Katrychenko
+
+> **v3 note (2026-05-01):** Second architecture pivot. v1 used Next.js + Docker + ECR + ALB + ACM + Route53 + WAF. v2 swapped Next.js for a Go single binary delivered via S3, kept the ALB+ACM+Route53+WAF edge. v3 drops the public edge entirely: the dashboard listens on the WireGuard server's tunnel IP and is reachable **only by clients connected to the VPN**. HTTP is acceptable inside the WG tunnel (the tunnel itself is encrypted with ChaCha20-Poly1305). Basic auth is retained as defense-in-depth. No domain, no ACM, no Route53, no ALB, no WAF.
 
 ---
 
 ## 1. High-Level Technical Approach
 
-A self-contained **Next.js (App Router)** application running as a single Docker container on the existing WireGuard EC2 instance, fronted by an **AWS Application Load Balancer** that terminates HTTPS using an **ACM certificate** at `https://wg.vk.provectus.pro`. A new Route53 hosted zone `vk.provectus.pro` (delegated from the parent `provectus.pro`, which lives in another AWS account) provides DNS; the dashboard is exposed as the `wg` record within that zone. **AWS WAF v2** in front of the ALB protects the public Basic-auth endpoint with a rate-based rule. Metrics history (last 24 h) is persisted in a local **SQLite** file inside a Docker volume on the EC2.
+A self-contained **Go single static binary** running as a systemd-managed process on the existing WireGuard EC2 instance, **bound to the WireGuard server's tunnel IP** (`172.16.15.1:8080`). The dashboard is reachable **only over the WG tunnel** — any client already connected to the VPN can hit `http://172.16.15.1:8080` and authenticate with HTTP Basic auth. The public internet cannot reach the dashboard at all (the EC2 security group does not expose port 8080). Metrics history (last 24 h) is persisted in a local **SQLite** file.
 
 ```
-Internet
+WireGuard client (e.g. operator's laptop)
    │
+   │ encrypted WG tunnel (UDP 51820, ChaCha20-Poly1305)
    ▼
-Route53  (wg.vk.provectus.pro, A-alias)
-   │
-   ▼
-WAF v2  (rate-based: 100 req / 5 min / IP)
-   │
-   ▼
-ALB     (ACM cert; :443 → EC2:8080, :80 → 301 :443)
-   │
-   ▼
-EC2 (existing WireGuard host)
-   └─ Docker container: Next.js (port 8080)
-        ├─ reads /host/proc, /host/sys
-        ├─ exec wg show dump, systemctl status wg-quick@wg0
+EC2 (existing WireGuard host, t3a.micro, Ubuntu 24.04)
+   ├─ wg-quick@wg0.service             (existing — listens on 0.0.0.0:51820/udp)
+   │     └─ wg0 interface              (172.16.15.1/24)
+   └─ wireguard-dashboard.service      (NEW — Go binary, binds 172.16.15.1:8080)
+        ├─ reads /proc, /sys directly
+        ├─ exec sudo wg show wg0 dump, sudo systemctl status wg-quick@wg0
         ├─ writes/reads SQLite at /var/lib/wireguard-dashboard
-        └─ Basic auth from SSM Parameter Store
+        └─ Basic auth from SSM Parameter Store (defense-in-depth inside the tunnel)
 ```
 
-Container builds run in **GitHub Actions on push to `main`** (paths-filter `dashboard/**`), publishing `linux/amd64` images to a private ECR repo via OIDC. A follow-on workflow triggers an SSM `SendCommand` to pull the new image and restart the systemd-managed `wireguard-dashboard` unit on the EC2.
+**Build & deploy pipeline:**
+
+```
+Developer push to main (touching dashboard/**)
+   │
+   ▼
+GitHub Actions (OIDC → AWS)
+   ├─ go test ./... && go build -ldflags "-s -w" → 15-25 MB static binary
+   └─ aws s3 cp wireguard-dashboard s3://<artifacts-bucket>/main-<sha>/wireguard-dashboard
+       and aws s3 cp wireguard-dashboard s3://<artifacts-bucket>/latest/wireguard-dashboard
+   │
+   ▼
+Optional follow-on workflow → SSM SendCommand
+   ├─ aws s3 cp s3://.../main-<sha>/wireguard-dashboard /opt/wireguard-dashboard/bin/wireguard-dashboard.new
+   ├─ chmod +x; atomic mv into place
+   └─ systemctl restart wireguard-dashboard
+```
+
+**Why VPN-only access works here:**
+
+- The user is already a WG operator and is the *only* persona who needs the dashboard. They're connected to the VPN by definition.
+- No ALB ($16/mo), no WAF (~$5/mo), no Route53 zone (parent-zone delegation problem disappears), no ACM cert lifecycle, no public attack surface for credential brute-forcing.
+- Encryption is provided by WG itself; HTTP is appropriate inside the tunnel.
+- Failure mode: if WG service is down, the dashboard is naturally unreachable — but if WG is down, the dashboard's most important reading is "WG service is down", which the operator already knows because their client can't reach it. Acceptable.
 
 ---
 
@@ -40,66 +59,55 @@ Container builds run in **GitHub Actions on push to `main`** (paths-filter `dash
 ### 2.1 Repository structure (additions and changes)
 
 ```
-dashboard/                              # NEW — Next.js app, single folder
-  app/
-    api/
-      health/route.ts                   # ALB health check, no auth
-      snapshot/route.ts                 # aggregate payload (10s poll)
-      metrics/route.ts                  # 24h time-series for charts
-    page.tsx                            # dashboard UI
-    layout.tsx
-  middleware.ts                         # Basic auth gate
-  lib/
-    proc.ts                             # /host/proc + /host/sys readers
-    wg.ts                               # `wg show wg0 dump` parser
-    systemd.ts                          # systemctl wrappers
-    db.ts                               # better-sqlite3 client
-    clients-config.ts                   # reads /etc/wireguard-dashboard/clients.json
-  instrumentation.ts                    # starts background poller
-  components/                           # charts, cards, layout
-  Dockerfile
-  package.json
-  next.config.ts
+dashboard/                              # NEW — Go project, single folder
+  cmd/
+    wireguard-dashboard/
+      main.go                           # entrypoint, flag parsing, server start
+  internal/
+    server/                             # HTTP routing, middleware, route handlers
+    proc/                               # /proc + /sys readers
+    wg/                                 # `wg show wg0 dump` parser
+    systemd/                            # systemctl wrappers
+    db/                                 # SQLite layer (modernc.org/sqlite — pure-Go, no CGO)
+    poller/                             # 30s sampler + retention sweeper
+    config/                             # env-var loading
+    clientsfile/                        # reads /etc/wireguard-dashboard/clients.json
+  web/                                  # served via embed.FS
+    templates/                          # layout, dashboard, cards/
+    static/                             # htmx.min.js, chart.umd.min.js, app.css
+  go.mod
+  go.sum
+  Makefile
 terraform/
   modules/
-    dashboard/                          # NEW
-      main.tf                           # ALB, target group, listener rules
-      acm.tf                            # ACM cert + DNS validation
-      dns.tf                            # Route53 zone + records
-      ecr.tf                            # ECR repo + lifecycle policy
-      waf.tf                            # WAF v2 web ACL + association
-      sg.tf                             # ALB SG + companion rule for EC2
-      iam.tf                            # GH OIDC role; instance role grants
-      variables.tf, outputs.tf, versions.tf, locals.tf
+    dashboard/                          # NEW — only an artifact bucket, no edge
+      s3.tf                             # binary artifact bucket + lifecycle
+      iam.tf                            # GH OIDC role for S3 push and SSM SendCommand
+      versions.tf, variables.tf, outputs.tf, locals.tf
     wireguard/                          # MODIFIED
-      templates/user-data.txt           # add Docker install + container start
-      sg.tf                             # add ingress 8080 from ALB SG
+      templates/user-data.txt           # add binary download + sudoers + systemd unit
       variables.tf                      # new clients_config schema (with name)
-      iam.tf                            # add ECR pull + dashboard SSM grants
+      iam.tf                            # add S3 read grant + SSM Parameter Store grants
+      # sg.tf — UNCHANGED (no new ingress rules)
   dev/
     main.tf                             # compose dashboard module, updated clients_config
-    locals.tf                           # dashboard hostname + parent zone reference
+    locals.tf                           # artifact bucket name
 .github/workflows/
-  dashboard-build.yml                   # NEW — build + push on main
-  dashboard-deploy.yml                  # NEW — SSM SendCommand to restart container
+  dashboard-build.yml                   # NEW — go build + S3 upload on main
+  dashboard-deploy.yml                  # NEW — SSM SendCommand to download + restart
 ```
 
 ### 2.2 Architecture changes
 
-- **Reuse the existing public subnets.** The VPC module already provisions three public subnets across three AZs; the ALB attaches to those — **no subnet work is required**.
-- **New ALB** spanning the existing public subnets. Listeners: `:80` (redirect to HTTPS), `:443` (forward to EC2 target on `:8080`).
-- **New ALB security group:** ingress `:443` and `:80` from `0.0.0.0/0`; egress `:8080` to the EC2 SG.
-- **WireGuard EC2 SG:** new ingress rule for `:8080/tcp` sourced from the ALB SG. (UDP 51820 unchanged.)
-- **New ECR private repo** `wireguard-dashboard`, with a lifecycle policy retaining the latest 10 untagged images and all `main-*` SHA tags for 30 days.
-- **WAF v2 Web ACL** associated with the ALB. One rate-based rule: 100 req / 5 min per source IP, action `BLOCK`. CloudWatch metrics enabled.
-- **New Route53 hosted zone** for `vk.provectus.pro`. NS delegation from parent `provectus.pro` is **out of band** — added manually in the parent account (one-time). The dashboard is exposed via an `A`-alias record `wg` in that zone, resolving to the ALB.
-- **ACM certificate** for `wg.vk.provectus.pro` in `us-east-1`, DNS-validated against the new zone (validation records created by Terraform).
-- **No CloudWatch agent** — system metrics read directly inside the container.
-- **No second EC2** — container co-locates with WireGuard.
+- **No ALB. No ACM. No Route53. No WAF.** All four removed from the design.
+- **No new EC2 ingress for the dashboard.** The WireGuard EC2 SG keeps its existing rules: UDP 51820 from `0.0.0.0/0`, and whatever SSH/SSM access already exists. Port 8080 is **not** opened to the internet.
+- **New S3 bucket** for dashboard binary artifacts (e.g., `wireguard-vpn-test-dashboard-artifacts`). Bucket policy permits writes only from the GitHub OIDC role and reads only from the EC2 instance role. Lifecycle: keep last 30 versions of `latest/wireguard-dashboard`, expire `main-*/` prefixes after 60 days.
+- **Dashboard listens on `172.16.15.1:8080`** (the WG server's tunnel IP, derived from `var.wg_server_net` minus the CIDR — currently `172.16.15.1/24` so the host IP is `172.16.15.1`). The Go binary's `LISTEN_ADDR` env defaults to that value. Configurable via env so that local dev can use `127.0.0.1:8080`.
+- **Systemd ordering:** the dashboard unit declares `After=wg-quick@wg0.service` and `Requires=wg-quick@wg0.service`, so it only starts once `wg0` is up (and therefore `172.16.15.1` is bindable). When WG is restarted, the dashboard restarts too.
 
 ### 2.3 Data model — local SQLite schema
 
-File: `/var/lib/wireguard-dashboard/metrics.db` (Docker volume `wireguard-dashboard-data`).
+File: `/var/lib/wireguard-dashboard/metrics.db`. Owned by the `wireguard-dashboard` system user (created by cloud-init).
 
 | Table | Purpose | Key columns |
 | --- | --- | --- |
@@ -108,87 +116,101 @@ File: `/var/lib/wireguard-dashboard/metrics.db` (Docker volume `wireguard-dashbo
 | `client_traffic` | per-client cumulative rx/tx | `ts`, `public_key`, `name`, `address`, `rx_bytes_cum`, `tx_bytes_cum` (composite PK on `ts, public_key`) |
 | `handshake_events` | detected handshakes (last hour) | `ts INTEGER`, `public_key`, `name` |
 
-A background poller samples every 30 s; a maintenance task prunes rows older than 25 h every 10 minutes. Schemas managed via `better-sqlite3` migrations.
+Background poller samples every 30 s; retention task prunes rows older than 25 h every 10 minutes. Driver: **`modernc.org/sqlite`** (pure-Go, no CGO).
 
 ### 2.4 API contracts
 
-All routes are Next.js App Router handlers under `dashboard/app/api/`. JSON in/out. All routes except `/api/health` require Basic auth (enforced by `middleware.ts`).
+All HTTP routes are served by the Go binary's `net/http` mux (or `chi`). All routes except `/api/health` require Basic auth.
 
 | Method | Path | Purpose / shape |
 | --- | --- | --- |
-| GET | `/api/health` | `{ ok: true }` — ALB target health check |
+| GET | `/api/health` | `{ "ok": true }` — used by `systemctl` health-checks and a curl sanity test |
 | GET | `/api/snapshot` | Aggregated payload: `{ system, traffic, clients[], service, server }` — single round-trip per 10s refresh |
 | GET | `/api/metrics?range=24h` | Time-series arrays for sparklines/trend charts |
+| GET | `/` | Server-rendered HTML dashboard (htmx-enabled) |
 
-### 2.5 Backend module breakdown
+### 2.5 Backend module breakdown (Go)
 
-- `lib/proc.ts` — reads `/host/proc/stat`, `/host/proc/meminfo`, `/host/sys/class/net/wg0/statistics/{rx_bytes,tx_bytes}`, `/host/proc/uptime`. Computes deltas for rates.
-- `lib/wg.ts` — `child_process.execFile('/usr/bin/wg', ['show','wg0','dump'])`, parses the tab-separated output into peer rows (`{public_key, endpoint, allowed_ips, latest_handshake, rx, tx}`).
-- `lib/systemd.ts` — `systemctl is-active wg-quick@wg0`, `systemctl show -p ActiveEnterTimestamp wg-quick@wg0` for service status and uptime.
-- `lib/db.ts` — wraps `better-sqlite3` with prepared statements; exports query helpers per table.
-- `lib/clients-config.ts` — reads `/etc/wireguard-dashboard/clients.json` (rendered by Terraform user-data) — the source of truth for `name → public_key → address`.
-- `instrumentation.ts` — Next.js bootstrap hook; starts a 30 s setInterval that samples → writes to SQLite, plus a 10 min retention sweeper.
+- `cmd/wireguard-dashboard/main.go` — flags + env parsing, constructs server, blocks on `http.ListenAndServe`. Graceful shutdown on SIGTERM.
+- `internal/config/` — loads `LISTEN_ADDR` (default `172.16.15.1:8080`), `BASIC_AUTH_USERNAME`, `BASIC_AUTH_PASSWORD_HASH`, `CLIENTS_CONFIG_PATH`, `DB_PATH` from env.
+- `internal/server/` — HTTP routing. Likely `github.com/go-chi/chi/v5` for middleware composition; plain `net/http` is also viable. Embeds `web/templates` and `web/static` via `embed.FS`.
+- `internal/server/middleware_auth.go` — Basic auth using `golang.org/x/crypto/bcrypt`. Skips `/api/health`.
+- `internal/proc/` — reads `/proc/stat`, `/proc/meminfo`, `/sys/class/net/wg0/statistics/{rx,tx}_bytes`, `/proc/uptime`. Computes CPU% and rates from prior in-memory sample.
+- `internal/wg/` — `os/exec` runs `sudo /usr/bin/wg show wg0 dump`, parses tab-separated output.
+- `internal/systemd/` — runs `sudo /usr/bin/systemctl is-active wg-quick@wg0`, `sudo /usr/bin/systemctl show -p ActiveEnterTimestamp wg-quick@wg0`.
+- `internal/db/` — `modernc.org/sqlite` with prepared statements; query helpers per table.
+- `internal/poller/` — goroutines with `time.Ticker(30s)` for sampling and `Ticker(10m)` for retention.
+- `internal/clientsfile/` — reads `/etc/wireguard-dashboard/clients.json`.
 
-### 2.6 Frontend breakdown
+### 2.6 Frontend (server-rendered + htmx + Chart.js)
 
-- `app/page.tsx` — server component, initial render with first snapshot.
-- `components/charts/Trend.tsx` — wrapper around **Recharts** `<AreaChart>` for CPU/memory/traffic 24h trends.
-- `components/ClientList.tsx`, `ServiceStatusCard.tsx`, `ServerInfoCard.tsx`, `UptimeCard.tsx`.
-- Client-side polling hook `usePoll('/api/snapshot', 10_000)` with stale-flag handling.
+- `web/templates/layout.html` — base HTML, includes htmx + Chart.js + app.css.
+- `web/templates/dashboard.html` — composes the cards into the page grid.
+- `web/templates/cards/*.html` — one template per widget (client-list, server-info, service-status, system, network-rate, events, charts). Each card uses `hx-get="/api/snapshot"`, `hx-trigger="every 10s"`, `hx-target="this"` for autonomous 10 s refresh; the API returns HTML fragments.
+- `/api/metrics?range=24h` returns JSON consumed by Chart.js drawing into `<canvas>` elements. Re-render triggered client-side via `htmx:afterSettle`.
+- htmx and Chart.js are vendored as pinned files in `web/static/`.
 
-### 2.7 Container runtime requirements
+### 2.7 Runtime requirements
 
-`docker run` flags (encoded in the systemd unit installed by cloud-init):
+The Go binary runs as a non-root **`wireguard-dashboard`** system user (created by cloud-init via `useradd --system --no-create-home --shell /usr/sbin/nologin`). Permissions:
 
-- `--network host` — required so the container shares the host's net namespace and can see `wg0` for `wg show`.
-- `--pid host` — so `systemctl` inside the container talks to the host's systemd via dbus.
-- `--cap-add NET_ADMIN` — for `wg show` to read interface counters.
-- Read-only bind mounts:
-  - `/proc:/host/proc:ro`
-  - `/sys:/host/sys:ro`
-  - `/etc/wireguard:/etc/wireguard:ro`
-  - `/etc/wireguard-dashboard/clients.json:/etc/wireguard-dashboard/clients.json:ro`
-  - `/run/dbus/system_bus_socket:/run/dbus/system_bus_socket`
-- Volume: `wireguard-dashboard-data:/var/lib/wireguard-dashboard`
-- Env (resolved at unit start by an `ExecStartPre` that calls `aws ssm get-parameter`):
-  - `BASIC_AUTH_USERNAME`
-  - `BASIC_AUTH_PASSWORD_HASH` (bcrypt, verified per request)
-  - `LISTEN_PORT=8080`
+- Read access to `/proc`, `/sys`.
+- Read access to `/etc/wireguard-dashboard/clients.json` (rendered with mode 0644 by cloud-init).
+- Permission to exec `wg` and `systemctl` for a fixed set of read-only commands via `/etc/sudoers.d/wireguard-dashboard`:
+  - `wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/wg show wg0 dump`
+  - `wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/wg show wg0 public-key`
+  - `wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/systemctl is-active wg-quick@wg0.service`
+  - `wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/systemctl show wg-quick@wg0.service*`
+  - File mode `0440`, owner `root:root`.
+- Write access to `/var/lib/wireguard-dashboard/` for the SQLite file.
+
+Environment variables (resolved at unit start by an `ExecStartPre` that calls `aws ssm get-parameter`):
+- `LISTEN_ADDR=172.16.15.1:8080`
+- `BASIC_AUTH_USERNAME`
+- `BASIC_AUTH_PASSWORD_HASH` (bcrypt)
+- `CLIENTS_CONFIG_PATH=/etc/wireguard-dashboard/clients.json`
+- `DB_PATH=/var/lib/wireguard-dashboard/metrics.db`
 
 ### 2.8 Cloud-init additions to `user-data.txt`
 
 After the existing WireGuard install:
 
-1. Install Docker (`apt install -y docker.io`).
-2. Authenticate to ECR via the instance role (`aws ecr get-login-password | docker login`).
-3. Render `/etc/wireguard-dashboard/clients.json` from a Terraform-templated value (the new `clients_config` shape).
-4. Drop `/etc/systemd/system/wireguard-dashboard.service` (templated) and `systemctl enable --now wireguard-dashboard.service`.
-5. Health-signal logic stays the same — ALB target health check is independent.
+1. `useradd --system --no-create-home --shell /usr/sbin/nologin wireguard-dashboard` (idempotent guard).
+2. `mkdir -p /opt/wireguard-dashboard/bin /var/lib/wireguard-dashboard /etc/wireguard-dashboard`; chown `wireguard-dashboard:wireguard-dashboard /var/lib/wireguard-dashboard`.
+3. Render `/etc/wireguard-dashboard/clients.json` from a Terraform-templated value.
+4. `aws s3 cp s3://<artifact-bucket>/latest/wireguard-dashboard /opt/wireguard-dashboard/bin/wireguard-dashboard`.
+5. `chmod +x /opt/wireguard-dashboard/bin/wireguard-dashboard`.
+6. Drop `/etc/sudoers.d/wireguard-dashboard` (mode 0440) granting NOPASSWD for the four scoped commands.
+7. Drop `/etc/systemd/system/wireguard-dashboard.service` with `After=wg-quick@wg0.service`, `Requires=wg-quick@wg0.service`. `systemctl enable --now`.
 
 ### 2.9 IAM additions
 
 **Instance role** gains:
-- `ecr:GetAuthorizationToken` (resource `*`)
-- `ecr:BatchGetImage`, `ecr:GetDownloadUrlForLayer`, `ecr:BatchCheckLayerAvailability` on the dashboard ECR repo ARN
+- `s3:GetObject` on `arn:aws:s3:::<artifact-bucket>/latest/*` and `arn:aws:s3:::<artifact-bucket>/main-*/*`
+- `s3:ListBucket` on the artifact bucket (with key-prefix conditions for `latest/` and `main-*/`)
 - `ssm:GetParameter` on:
   - `/config/wireguard/dashboard/username`
   - `/config/wireguard/dashboard/password-hash`
 
-**New GitHub OIDC role** (federated from `token.actions.githubusercontent.com`, scoped to this repo):
-- ECR push permissions on the dashboard repo
+**New GitHub OIDC role** (federated from `token.actions.githubusercontent.com`, scoped to this repository):
+- `s3:PutObject` on the artifact bucket
 - `ssm:SendCommand` on the WireGuard instance ARN with a hard-pinned document
+
+**No ECR, ALB, Route53, ACM, or WAF permissions anywhere.**
 
 ### 2.10 GitHub Actions workflows
 
 `dashboard-build.yml`:
 - Trigger: `push: branches: [main]`, paths: `dashboard/**`
-- Steps: checkout → configure-aws-credentials (OIDC) → docker buildx build `--platform linux/amd64` → ECR login → push tags `main-${{ github.sha }}` and `latest`
+- Steps: checkout → set up Go (`actions/setup-go@v5` pinned by SHA, version pinned in `go.mod`) → `cd dashboard && go test ./...` → `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o wireguard-dashboard ./cmd/wireguard-dashboard` → configure-aws-credentials (OIDC) → `aws s3 cp` to `main-<sha>/` and `latest/`.
 
 `dashboard-deploy.yml`:
 - Trigger: `workflow_run` after `dashboard-build.yml` succeeds; or manual `workflow_dispatch`
-- Step: `aws ssm send-command` with a document that runs:
+- Step: `aws ssm send-command` with a hard-pinned document that:
   ```
-  docker pull <ECR>/wireguard-dashboard:main-<sha>
+  aws s3 cp s3://<bucket>/main-<sha>/wireguard-dashboard /opt/wireguard-dashboard/bin/wireguard-dashboard.new
+  chmod +x /opt/wireguard-dashboard/bin/wireguard-dashboard.new
+  mv /opt/wireguard-dashboard/bin/wireguard-dashboard.new /opt/wireguard-dashboard/bin/wireguard-dashboard
   systemctl restart wireguard-dashboard
   ```
 
@@ -198,7 +220,7 @@ Today: `clients_config = [ { "172.16.15.5/32" = "publickey" } ]`
 
 New: `clients_config = [ { name = "vkatrychenko", address = "172.16.15.5/32", public_key = "..." } ]`
 
-This is a breaking change to the `wireguard` module input. The user-data template and `dev/main.tf` are updated in the same commit. The module README documents the migration.
+Same as v1/v2 — unchanged by the architecture pivot.
 
 ---
 
@@ -206,32 +228,33 @@ This is a breaking change to the `wireguard` module input. The user-data templat
 
 ### 3.1 System Dependencies
 
-- **Parent zone `provectus.pro` lives outside this AWS account.** NS delegation for `vk.provectus.pro` is a one-time manual edit there. Without it, ACM DNS validation never completes. **This must happen before `terraform apply`.**
-- **EC2 has `lifecycle.ignore_changes = [user_data, user_data_base64]`.** Cloud-init changes don't replace the instance; the operator must `terraform taint` it (or `terraform apply -replace=...`) to pick up new bootstrap logic.
+- **EC2 has `lifecycle.ignore_changes = [user_data, user_data_base64]`.** Cloud-init changes don't replace the instance; the operator must `terraform apply -replace=...` to pick up new bootstrap logic.
 - **SSM Parameter Store credentials** for the dashboard must be created out-of-band (same pattern as the WireGuard private key).
+- **Existing committed Next.js scaffold under `dashboard/`** must be removed before the Go project is added.
+- **Dashboard depends on `wg-quick@wg0.service`** for binding (the WG IP only exists when WG is up). `systemd` ordering handles this.
 
 ### 3.2 Potential Risks & Mitigations
 
 | Risk | Likelihood | Mitigation |
 | --- | --- | --- |
-| Brute-force on public Basic auth | Medium | WAF rate-based rule (100 req / 5 min / IP) + ≥ 20-char password. CloudWatch metric filter on ALB access logs alarms on 401 spikes (out-of-scope to wire up here). Resolves the open `[NEEDS CLARIFICATION]` from §2.7 of the functional spec. |
-| Container can't see host system metrics | Medium | Documented `--network host` + `--pid host` + bind mounts of `/host/proc`, `/host/sys`. Verified locally before merge. |
-| Memory pressure on `t3a.micro` (1 GB) | Medium | Next.js (production) baseline ~150–200 MB; dashboard budget ≤ 350 MB total. If the 30-day p95 exceeds budget, follow-up task to upsize to `t3a.small`. |
-| ACM validation race (parent NS not delegated) | Low (manual, one-shot) | Deploy guide makes the manual NS-records step explicit prior to `terraform apply`. |
-| ECR pull fails on EC2 boot | Low | Cloud-init logs to `/var/log/cloud-init-output.log`. Systemd unit's `Restart=on-failure` retries. |
-| Public exposure of dashboard | High by design | Mitigated by Basic auth + WAF rate rule. WAF IP-set allow-list can be added later if needed. |
-| ALB cost (~$16/mo + LCU) | Accepted | Documented; chosen over Caddy/Let's Encrypt to honor the ACM decision. |
+| Operator can't reach dashboard when WG service is down | Certain by design | Acceptable — when WG is down, the dashboard's primary value (showing WG state) is moot. Operator falls back to SSM Session Manager. |
+| Dashboard binds before `wg0` exists | Low | systemd `After=wg-quick@wg0.service` + `Requires=wg-quick@wg0.service` plus `Restart=on-failure RestartSec=5s` covers transient races. |
+| Privileged commands (`wg`, `systemctl`) misused | Low | Sudoers entry scoped to four exact arg patterns, file mode 0440. |
+| Memory pressure on `t3a.micro` (1 GB) | Low | Go binary baseline ~30 MB RAM. |
+| S3 artifact pull fails on EC2 boot | Low | Cloud-init logs to `/var/log/cloud-init-output.log`. Systemd unit's `Restart=on-failure` retries. |
+| Basic auth credentials on the wire (HTTP inside WG tunnel) | Low | WG tunnel encrypts the entire path. HTTP is acceptable inside it. Basic auth is defense-in-depth in case multiple WG clients share the tunnel. |
+| Operator has multiple WG client devices | Acceptable | Each WG client can reach the dashboard. Basic auth is the gate; password sharing across the operator's own devices is the operator's choice. |
 | `clients_config` schema break | Medium | Coordinated PR: schema change + user-data + `dev/main.tf` in one commit. `terraform plan` reviewed for unintended replacements. |
-| SSM `SendCommand` deploy has no rollback | Medium | Operator can manually `docker run` a previous tag. Blue/green deployment is out of scope for v1. |
-| Charts library (Recharts) bundle size on mobile | Low | Recharts gzipped ~50–60 KB. Acceptable for a dashboard. Lazy-loaded on the chart route segment if needed. |
+| Existing committed Next.js / ECR / dashboard work in the tree | Medium | Slice 0 explicitly removes `dashboard/` (Next.js), `terraform/modules/ecr/`, and the ECR-related vars/iam/locals/user-data blocks before Go work begins. |
+| Chart.js / htmx CDN drift | Low | Both vendored as pinned files in `web/static/`, committed to the repo. |
 
 ---
 
 ## 4. Testing Strategy
 
-- **Local development:** `docker compose` running the Next.js container with mock `/host/proc` and `/host/sys` files; develop against `http://localhost:8080`.
-- **Backend unit tests (Vitest):** `lib/proc.ts`, `lib/wg.ts`, `lib/systemd.ts` — mock filesystem and `child_process`. Cover edge cases: no peers, never-handshaked peer, kernel counter wraps, `wg-quick@wg0` stopped.
-- **Frontend component tests (React Testing Library):** chart rendering, `ClientList` empty/populated states, `ServiceStatusCard` running/stopped variants.
-- **Integration test:** A `make` target that builds the image, runs it with synthetic env, and asserts `/api/health` returns 200 and `/api/snapshot` returns valid JSON when authenticated.
-- **Manual end-to-end:** After `terraform apply`, open `https://wg.vk.provectus.pro` and verify all six widgets render with non-empty data; SSM-exec `systemctl stop wg-quick@wg0` and confirm the UI shows **"Service down"** within one refresh cycle (~10 s).
-- **Terraform validation:** `terraform validate` in `terraform/dev/`, `terraform/dev/backend/`, and the new `terraform/modules/dashboard/`. `make pre-commit` (fmt + tflint + trivy + docs) at repo root before claiming done.
+- **Local development:** `cd dashboard && make run` builds and runs the binary against synthetic env (`make run-with-fakeproc` — points at fixture files in `testdata/`). Develops against `http://127.0.0.1:8080` (override `LISTEN_ADDR`).
+- **Backend unit tests (`go test ./...`):** table-driven tests for `internal/proc`, `internal/wg`, `internal/systemd`, `internal/db` (in-memory SQLite via `:memory:`), `internal/server` (httptest). Cover edge cases: no peers, never-handshaked peer, kernel counter wraps, `wg-quick@wg0` stopped.
+- **Frontend smoke:** `httptest` against `/` to verify the dashboard HTML includes each card's expected content; no JS-runtime tests in v1.
+- **Integration test:** `make` target builds the binary, runs it with synthetic env, and curls `/api/health` and `/api/snapshot`.
+- **Manual end-to-end:** After `terraform apply` and a CI-driven binary upload + deploy, **connect to the VPN**, then open `http://172.16.15.1:8080` in browser and verify all six widgets render. SSM-exec `systemctl stop wg-quick@wg0` (from outside the tunnel) and confirm the dashboard becomes unreachable (expected — the WG IP goes down).
+- **Terraform validation:** `terraform validate` in `terraform/dev/` and the new `terraform/modules/dashboard/`. `make pre-commit` (fmt + tflint + trivy + docs) at repo root before claiming done.

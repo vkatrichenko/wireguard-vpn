@@ -1,0 +1,12 @@
+# Locally built binary (cross-compiled for linux/amd64 by `make build`).
+# CI uploads its own artifact to S3; we never want a developer's binary checked in.
+/wireguard-dashboard
+
+# Go test/coverage artifacts
+*.test
+*.out
+coverage.txt
+
+# Editor / OS noise
+.DS_Store
+*.swp

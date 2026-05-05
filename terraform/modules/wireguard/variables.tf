@@ -79,3 +79,25 @@ variable "tags" {
   description = "A map of tags to assign to resources."
   type        = map(string)
 }
+
+variable "dashboard_artifact_bucket_arn" {
+  description = "ARN of the S3 bucket that holds the web-dashboard binary artifacts. When non-null, the EC2 instance role gains scoped read access to objects under `latest/*` and `main-*/*`. When null (default), no dashboard read statements are added to the instance policy. Wired in by `dev/main.tf` once the dashboard module is composed in."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.dashboard_artifact_bucket_arn == null || can(regex("^arn:aws:s3:::", var.dashboard_artifact_bucket_arn))
+    error_message = "dashboard_artifact_bucket_arn must be null or a valid S3 bucket ARN starting with 'arn:aws:s3:::'."
+  }
+}
+
+variable "dashboard_artifact_bucket_name" {
+  description = "Name of the S3 bucket that hosts the web-dashboard binary artifacts. When non-null, first-boot user-data downloads `s3://<bucket>/latest/wireguard-dashboard`, installs it under `/opt/wireguard-dashboard/bin/`, and starts a `wireguard-dashboard.service` systemd unit bound to the WireGuard tunnel IP. When null (default), the dashboard is not provisioned and user-data behaves as before. Paired with `dashboard_artifact_bucket_arn` (which gates the IAM read permissions); both are wired in by `dev/main.tf` once the dashboard module is composed in."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.dashboard_artifact_bucket_name == null || can(regex("^[a-z0-9.\\-]{3,63}$", var.dashboard_artifact_bucket_name))
+    error_message = "dashboard_artifact_bucket_name must be null or a valid S3 bucket name (3-63 chars, lowercase letters, digits, hyphens, dots)."
+  }
+}

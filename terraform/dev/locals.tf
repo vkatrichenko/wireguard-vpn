@@ -1,6 +1,6 @@
 locals {
   aws_region   = "us-east-1"
-  project_name = "wireguard-vpn-test"
+  project_name = "wireguard-vpn"
   environment  = "test"
 
   vpc_name = "${local.project_name}-vpc"

@@ -60,6 +60,60 @@ TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-meta
 INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/instance-id)
 echo $INSTANCE_ID > /tmp/instance-id
 
+%{ if dashboard_artifact_bucket_name != "" ~}
+# --- WireGuard dashboard (Slice 1) ---------------------------------------
+# Provisioned only when the caller wires in a non-empty
+# `dashboard_artifact_bucket_name`. The IAM role's `s3:GetObject` is already
+# scoped to `latest/*` (sub-task 3). AWS CLI was installed earlier in this
+# script. The IMDSv2 token block is also already present above; not duplicated.
+# Slice 2 will add SSM-sourced BASIC_AUTH_* env vars; Slice 3 will render
+# /etc/wireguard-dashboard/clients.json; Slice 4 adds sudoers — none of those
+# belong here.
+
+# 1. Create the dedicated system user (idempotent).
+id -u wireguard-dashboard >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin wireguard-dashboard
+
+# 2. Create directories with the right ownership/modes.
+install -d -o root -g root -m 0755 /opt/wireguard-dashboard/bin
+install -d -o wireguard-dashboard -g wireguard-dashboard -m 0750 /var/lib/wireguard-dashboard
+install -d -o root -g root -m 0755 /etc/wireguard-dashboard
+
+# 3. Download the binary from the artifacts bucket. Instance role grants
+#    s3:GetObject on `latest/*` only. Bucket name is substituted at template
+#    render time so the IAM-scoped bucket and the URL stay in lockstep.
+aws s3 cp s3://${dashboard_artifact_bucket_name}/latest/wireguard-dashboard /opt/wireguard-dashboard/bin/wireguard-dashboard
+
+# 4. Make it executable.
+chmod +x /opt/wireguard-dashboard/bin/wireguard-dashboard
+
+# 5. Drop the systemd unit. Bound to the WG tunnel IP via LISTEN_ADDR;
+#    Requires/After wg-quick@wg0 ensures 172.16.15.1 is bindable before start
+#    and that the dashboard restarts when the WG interface bounces.
+cat > /etc/systemd/system/wireguard-dashboard.service <<'UNIT_EOF'
+[Unit]
+Description=WireGuard VPN dashboard
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+Requires=wg-quick@wg0.service
+
+[Service]
+Type=simple
+User=wireguard-dashboard
+Group=wireguard-dashboard
+ExecStart=/opt/wireguard-dashboard/bin/wireguard-dashboard
+Environment=LISTEN_ADDR=172.16.15.1:8080
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+# 6. Reload systemd and bring the unit up.
+systemctl daemon-reload
+systemctl enable --now wireguard-dashboard.service
+
+%{ endif ~}
 # Check WireGuard status twice with a 10s delay
 for i in {1..2}; do
   if systemctl is-active --quiet wg-quick@wg0.service; then
