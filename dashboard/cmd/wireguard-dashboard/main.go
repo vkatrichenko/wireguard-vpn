@@ -20,6 +20,7 @@ import (
 	dashboard "wireguard-dashboard"
 	"wireguard-dashboard/internal/server"
 	"wireguard-dashboard/internal/serverinfo"
+	"wireguard-dashboard/internal/systemd"
 )
 
 const (
@@ -47,7 +48,12 @@ func main() {
 	// interface name, etc.).
 	serverinfoSvc := serverinfo.New()
 
-	handler, err := server.New(dashboard.WebFS(), serverinfoSvc)
+	// systemd.New() targets `wg-quick@wg0.service` via sudo systemctl. Like
+	// serverinfo, the unit name and runner are not env-configurable yet —
+	// add knobs only when a concrete need shows up.
+	systemdSvc := systemd.New()
+
+	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc)
 	if err != nil {
 		log.Fatalf("server init failed: %v", err)
 	}

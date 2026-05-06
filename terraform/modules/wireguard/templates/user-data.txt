@@ -88,7 +88,7 @@ cat > /etc/sudoers.d/wireguard-dashboard.tmp <<'SUDOERS_EOF'
 wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/wg show wg0 public-key
 wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/wg show wg0 dump
 wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/systemctl is-active wg-quick@wg0.service
-wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/systemctl show wg-quick@wg0.service *
+wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/systemctl show -p ActiveEnterTimestamp wg-quick@wg0.service
 SUDOERS_EOF
 chown root:root /etc/sudoers.d/wireguard-dashboard.tmp
 chmod 0440 /etc/sudoers.d/wireguard-dashboard.tmp

@@ -7,10 +7,18 @@
   </head>
   <body>
     <h1>WireGuard Dashboard</h1>
+
     {{ if .ServerInfoError }}
     <section class="card error">{{ .ServerInfoError }}</section>
     {{ else }}
     {{ template "server-info" .ServerInfo }}
+    {{ end }}
+
+    {{ if .ServiceStatusError }}
+    <section class="card error">{{ .ServiceStatusError }}</section>
+    {{ else }}
+    {{ template "service-status" .ServiceStatus }}
+    {{ template "uptime" .ServiceStatus }}
     {{ end }}
   </body>
 </html>

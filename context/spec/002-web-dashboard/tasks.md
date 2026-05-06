@@ -84,10 +84,10 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 
 **Outcome:** Card shows Running/Stopped + service uptime; goes red within ~10s when service stopped (note: stopping `wg-quick@wg0` will also kill the dashboard's binding — verification done via brief simulated shutdown).
 
-- [ ] `internal/systemd/systemd.go` — `sudo systemctl is-active wg-quick@wg0`, `sudo systemctl show -p ActiveEnterTimestamp wg-quick@wg0`. **[Agent: go-fullstack]**
-- [ ] `GET /api/service` handler. **[Agent: go-fullstack]**
-- [ ] `web/templates/cards/service-status.html` + `uptime.html`. **[Agent: go-fullstack]**
-- [ ] Go tests (running, stopped, never-started). **[Agent: go-fullstack]**
+- [x] `internal/systemd/systemd.go` — `sudo systemctl is-active wg-quick@wg0`, `sudo systemctl show -p ActiveEnterTimestamp wg-quick@wg0`. **[Agent: go-fullstack]**
+- [x] `GET /api/service` handler. **[Agent: go-fullstack]**
+- [x] `web/templates/cards/service-status.html` + `uptime.html`. **[Agent: go-fullstack]**
+- [x] Go tests (running, stopped, never-started). **[Agent: go-fullstack]**
 
 ---
 
