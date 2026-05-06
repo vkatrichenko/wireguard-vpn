@@ -19,6 +19,7 @@ import (
 
 	dashboard "wireguard-dashboard"
 	"wireguard-dashboard/internal/server"
+	"wireguard-dashboard/internal/serverinfo"
 )
 
 const (
@@ -40,7 +41,13 @@ func main() {
 		addr = defaultListenAddr
 	}
 
-	handler, err := server.New(dashboard.WebFS())
+	// Production defaults are correct: real IMDSv2 endpoint + os/exec runner.
+	// No env-var configuration of the IMDS URL or `wg` path is exposed yet —
+	// add it later only if there's a concrete need (test rigs, alternate WG
+	// interface name, etc.).
+	serverinfoSvc := serverinfo.New()
+
+	handler, err := server.New(dashboard.WebFS(), serverinfoSvc)
 	if err != nil {
 		log.Fatalf("server init failed: %v", err)
 	}

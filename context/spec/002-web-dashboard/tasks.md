@@ -58,11 +58,11 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 
 **Outcome:** Same VPN connectivity as before, but Terraform now passes named clients and renders `/etc/wireguard-dashboard/clients.json` for the dashboard to consume.
 
-- [ ] Update `terraform/modules/wireguard/variables.tf` — `clients_config` to `list(object({ name, address, public_key }))`. **[Agent: terraform-aws]**
-- [ ] Update `terraform/modules/wireguard/templates/user-data.txt` peers section to consume the new shape; add a step that writes `/etc/wireguard-dashboard/clients.json` from the templated value. **[Agent: linux-cloud-init]**
-- [ ] Update `terraform/dev/main.tf` to pass `[{ name = "vkatrychenko", address = "172.16.15.5/32", public_key = "..." }]`. **[Agent: terraform-aws]**
-- [ ] Run `terraform plan -out=tfplan` and inspect: only EC2 user-data + clients.json should change. **[Agent: terraform-aws]**
-- [ ] Apply + replace EC2; verify `/etc/wireguard-dashboard/clients.json` content via SSM session; existing VPN client still connects. **[Agent: linux-cloud-init]**
+- [x] Update `terraform/modules/wireguard/variables.tf` — `clients_config` to `list(object({ name, address, public_key }))`. **[Agent: terraform-aws]**
+- [x] Update `terraform/modules/wireguard/templates/user-data.txt` peers section to consume the new shape; add a step that writes `/etc/wireguard-dashboard/clients.json` from the templated value. **[Agent: linux-cloud-init]**
+- [x] Update `terraform/dev/main.tf` to pass `[{ name = "vkatrychenko", address = "172.16.15.5/32", public_key = "..." }]`. **[Agent: terraform-aws]**
+- [x] Run `terraform plan -out=tfplan` and inspect: only EC2 user-data + clients.json should change. **[Agent: terraform-aws]**
+- [x] Apply + replace EC2; verify `/etc/wireguard-dashboard/clients.json` content via SSM session; existing VPN client still connects. **[Agent: linux-cloud-init]**
 
 ---
 
@@ -70,13 +70,13 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 
 **Outcome:** Logged-in user sees public IP, port 51820, and server public key (with copy-to-clipboard).
 
-- [ ] `internal/serverinfo/serverinfo.go` — IMDSv2 for public IP; `sudo wg show wg0 public-key` for server pubkey. **[Agent: go-fullstack]**
-- [ ] Drop `/etc/sudoers.d/wireguard-dashboard` (mode 0440) granting NOPASSWD for the four scoped commands (cloud-init step). **[Agent: linux-cloud-init]**
-- [ ] `GET /api/server` handler. **[Agent: go-fullstack]**
-- [ ] `web/templates/cards/server-info.html` with copy-to-clipboard JS snippet. **[Agent: go-fullstack]**
-- [ ] Wire into `web/templates/dashboard.html`. **[Agent: go-fullstack]**
-- [ ] Go test (mocked exec). **[Agent: go-fullstack]**
-- [ ] Build + upload + verify in browser. **[Agent: go-fullstack]**
+- [x] `internal/serverinfo/serverinfo.go` — IMDSv2 for public IP; `sudo wg show wg0 public-key` for server pubkey. **[Agent: go-fullstack]**
+- [x] Drop `/etc/sudoers.d/wireguard-dashboard` (mode 0440) granting NOPASSWD for the four scoped commands (cloud-init step). **[Agent: linux-cloud-init]**
+- [x] `GET /api/server` handler. **[Agent: go-fullstack]**
+- [x] `web/templates/cards/server-info.html` with copy-to-clipboard JS snippet. **[Agent: go-fullstack]**
+- [x] Wire into `web/templates/dashboard.html`. **[Agent: go-fullstack]**
+- [x] Go test (mocked exec). **[Agent: go-fullstack]**
+- [x] Build + upload + verify in browser. **[Agent: go-fullstack]**
 
 ---
 

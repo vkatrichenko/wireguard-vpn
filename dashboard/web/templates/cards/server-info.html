@@ -1,0 +1,37 @@
+{{ define "server-info" }}
+<section id="server-info" class="card">
+  <h2>Server endpoint</h2>
+  <dl>
+    <dt>Public IP</dt>
+    <dd>{{ .PublicIP }}</dd>
+    <dt>Port</dt>
+    <dd>{{ .Port }}</dd>
+    <dt>Server public key</dt>
+    <dd>
+      <code class="server-pubkey">{{ .ServerPublicKey }}</code>
+      <button type="button" class="copy-btn" data-copy-target=".server-pubkey">Copy</button>
+    </dd>
+  </dl>
+</section>
+<script>
+(function() {
+  if (window.__copyBtnInit) return;
+  window.__copyBtnInit = true;
+  document.addEventListener('click', async function(e) {
+    const btn = e.target.closest('.copy-btn');
+    if (!btn) return;
+    const sel = btn.getAttribute('data-copy-target');
+    const target = document.querySelector(sel);
+    if (!target) return;
+    try {
+      await navigator.clipboard.writeText(target.textContent.trim());
+      const orig = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    } catch (err) {
+      console.error('clipboard write failed', err);
+    }
+  });
+})();
+</script>
+{{ end }}

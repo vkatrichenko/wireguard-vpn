@@ -7,6 +7,10 @@
   </head>
   <body>
     <h1>WireGuard Dashboard</h1>
-    <p>Slice 1 hello-world. More to come.</p>
+    {{ if .ServerInfoError }}
+    <section class="card error">{{ .ServerInfoError }}</section>
+    {{ else }}
+    {{ template "server-info" .ServerInfo }}
+    {{ end }}
   </body>
 </html>
