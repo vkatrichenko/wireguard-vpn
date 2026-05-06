@@ -31,8 +31,16 @@ module "wireguard" {
   # Endpoint = 54.245.26.247:51820
 
   clients_config = [
-    { "172.16.15.6/32" = "OVtCVOCizGvTVq2vhlymbEOmVnzfZaQKxXgUk+5eYwM=" }, # vkatrychenko
-    # { "10.222.123.9/32" = "user public key" },
+    {
+      name       = "vkatrychenko"
+      address    = "172.16.15.6/32"
+      public_key = "OVtCVOCizGvTVq2vhlymbEOmVnzfZaQKxXgUk+5eYwM="
+    },
+    # {
+    #   name       = "<peer-name>"
+    #   address    = "10.222.123.9/32"
+    #   public_key = "<peer-public-key>"
+    # },
   ]
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id

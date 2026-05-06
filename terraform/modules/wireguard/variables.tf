@@ -26,8 +26,22 @@ variable "subnet_id" {
 }
 
 variable "clients_config" {
-  description = "List of maps of client IPs and public keys. See Usage in README for details."
-  type        = any
+  description = "List of WireGuard peer (client) definitions. Each entry's `name` is rendered into /etc/wireguard-dashboard/clients.json by user-data so the dashboard can label peers; `address` is the CIDR the peer is allowed inside the WG subnet (e.g. \"172.16.15.6/32\"); `public_key` is the peer's WireGuard public key."
+  type = list(object({
+    name       = string
+    address    = string
+    public_key = string
+  }))
+
+  validation {
+    condition     = alltrue([for c in var.clients_config : can(regex("^[0-9.]+/32$", c.address))])
+    error_message = "Every clients_config entry's `address` must be an IPv4 /32 CIDR (e.g. \"172.16.15.6/32\")."
+  }
+
+  validation {
+    condition     = alltrue([for c in var.clients_config : length(c.public_key) == 44])
+    error_message = "Every clients_config entry's `public_key` must be a base64-encoded 32-byte WireGuard key (44 chars including padding)."
+  }
 }
 
 variable "wg_server_net" {

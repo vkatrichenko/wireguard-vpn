@@ -61,14 +61,14 @@ INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.2
 echo $INSTANCE_ID > /tmp/instance-id
 
 %{ if dashboard_artifact_bucket_name != "" ~}
-# --- WireGuard dashboard (Slice 1) ---------------------------------------
+# --- WireGuard dashboard (Slice 1 + Slice 3) -----------------------------
 # Provisioned only when the caller wires in a non-empty
 # `dashboard_artifact_bucket_name`. The IAM role's `s3:GetObject` is already
 # scoped to `latest/*` (sub-task 3). AWS CLI was installed earlier in this
 # script. The IMDSv2 token block is also already present above; not duplicated.
-# Slice 2 will add SSM-sourced BASIC_AUTH_* env vars; Slice 3 will render
-# /etc/wireguard-dashboard/clients.json; Slice 4 adds sudoers — none of those
-# belong here.
+# Slice 2 will add SSM-sourced BASIC_AUTH_* env vars; Slice 4 adds sudoers —
+# neither belongs here. Slice 3 step 3 below renders
+# /etc/wireguard-dashboard/clients.json from the typed `clients_config` shape.
 
 # 1. Create the dedicated system user (idempotent).
 id -u wireguard-dashboard >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin wireguard-dashboard
@@ -78,15 +78,45 @@ install -d -o root -g root -m 0755 /opt/wireguard-dashboard/bin
 install -d -o wireguard-dashboard -g wireguard-dashboard -m 0750 /var/lib/wireguard-dashboard
 install -d -o root -g root -m 0755 /etc/wireguard-dashboard
 
-# 3. Download the binary from the artifacts bucket. Instance role grants
+# 3. Drop sudoers file granting the wireguard-dashboard user NOPASSWD on the
+#    narrow set of commands the Go service needs to read WG and systemd state
+#    (wg show wg0 public-key/dump, systemctl is-active/show wg-quick@wg0).
+#    Write to a staging path first, validate with visudo -c, then atomically
+#    move into /etc/sudoers.d/ — guarantees we never leave a malformed sudoers
+#    fragment that could lock everyone out of sudo.
+cat > /etc/sudoers.d/wireguard-dashboard.tmp <<'SUDOERS_EOF'
+wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/wg show wg0 public-key
+wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/wg show wg0 dump
+wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/systemctl is-active wg-quick@wg0.service
+wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/systemctl show wg-quick@wg0.service *
+SUDOERS_EOF
+chown root:root /etc/sudoers.d/wireguard-dashboard.tmp
+chmod 0440 /etc/sudoers.d/wireguard-dashboard.tmp
+visudo -c -f /etc/sudoers.d/wireguard-dashboard.tmp
+mv /etc/sudoers.d/wireguard-dashboard.tmp /etc/sudoers.d/wireguard-dashboard
+
+# 4. Render the clients manifest the dashboard reads at runtime
+#    (CLIENTS_CONFIG_PATH=/etc/wireguard-dashboard/clients.json). The quoted
+#    heredoc prevents bash from expanding any dollar-prefixed tokens in the
+#    JSON body; Terraform's templatefile() has already substituted the
+#    clients_json placeholder at apply time, so the literal JSON ends up here
+#    before bash ever reads the file. Mode 0640 + group wireguard-dashboard:
+#    only the dashboard user can read it.
+cat > /etc/wireguard-dashboard/clients.json <<'CLIENTS_EOF'
+${clients_json}
+CLIENTS_EOF
+chown root:wireguard-dashboard /etc/wireguard-dashboard/clients.json
+chmod 0640 /etc/wireguard-dashboard/clients.json
+
+# 5. Download the binary from the artifacts bucket. Instance role grants
 #    s3:GetObject on `latest/*` only. Bucket name is substituted at template
 #    render time so the IAM-scoped bucket and the URL stay in lockstep.
 aws s3 cp s3://${dashboard_artifact_bucket_name}/latest/wireguard-dashboard /opt/wireguard-dashboard/bin/wireguard-dashboard
 
-# 4. Make it executable.
+# 6. Make it executable.
 chmod +x /opt/wireguard-dashboard/bin/wireguard-dashboard
 
-# 5. Drop the systemd unit. Bound to the WG tunnel IP via LISTEN_ADDR;
+# 7. Drop the systemd unit. Bound to the WG tunnel IP via LISTEN_ADDR;
 #    Requires/After wg-quick@wg0 ensures 172.16.15.1 is bindable before start
 #    and that the dashboard restarts when the WG interface bounces.
 cat > /etc/systemd/system/wireguard-dashboard.service <<'UNIT_EOF'
@@ -109,7 +139,7 @@ RestartSec=5s
 WantedBy=multi-user.target
 UNIT_EOF
 
-# 6. Reload systemd and bring the unit up.
+# 8. Reload systemd and bring the unit up.
 systemctl daemon-reload
 systemctl enable --now wireguard-dashboard.service
 

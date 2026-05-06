@@ -6,7 +6,7 @@ variable "project_name" {
 variable "env" {
   description = "The name of environment for the dashboard. Used to differentiate multiple deployments."
   type        = string
-  default = ""
+  default     = ""
 }
 
 variable "tags" {
