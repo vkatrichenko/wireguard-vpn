@@ -1,0 +1,15 @@
+{{ define "network-rate" }}
+<section id="network-rate" class="card">
+  <h2>Network rate (wg0)</h2>
+  <dl>
+    <dt>Receive</dt>
+    <dd>{{ humanBytesPerSec .WgRxRateBps }}</dd>
+    <dt>Transmit</dt>
+    <dd>{{ humanBytesPerSec .WgTxRateBps }}</dd>
+    <dt>Total received</dt>
+    <dd>{{ humanBytes .WgRxBytesCum }}</dd>
+    <dt>Total transmitted</dt>
+    <dd>{{ humanBytes .WgTxBytesCum }}</dd>
+  </dl>
+</section>
+{{ end }}

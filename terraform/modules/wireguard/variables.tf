@@ -26,8 +26,22 @@ variable "subnet_id" {
 }
 
 variable "clients_config" {
-  description = "List of maps of client IPs and public keys. See Usage in README for details."
-  type        = any
+  description = "List of WireGuard peer (client) definitions. Each entry's `name` is rendered into /etc/wireguard-dashboard/clients.json by user-data so the dashboard can label peers; `address` is the CIDR the peer is allowed inside the WG subnet (e.g. \"172.16.15.6/32\"); `public_key` is the peer's WireGuard public key."
+  type = list(object({
+    name       = string
+    address    = string
+    public_key = string
+  }))
+
+  validation {
+    condition     = alltrue([for c in var.clients_config : can(regex("^[0-9.]+/32$", c.address))])
+    error_message = "Every clients_config entry's `address` must be an IPv4 /32 CIDR (e.g. \"172.16.15.6/32\")."
+  }
+
+  validation {
+    condition     = alltrue([for c in var.clients_config : length(c.public_key) == 44])
+    error_message = "Every clients_config entry's `public_key` must be a base64-encoded 32-byte WireGuard key (44 chars including padding)."
+  }
 }
 
 variable "wg_server_net" {
@@ -78,4 +92,26 @@ variable "ami_id" {
 variable "tags" {
   description = "A map of tags to assign to resources."
   type        = map(string)
+}
+
+variable "dashboard_artifact_bucket_arn" {
+  description = "ARN of the S3 bucket that holds the web-dashboard binary artifacts. When non-null, the EC2 instance role gains scoped read access to objects under `latest/*` and `main-*/*`. When null (default), no dashboard read statements are added to the instance policy. Wired in by `dev/main.tf` once the dashboard module is composed in."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.dashboard_artifact_bucket_arn == null || can(regex("^arn:aws:s3:::", var.dashboard_artifact_bucket_arn))
+    error_message = "dashboard_artifact_bucket_arn must be null or a valid S3 bucket ARN starting with 'arn:aws:s3:::'."
+  }
+}
+
+variable "dashboard_artifact_bucket_name" {
+  description = "Name of the S3 bucket that hosts the web-dashboard binary artifacts. When non-null, first-boot user-data downloads `s3://<bucket>/latest/wireguard-dashboard`, installs it under `/opt/wireguard-dashboard/bin/`, and starts a `wireguard-dashboard.service` systemd unit bound to the WireGuard tunnel IP. When null (default), the dashboard is not provisioned and user-data behaves as before. Paired with `dashboard_artifact_bucket_arn` (which gates the IAM read permissions); both are wired in by `dev/main.tf` once the dashboard module is composed in."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.dashboard_artifact_bucket_name == null || can(regex("^[a-z0-9.\\-]{3,63}$", var.dashboard_artifact_bucket_name))
+    error_message = "dashboard_artifact_bucket_name must be null or a valid S3 bucket name (3-63 chars, lowercase letters, digits, hyphens, dots)."
+  }
 }

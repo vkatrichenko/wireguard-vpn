@@ -1,0 +1,10 @@
+{{ define "uptime" }}
+<section id="uptime" class="card">
+  <h2>Uptime</h2>
+  {{ if .Active }}
+    <p class="uptime">{{ humanUptime .ActiveEnterTimestamp }}</p>
+  {{ else }}
+    <p class="uptime down">Service down</p>
+  {{ end }}
+</section>
+{{ end }}

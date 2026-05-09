@@ -1,0 +1,401 @@
+/* WireGuard Dashboard — hand-written, mobile-first stylesheet.
+ *
+ * Design intent:
+ *   - One source of truth for palette / spacing / radii via :root custom props.
+ *   - #dashboard-content and .charts-grid use auto-fit / fixed-2col CSS grids
+ *     so cards reflow without a per-breakpoint layout matrix.
+ *   - Status and state pills share a base style; per-state colors are layered
+ *     on top so adding a new state is one rule, not a redesign.
+ *   - Touch targets (.copy-btn) are >= 44x44 px to meet the spec.
+ */
+
+/* 1. Reset / base ---------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 1rem;
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+/* 2. Design tokens --------------------------------------------------------- */
+
+:root {
+  --bg: #f6f7fb;
+  --card-bg: #ffffff;
+  --card-border: #e5e7eb;
+  --text: #1f2937;
+  --text-muted: #6b7280;
+  --accent: #2563eb;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --radius: 8px;
+  --gap: 1rem;
+  --pad: 1rem;
+}
+
+/* 3. Header ---------------------------------------------------------------- */
+
+.dashboard-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: var(--gap);
+}
+
+.dashboard-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.stale-pill {
+  background: #fde68a;
+  color: #92400e;
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* 4. Layout grids ---------------------------------------------------------- */
+
+#dashboard-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--gap);
+}
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--gap);
+  margin-top: var(--gap);
+}
+
+/* 5. Card base ------------------------------------------------------------- */
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: var(--pad);
+  /* Lets the table card overflow horizontally without the card itself
+     blowing out the grid track. */
+  min-width: 0;
+}
+
+.card h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 0;
+  margin-bottom: 0.75rem;
+  color: var(--text);
+}
+
+.card.error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+  padding: calc(var(--pad) + 0.25rem);
+}
+
+/* 6. Definition lists ------------------------------------------------------ */
+
+.card dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+.card dt {
+  margin: 0;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.card dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+/* server-info needs the public-key code + button to wrap nicely under the
+   value column, not collide with the label column. */
+#server-info dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.server-pubkey {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  word-break: break-all;
+  /* Without min-width:0, a flex child with long content forces overflow. */
+  min-width: 0;
+  flex: 1 1 200px;
+}
+
+/* 7. State / status pills -------------------------------------------------- */
+
+.state-pill,
+.status-pill {
+  display: inline-block;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid transparent;
+  margin: 0;
+}
+
+/* active / online → green */
+.state-active,
+.status-online {
+  background: #dcfce7;
+  color: #166534;
+}
+
+/* inactive / offline → grey */
+.state-inactive,
+.status-offline {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+/* failed → red */
+.state-failed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* activating / deactivating → amber */
+.state-activating,
+.state-deactivating {
+  background: #fde68a;
+  color: #92400e;
+}
+
+/* pending → blue (informational) */
+.status-pending {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+/* unknown → muted grey with a subtle warning border (signals drift) */
+.state-unknown,
+.status-unknown {
+  background: #f3f4f6;
+  color: #6b7280;
+  border-color: #fcd34d;
+}
+
+.meta {
+  margin: 0.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* 8. Uptime ---------------------------------------------------------------- */
+
+.uptime {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.uptime.down {
+  color: var(--danger);
+}
+
+/* 9. Copy button ----------------------------------------------------------- */
+
+.copy-btn {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.copy-btn:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.copy-btn:active {
+  background: #e5e7eb;
+}
+
+.copy-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 10. Client table --------------------------------------------------------- */
+
+#client-list {
+  /* The table can overflow horizontally on narrow viewports; let the card
+     scroll its own contents instead of the page. */
+  overflow-x: auto;
+}
+
+.client-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.client-table th,
+.client-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--card-border);
+  vertical-align: middle;
+}
+
+.client-table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.client-table tbody tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.client-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* 11. Event list ----------------------------------------------------------- */
+
+.event-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.event-item {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.event-item:last-child {
+  border-bottom: none;
+}
+
+.event-time {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 5em;
+  flex-shrink: 0;
+}
+
+.event-name {
+  word-break: break-word;
+}
+
+/* 12. Empty states --------------------------------------------------------- */
+
+.empty {
+  color: var(--text-muted);
+  font-style: italic;
+  margin: 0;
+}
+
+/* 13. Charts --------------------------------------------------------------- */
+
+.charts-grid .card canvas {
+  width: 100%;
+  height: 220px;
+  display: block;
+}
+
+/* 14. Responsive ----------------------------------------------------------- */
+
+@media (max-width: 600px) {
+  body {
+    padding: 0.5rem;
+  }
+
+  :root {
+    --pad: 0.75rem;
+    --gap: 0.75rem;
+  }
+
+  #dashboard-content,
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .card h2 {
+    font-size: 0.95rem;
+  }
+
+  .uptime {
+    font-size: 1.25rem;
+  }
+
+  .dashboard-header h1 {
+    font-size: 1.25rem;
+  }
+}
+
+/* 15. Reduced motion ------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

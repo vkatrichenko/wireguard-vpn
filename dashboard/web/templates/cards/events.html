@@ -1,0 +1,17 @@
+{{ define "events" }}
+<section id="events" class="card">
+  <h2>Recent handshakes</h2>
+  {{ if . }}
+  <ul class="event-list">
+    {{ range . }}
+    <li class="event-item">
+      <time class="event-time" datetime="{{ .TS.Format "2006-01-02T15:04:05Z" }}">{{ humanAgo .TS }}</time>
+      <span class="event-name">{{ .Name }}</span>
+    </li>
+    {{ end }}
+  </ul>
+  {{ else }}
+  <p class="empty">No recent handshakes.</p>
+  {{ end }}
+</section>
+{{ end }}

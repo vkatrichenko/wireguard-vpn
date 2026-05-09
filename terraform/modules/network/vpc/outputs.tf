@@ -19,7 +19,7 @@ output "intra_subnets" {
 }
 
 output "database_subnets" {
-  value = var.create_database_subnets == true ? module.vpc.intra_subnets : null
+  value = var.create_database_subnets == true ? module.vpc.database_subnets : null
 }
 
 output "general_security_group_id" {

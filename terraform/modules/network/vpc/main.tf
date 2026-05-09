@@ -13,10 +13,7 @@ module "vpc" {
     cidrsubnet(var.vpc_cidr, 8, 3)
   ]
   public_subnet_tags = {
-    Role                                          = "public"
-    "kubernetes.io/role/elb"                      = "1"
-    "kubernetes.io/cluster/${local.cluster_name}" = "owned"
-
+    Role = "public"
   }
 
   private_subnets = [
@@ -25,9 +22,7 @@ module "vpc" {
     cidrsubnet(var.vpc_cidr, local.private_subnet_newbits, 13)
   ]
   private_subnet_tags = {
-    Role                                          = "private"
-    "kubernetes.io/role/internal-elb"             = "1"
-    "kubernetes.io/cluster/${local.cluster_name}" = "owned"
+    Role = "private"
   }
 
   intra_subnets = var.create_intra_subnets == false ? [] : [
@@ -42,7 +37,7 @@ module "vpc" {
     cidrsubnet(var.vpc_cidr, 8, 23)
   ]
 
-  enable_nat_gateway = true
+  enable_nat_gateway = var.enable_nat_gateway
   single_nat_gateway = true
 
   enable_dns_hostnames = true

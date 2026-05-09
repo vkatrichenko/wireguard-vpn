@@ -1,0 +1,11 @@
+{{ define "service-status" }}
+<section id="service-status" class="card">
+  <h2>WireGuard service</h2>
+  <p class="state-pill state-{{ .State }}">{{ .State }}</p>
+  {{ if .ActiveEnterTimestamp.IsZero }}
+    <p class="meta">Never started.</p>
+  {{ else }}
+    <p class="meta">Active since {{ .ActiveEnterTimestamp.Format "2006-01-02 15:04 MST" }}</p>
+  {{ end }}
+</section>
+{{ end }}

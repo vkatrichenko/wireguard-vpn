@@ -24,6 +24,37 @@ data "aws_iam_policy_document" "wireguard_policy_doc" {
     actions   = ["s3:PutObject"]
     resources = ["${aws_s3_bucket.health_check.arn}/*"]
   }
+
+  # Dashboard artifact read access. Only emitted when the caller wires in
+  # `dashboard_artifact_bucket_arn`; null keeps the instance policy unchanged.
+  dynamic "statement" {
+    for_each = var.dashboard_artifact_bucket_arn != null ? [1] : []
+
+    content {
+      sid     = "S3GetObjectDashboardBinary"
+      actions = ["s3:GetObject"]
+      resources = [
+        "${var.dashboard_artifact_bucket_arn}/latest/*",
+        "${var.dashboard_artifact_bucket_arn}/main-*/*",
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.dashboard_artifact_bucket_arn != null ? [1] : []
+
+    content {
+      sid       = "S3ListBucketDashboardArtifacts"
+      actions   = ["s3:ListBucket"]
+      resources = [var.dashboard_artifact_bucket_arn]
+
+      condition {
+        test     = "StringLike"
+        variable = "s3:prefix"
+        values   = ["latest/*", "main-*/*"]
+      }
+    }
+  }
 }
 
 resource "aws_iam_policy" "wireguard_policy" {

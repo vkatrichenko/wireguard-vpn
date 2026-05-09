@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WireGuard Dashboard</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <script src="/static/htmx.min.js" defer></script>
+    <script src="/static/htmx-stale.js" defer></script>
+    <script src="/static/chart.umd.min.js" defer></script>
+    <script src="/static/chartjs-adapter-date-fns.bundle.min.js" defer></script>
+    <script src="/static/charts.js" defer></script>
+  </head>
+  <body>
+    <header class="dashboard-header">
+      <h1>WireGuard Dashboard</h1>
+      <span id="stale-pill" class="stale-pill" hidden>Stale data</span>
+    </header>
+
+    <main id="dashboard-content"
+          hx-get="/partial/dashboard"
+          hx-trigger="every 10s"
+          hx-swap="innerHTML">
+      {{ template "dashboard-content" . }}
+    </main>
+
+    <section class="charts-grid">
+      {{ template "chart-cpu" }}
+      {{ template "chart-memory" }}
+      {{ template "chart-rx" }}
+      {{ template "chart-tx" }}
+    </section>
+  </body>
+</html>
