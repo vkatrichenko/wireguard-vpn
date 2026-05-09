@@ -1,6 +1,6 @@
 # dashboard-build
 #
-# Cross-compiles the wireguard-dashboard Go binary (linux/amd64) and uploads it
+## Cross-compiles the wireguard-dashboard Go binary (linux/amd64) and uploads it
 # to the S3 artifact bucket on every push to main that touches dashboard/.
 #
 # Trigger semantics:

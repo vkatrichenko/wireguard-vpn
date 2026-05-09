@@ -70,5 +70,6 @@ No modules.
 
 | Name | Description |
 |------|-------------|
+| <a name="output_instance_arn"></a> [instance\_arn](#output\_instance\_arn) | ARN of the WireGuard EC2 instance — used by the dashboard module to scope SSM document grants. |
 | <a name="output_security_group_id"></a> [security\_group\_id](#output\_security\_group\_id) | n/a |
 <!-- END_TF_DOCS -->

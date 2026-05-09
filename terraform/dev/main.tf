@@ -55,9 +55,10 @@ module "wireguard" {
 module "dashboard" {
   source = "../modules/dashboard"
 
-  project_name = local.project_name
-  env          = local.environment
-  tags         = local.default_tags
+  project_name        = local.project_name
+  env                 = local.environment
+  target_instance_arn = module.wireguard.instance_arn
+  tags                = local.default_tags
 }
 
 module "github_oidc" {
@@ -75,6 +76,11 @@ module "github_oidc" {
           prefixes   = ["latest/*", "main-*/*"]
         },
       ]
+    }
+    "dashboard-ci-deploy" = {
+      name_suffix        = "dashboard-ci-deploy"
+      subject            = "repo:vkatrichenko/wireguard-vpn:ref:refs/heads/main"
+      inline_policy_json = module.dashboard.deploy_policy_json
     }
   }
 
