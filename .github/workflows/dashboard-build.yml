@@ -76,9 +76,9 @@ jobs:
       - name: Upload binary to S3
         run: |
           aws s3 cp dashboard/wireguard-dashboard \
-            s3://wireguard-vpn-test-test-dashboard-artifacts/main-${{ github.sha }}/wireguard-dashboard
+            s3://wireguard-vpn-test-dashboard-artifacts/main-${{ github.sha }}/wireguard-dashboard
           aws s3 cp dashboard/wireguard-dashboard \
-            s3://wireguard-vpn-test-test-dashboard-artifacts/latest/wireguard-dashboard
+            s3://wireguard-vpn-test-dashboard-artifacts/latest/wireguard-dashboard
 
       - name: Summary
         run: echo "Pushed to main-${{ github.sha }}/ and latest/"
