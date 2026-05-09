@@ -1,0 +1,19 @@
+# Vendored static assets for the WireGuard dashboard.
+# Update procedure: download from the upstream URL, recompute SHA-256,
+# update the line below, commit. Diff inspection during review confirms
+# the integrity of the new bundle.
+
+chart.umd.min.js
+  version: 4.4.7
+  source:  https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js
+  sha256:  206b6e8bb00fc7bba2c7ee80ca41db3e9e05ba7be0aa35abeba9cfd5357f5d0e
+
+chartjs-adapter-date-fns.bundle.min.js
+  version: 3.0.0
+  source:  https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js
+  sha256:  ea7ab30d26c38dcf1f2d26bb43e73a94537b58f1906f55e1a546dd09321b5615
+
+htmx.min.js
+  version: 2.0.6
+  source:  https://cdn.jsdelivr.net/npm/htmx.org@2.0.6/dist/htmx.min.js
+  sha256:  b6768eed4f3af85b73a75054701bd60e17cac718aef2b7f6b254e5e0e2045616

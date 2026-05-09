@@ -1,0 +1,84 @@
+# dashboard-build
+#
+# Cross-compiles the wireguard-dashboard Go binary (linux/amd64) and uploads it
+# to the S3 artifact bucket on every push to main that touches dashboard/.
+#
+# Trigger semantics:
+#   - push to `main` only (the OIDC trust policy on the assumed role pins
+#     `repo:vkatrichenko/wireguard-vpn:ref:refs/heads/main` with StringEquals,
+#     so PRs and feature branches would be rejected by STS anyway).
+#   - paths-filtered to `dashboard/**` and this workflow file itself, so editing
+#     the workflow → push → run works without a separate dummy commit.
+#   - workflow_dispatch for manual re-runs from the Actions UI.
+#
+# OIDC role assumed:
+#   arn:aws:iam::831917488702:role/tf-github-actions-dashboard-ci-build
+#
+# S3 keys published (bucket: wireguard-vpn-test-test-dashboard-artifacts):
+#   s3://.../main-<sha>/wireguard-dashboard   (immutable, per-commit)
+#   s3://.../latest/wireguard-dashboard       (mutable pointer, overwritten)
+
+name: dashboard-build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'dashboard/**'
+      - '.github/workflows/dashboard-build.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required to mint the OIDC token for AWS STS
+  contents: read    # actions/checkout needs read on the repo contents
+
+concurrency:
+  group: dashboard-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and publish dashboard binary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Set up Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32  # v5.0.0
+        with:
+          go-version-file: dashboard/go.mod
+          cache: true
+          cache-dependency-path: dashboard/go.sum
+
+      - name: go vet
+        working-directory: dashboard
+        run: go vet ./...
+
+      - name: go test
+        working-directory: dashboard
+        run: go test -race ./...
+
+      - name: Cross-compile linux/amd64 binary
+        working-directory: dashboard
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -ldflags "-s -w" -o wireguard-dashboard ./cmd/wireguard-dashboard
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2
+        with:
+          role-to-assume: arn:aws:iam::831917488702:role/tf-github-actions-dashboard-ci-build
+          aws-region: us-east-1
+
+      - name: Upload binary to S3
+        run: |
+          aws s3 cp dashboard/wireguard-dashboard \
+            s3://wireguard-vpn-test-test-dashboard-artifacts/main-${{ github.sha }}/wireguard-dashboard
+          aws s3 cp dashboard/wireguard-dashboard \
+            s3://wireguard-vpn-test-test-dashboard-artifacts/latest/wireguard-dashboard
+
+      - name: Summary
+        run: echo "Pushed to main-${{ github.sha }}/ and latest/"

@@ -1,0 +1,13 @@
+{{ define "system" }}
+<section id="system" class="card">
+  <h2>System</h2>
+  <dl>
+    <dt>CPU</dt>
+    <dd>{{ printf "%.1f" .CPUPercent }}%</dd>
+    <dt>Memory</dt>
+    <dd>{{ humanBytesKB .MemUsedKB }} / {{ humanBytesKB .MemTotalKB }} ({{ printf "%.1f" .MemUsedPercent }}%)</dd>
+    <dt>Host uptime</dt>
+    <dd>{{ humanDuration .HostUptime }}</dd>
+  </dl>
+</section>
+{{ end }}

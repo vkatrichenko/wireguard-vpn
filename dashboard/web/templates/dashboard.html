@@ -4,21 +4,31 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>WireGuard Dashboard</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <script src="/static/htmx.min.js" defer></script>
+    <script src="/static/htmx-stale.js" defer></script>
+    <script src="/static/chart.umd.min.js" defer></script>
+    <script src="/static/chartjs-adapter-date-fns.bundle.min.js" defer></script>
+    <script src="/static/charts.js" defer></script>
   </head>
   <body>
-    <h1>WireGuard Dashboard</h1>
+    <header class="dashboard-header">
+      <h1>WireGuard Dashboard</h1>
+      <span id="stale-pill" class="stale-pill" hidden>Stale data</span>
+    </header>
 
-    {{ if .ServerInfoError }}
-    <section class="card error">{{ .ServerInfoError }}</section>
-    {{ else }}
-    {{ template "server-info" .ServerInfo }}
-    {{ end }}
+    <main id="dashboard-content"
+          hx-get="/partial/dashboard"
+          hx-trigger="every 10s"
+          hx-swap="innerHTML">
+      {{ template "dashboard-content" . }}
+    </main>
 
-    {{ if .ServiceStatusError }}
-    <section class="card error">{{ .ServiceStatusError }}</section>
-    {{ else }}
-    {{ template "service-status" .ServiceStatus }}
-    {{ template "uptime" .ServiceStatus }}
-    {{ end }}
+    <section class="charts-grid">
+      {{ template "chart-cpu" }}
+      {{ template "chart-memory" }}
+      {{ template "chart-rx" }}
+      {{ template "chart-tx" }}
+    </section>
   </body>
 </html>

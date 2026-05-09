@@ -95,11 +95,11 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 
 **Outcome:** Table of configured peers with name, IP, status pill, last-handshake "X min ago".
 
-- [ ] `internal/clientsfile/clientsfile.go` — read `/etc/wireguard-dashboard/clients.json`. **[Agent: go-fullstack]**
-- [ ] `internal/wg/wg.go` — `sudo wg show wg0 dump` parser. **[Agent: go-fullstack]**
-- [ ] `GET /api/clients` handler joining wg-show output with clients.json. **[Agent: go-fullstack]**
-- [ ] `web/templates/cards/client-list.html` (empty state included). **[Agent: go-fullstack]**
-- [ ] Go tests for `internal/wg` (no peers / never-handshaked / normal). **[Agent: go-fullstack]**
+- [x] `internal/clientsfile/clientsfile.go` — read `/etc/wireguard-dashboard/clients.json`. **[Agent: go-fullstack]**
+- [x] `internal/wg/wg.go` — `sudo wg show wg0 dump` parser. **[Agent: go-fullstack]**
+- [x] `GET /api/clients` handler joining wg-show output with clients.json. **[Agent: go-fullstack]**
+- [x] `web/templates/cards/client-list.html` (empty state included). **[Agent: go-fullstack]**
+- [x] Go tests for `internal/wg` (no peers / never-handshaked / normal). **[Agent: go-fullstack]**
 
 ---
 
@@ -107,9 +107,9 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 
 **Outcome:** Each row shows bytes sent / received, updates after WG transfer.
 
-- [ ] Extend `internal/wg/wg.go` to expose rx/tx fields. **[Agent: go-fullstack]**
-- [ ] Extend client-list template with humanized bytes columns. **[Agent: go-fullstack]**
-- [ ] Test for the new column. **[Agent: go-fullstack]**
+- [x] Extend `internal/wg/wg.go` to expose rx/tx fields. **[Agent: go-fullstack]** _(done as part of Slice 6 sub-task 2 — `Peer.TransferRx` / `TransferTx` already exposed)_
+- [x] Extend client-list template with humanized bytes columns. **[Agent: go-fullstack]** _(done as part of Slice 6 sub-task 4 — `humanBytes` helper + Sent/Received columns already in `client-list.html`)_
+- [x] Test for the new column. **[Agent: go-fullstack]** _(covered by Slice 6 sub-task 5 — `TestServiceShow_ActivePeer` and `_NeverHandshaked` exercise rx/tx parsing)_
 
 ---
 
@@ -117,10 +117,10 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 
 **Outcome:** Three live cards with current values (no charts yet).
 
-- [ ] `internal/proc/proc.go` — read `/proc/stat`, `/proc/meminfo`, `/sys/class/net/wg0/statistics/{rx,tx}_bytes`, `/proc/uptime`. Compute CPU% + rates from prior in-memory sample. **[Agent: go-fullstack]**
-- [ ] `GET /api/snapshot` handler — aggregate `{ system, traffic, clients, service, server }`. **[Agent: go-fullstack]**
-- [ ] `web/templates/cards/system.html` + `network-rate.html`. **[Agent: go-fullstack]**
-- [ ] Go test for `internal/proc` parsing. **[Agent: go-fullstack]**
+- [x] `internal/proc/proc.go` — read `/proc/stat`, `/proc/meminfo`, `/sys/class/net/wg0/statistics/{rx,tx}_bytes`, `/proc/uptime`. Compute CPU% + rates from prior in-memory sample. **[Agent: go-fullstack]**
+- [x] `GET /api/snapshot` handler — aggregate `{ system, traffic, clients, service, server }`. **[Agent: go-fullstack]**
+- [x] `web/templates/cards/system.html` + `network-rate.html`. **[Agent: go-fullstack]**
+- [x] Go test for `internal/proc` parsing. **[Agent: go-fullstack]**
 
 ---
 
@@ -128,12 +128,12 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 
 **Outcome:** Sparkline charts populate over time; persist across binary restart.
 
-- [ ] `internal/db/db.go` (`modernc.org/sqlite`) — bootstrap `system_metrics`, `traffic_metrics`, `client_traffic` tables. **[Agent: go-fullstack]**
-- [ ] `internal/poller/poller.go` — 30s sampler + 10-min retention sweep (>25h). **[Agent: go-fullstack]**
-- [ ] `GET /api/metrics?range=24h` handler. **[Agent: go-fullstack]**
-- [ ] Vendor `web/static/chart.umd.min.js` (pinned Chart.js version, integrity-checked). **[Agent: go-fullstack]**
-- [ ] Trend chart partials in `web/templates/cards/charts/` for CPU, memory, rx, tx. **[Agent: go-fullstack]**
-- [ ] Go test for retention sweeper boundary. **[Agent: go-fullstack]**
+- [x] `internal/db/db.go` (`modernc.org/sqlite`) — bootstrap `system_metrics`, `traffic_metrics`, `client_traffic` tables. **[Agent: go-fullstack]**
+- [x] `internal/poller/poller.go` — 30s sampler + 10-min retention sweep (>25h). **[Agent: go-fullstack]**
+- [x] `GET /api/metrics?range=24h` handler. **[Agent: go-fullstack]**
+- [x] Vendor `web/static/chart.umd.min.js` (pinned Chart.js version, integrity-checked). **[Agent: go-fullstack]**
+- [x] Trend chart partials in `web/templates/cards/charts/` for CPU, memory, rx, tx. **[Agent: go-fullstack]**
+- [x] Go test for retention sweeper boundary. **[Agent: go-fullstack]**
 
 ---
 
@@ -141,10 +141,10 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 
 **Outcome:** Card lists handshake events with timestamp + client name; updates within ~30s.
 
-- [ ] Add `handshake_events` table. **[Agent: go-fullstack]**
-- [ ] Extend poller to detect handshake-time changes per peer and insert events. **[Agent: go-fullstack]**
-- [ ] Extend `/api/service` handler to include `events[]` for the last hour. **[Agent: go-fullstack]**
-- [ ] `web/templates/cards/events.html`. **[Agent: go-fullstack]**
+- [x] Add `handshake_events` table. **[Agent: go-fullstack]**
+- [x] Extend poller to detect handshake-time changes per peer and insert events. **[Agent: go-fullstack]**
+- [x] Extend `/api/service` handler to include `events[]` for the last hour. **[Agent: go-fullstack]**
+- [x] `web/templates/cards/events.html`. **[Agent: go-fullstack]**
 
 ---
 
@@ -152,9 +152,9 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 
 **Outcome:** All cards refresh every 10s via htmx; "Stale data" pill appears when the API errors.
 
-- [ ] Vendor `web/static/htmx.min.js` (pinned htmx version, integrity-checked). **[Agent: go-fullstack]**
-- [ ] Add `hx-get="/api/snapshot"` `hx-trigger="every 10s"` `hx-target="this"` to each card; the API returns HTML fragments. **[Agent: go-fullstack]**
-- [ ] Add stale-data pill rendered when handler returns degraded state. **[Agent: go-fullstack]**
+- [x] Vendor `web/static/htmx.min.js` (pinned htmx version, integrity-checked). **[Agent: go-fullstack]**
+- [x] Add `hx-get="/api/snapshot"` `hx-trigger="every 10s"` `hx-target="this"` to each card; the API returns HTML fragments. **[Agent: go-fullstack]** _(implemented as a single `/partial/dashboard` swap target on `<main>` rather than per-card `hx-get` — see Slice 11 architecture decision: charts stay outside the swap so `<canvas>` elements aren't destroyed)_
+- [x] Add stale-data pill rendered when handler returns degraded state. **[Agent: go-fullstack]**
 
 ---
 
@@ -162,8 +162,17 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 
 **Outcome:** No horizontal scroll at 360 px; charts re-flow to single column < 600 px; touch targets ≥ 44 px.
 
-- [ ] Tweaks to `web/static/app.css` across cards + charts. **[Agent: go-fullstack]**
+- [x] Tweaks to `web/static/app.css` across cards + charts. **[Agent: go-fullstack]**
 - [ ] Verify in browser devtools at 360 px and 768 px viewports. **[Agent: go-fullstack]**
+
+---
+
+## Slice 12.5: Cap "Recent handshakes" to 10 most recent
+
+**Outcome:** The handshake-events card shows only the 10 newest events (instead of all events in the last hour). Older entries roll off as new ones land.
+
+- [x] Extend `db.QueryHandshakeEvents` with a `limit` parameter and switch the SQL to `ORDER BY ts DESC LIMIT ?` so it returns newest-first; update the test signature. Drop the `reverse` template helper since the API now returns DESC. **[Agent: go-fullstack]**
+- [x] Update call sites (`handleGetService`, `handleIndex` via `buildPageData`) to pass `limit = 10`. Update the `events.html` template to drop the `reverse` filter. **[Agent: go-fullstack]**
 
 ---
 
@@ -171,8 +180,8 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 
 **Outcome:** `git push origin main` (touching `dashboard/**`) builds the binary and uploads it to S3 automatically.
 
-- [ ] TF: GitHub OIDC IAM role scoped to this repo's `main` ref, with `s3:PutObject` on the artifact bucket. **[Agent: terraform-aws]**
-- [ ] `.github/workflows/dashboard-build.yml` — paths-filter `dashboard/**`, OIDC, `go test` then `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w"`, `aws s3 cp` to `main-${{ github.sha }}/wireguard-dashboard` and `latest/wireguard-dashboard`. Pin actions by SHA. **[Agent: cicd-github-actions]**
+- [x] TF: GitHub OIDC IAM role scoped to this repo's `main` ref, with `s3:PutObject` on the artifact bucket. **[Agent: terraform-aws]**
+- [x] `.github/workflows/dashboard-build.yml` — paths-filter `dashboard/**`, OIDC, `go test` then `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w"`, `aws s3 cp` to `main-${{ github.sha }}/wireguard-dashboard` and `latest/wireguard-dashboard`. Pin actions by SHA. **[Agent: cicd-github-actions]**
 - [ ] Push a no-op commit; verify the binary lands in S3 with both keys via `aws s3 ls`. **[Agent: cicd-github-actions]**
 
 ---

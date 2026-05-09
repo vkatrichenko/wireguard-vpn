@@ -59,3 +59,24 @@ module "dashboard" {
   env          = local.environment
   tags         = local.default_tags
 }
+
+module "github_oidc" {
+  source = "../modules/github-oidc"
+
+  use_existing = true
+
+  roles = {
+    "dashboard-ci-build" = {
+      name_suffix = "dashboard-ci-build"
+      subject     = "repo:vkatrichenko/wireguard-vpn:ref:refs/heads/main"
+      s3_put_object = [
+        {
+          bucket_arn = module.dashboard.bucket_arn
+          prefixes   = ["latest/*", "main-*/*"]
+        },
+      ]
+    }
+  }
+
+  tags = local.default_tags
+}

@@ -1,0 +1,35 @@
+{{ define "client-list" }}
+<section id="client-list" class="card">
+  <h2>Clients</h2>
+  {{ if . }}
+  <table class="client-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Address</th>
+        <th>Status</th>
+        <th>Last handshake</th>
+        <th>Endpoint</th>
+        <th>Sent</th>
+        <th>Received</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range . }}
+      <tr class="client-row status-{{ .Status }}">
+        <td>{{ if .Name }}{{ .Name }}{{ else }}<em>(unknown)</em>{{ end }}</td>
+        <td>{{ if .Address }}{{ .Address }}{{ else }}—{{ end }}</td>
+        <td><span class="status-pill status-{{ .Status }}">{{ .Status }}</span></td>
+        <td>{{ if .LatestHandshake.IsZero }}never{{ else }}{{ humanAgo .LatestHandshake }}{{ end }}</td>
+        <td>{{ if .Endpoint }}{{ .Endpoint }}{{ else }}—{{ end }}</td>
+        <td>{{ humanBytes .TransferTx }}</td>
+        <td>{{ humanBytes .TransferRx }}</td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+  {{ else }}
+  <p class="empty">No clients configured. Add via <code>terraform/dev/main.tf</code>.</p>
+  {{ end }}
+</section>
+{{ end }}

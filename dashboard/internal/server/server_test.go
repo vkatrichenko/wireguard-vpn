@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,10 +12,81 @@ import (
 	"time"
 
 	dashboard "wireguard-dashboard"
+	"wireguard-dashboard/internal/clientsfile"
+	"wireguard-dashboard/internal/db"
+	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/server"
 	"wireguard-dashboard/internal/serverinfo"
 	"wireguard-dashboard/internal/systemd"
+	"wireguard-dashboard/internal/wg"
 )
+
+// newTestDB returns an in-memory *db.DB scoped to t — opened once, closed
+// in t.Cleanup. Used to satisfy server.New(...)'s metricsDB parameter in
+// existing tests that don't exercise /api/metrics.
+func newTestDB(t *testing.T) *db.DB {
+	t.Helper()
+	testDB, err := db.Open(context.Background(), ":memory:")
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	t.Cleanup(func() { _ = testDB.Close() })
+	return testDB
+}
+
+// fakeClientsfileSvc returns an empty manifest. The existing index-page tests
+// don't exercise the client-list path, so an empty list is sufficient to keep
+// server.New() satisfied at construction time.
+func fakeClientsfileSvc() *clientsfile.Service {
+	return &clientsfile.Service{
+		Reader: func(string) ([]byte, error) { return []byte("[]"), nil },
+		Path:   "/test/clients.json",
+	}
+}
+
+// fakeWgSvc returns canned `wg show wg0 dump` output containing only the
+// server's own info line (no peers). Same reasoning as fakeClientsfileSvc:
+// keeps server.New() happy without driving the client-list join.
+func fakeWgSvc() *wg.Service {
+	return &wg.Service{
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("server-key\tserver-pub\t51820\toff\n"), nil
+		},
+		Iface: "wg0",
+	}
+}
+
+// fakeProcSvc returns a *proc.Service with an in-memory Reader that serves
+// canned /proc/stat, /proc/meminfo, /proc/uptime and /sys/class/net/wg0
+// rx/tx byte counters. The numeric values are arbitrary — the existing
+// tests only need Sample() to succeed so server.New() is satisfied; they
+// don't assert on the rendered Stats (the system + network-rate templates
+// land in Slice 8 sub-task 3).
+//
+// ProcPath / SysPath are kept as the real defaults so the canned paths line
+// up with what proc.Service.readCPU / readMem / readUptime / readIfaceCounter
+// will request.
+func fakeProcSvc() *proc.Service {
+	files := map[string][]byte{
+		"/proc/stat":                              []byte("cpu  100 0 50 800 10 0 0 0 0 0\n"),
+		"/proc/meminfo":                           []byte("MemTotal:    8000000 kB\nMemAvailable:  4000000 kB\n"),
+		"/proc/uptime":                            []byte("12345.67 9876.54\n"),
+		"/sys/class/net/wg0/statistics/rx_bytes":  []byte("1024\n"),
+		"/sys/class/net/wg0/statistics/tx_bytes":  []byte("2048\n"),
+	}
+	return &proc.Service{
+		Reader: func(path string) ([]byte, error) {
+			if data, ok := files[path]; ok {
+				return data, nil
+			}
+			return nil, fmt.Errorf("fake reader: unexpected path %q", path)
+		},
+		Now:      time.Now,
+		ProcPath: "/proc",
+		SysPath:  "/sys",
+		Iface:    "wg0",
+	}
+}
 
 // systemdRunnerActive returns canned bytes representing a running unit. The
 // `is-active` call returns "active\n"; the `show -p ActiveEnterTimestamp`
@@ -92,7 +164,7 @@ func TestHandleIndex_Success(t *testing.T) {
 	}
 	systemdSvc := systemdRunnerActive(enteredAt)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -123,6 +195,44 @@ func TestHandleIndex_Success(t *testing.T) {
 		`id="uptime"`,
 		`class="uptime"`,
 		"h ",
+		// client-list card — fakes return an empty manifest and a
+		// server-only `wg show`, so the card renders the empty-state
+		// branch rather than a populated table.
+		`id="client-list"`,
+		"No clients configured",
+		// system card — fakeProcSvc returns first-sample stats:
+		// CPUPercent is 0 (no prior sample to delta against), memory
+		// is MemTotal=8000000 kB / MemAvailable=4000000 kB so used = 50%.
+		`id="system"`,
+		"0.0%",
+		"50.0%",
+		// network-rate card — first-sample rates render as "0 B/s".
+		`id="network-rate"`,
+		"0 B/s",
+		// Trend-chart partials — Slice 9 sub-task 5 wires the four
+		// chart cards into the page and references the embedded
+		// Chart.js bundle from /static/.
+		`id="chart-cpu"`,
+		`id="chart-memory"`,
+		`id="chart-rx"`,
+		`id="chart-tx"`,
+		`/static/chart.umd.min.js`,
+		`/static/charts.js`,
+		// htmx wiring — sub-task 2 of Slice 11. The page polls
+		// /partial/dashboard every 10s and swaps the data-card block.
+		`<main id="dashboard-content"`,
+		`hx-get="/partial/dashboard"`,
+		`/static/htmx.min.js`,
+		// Stale-data indicator — sub-task 3 of Slice 11. The pill lives
+		// outside #dashboard-content so it survives htmx innerHTML swaps,
+		// and the IIFE listener is loaded after htmx itself.
+		`id="stale-pill"`,
+		`/static/htmx-stale.js`,
+		// events card — the test seeds no handshake events, so the
+		// card renders the empty-state branch (newest-first reverse
+		// is a no-op on an empty slice).
+		`id="events"`,
+		"No recent handshakes.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
@@ -155,7 +265,7 @@ func TestHandleIndex_BothErrors(t *testing.T) {
 		Runner: fakeSystemdRunnerErr,
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, systemdSvc)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -182,5 +292,109 @@ func TestHandleIndex_BothErrors(t *testing.T) {
 		if strings.Contains(body, unwanted) {
 			t.Errorf("body unexpectedly contains %q on error path:\n%s", unwanted, body)
 		}
+	}
+}
+
+// TestHandleGetService_IncludesEvents proves GET /api/service returns the
+// new {status, events} envelope with last-hour handshake events folded in
+// alongside the systemd snapshot. We seed one event inside the window via
+// db.InsertHandshakeEvents and assert the JSON envelope contains both the
+// status fields AND the single event row.
+func TestHandleGetService_IncludesEvents(t *testing.T) {
+	enteredAt := time.Now().Add(-(2*time.Hour + 3*time.Minute))
+	systemdSvc := systemdRunnerActive(enteredAt)
+
+	testDB := newTestDB(t)
+	if err := testDB.InsertHandshakeEvents(context.Background(), []db.HandshakeEvent{
+		{TS: time.Now().Add(-5 * time.Minute), PublicKey: "peer-pub", Name: "alice"},
+	}); err != nil {
+		t.Fatalf("seed handshake events: %v", err)
+	}
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/service", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var got struct {
+		Status systemd.ServiceStatus `json:"status"`
+		Events []db.HandshakeEvent   `json:"events"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+	}
+	if !got.Status.Active {
+		t.Errorf("status.active = false, want true; body=%s", rec.Body.String())
+	}
+	if got.Status.State != "active" {
+		t.Errorf("status.state = %q, want %q", got.Status.State, "active")
+	}
+	if len(got.Events) != 1 {
+		t.Fatalf("len(events) = %d, want 1; body=%s", len(got.Events), rec.Body.String())
+	}
+	if got.Events[0].PublicKey != "peer-pub" || got.Events[0].Name != "alice" {
+		t.Errorf("events[0] = %+v, want PublicKey=peer-pub Name=alice", got.Events[0])
+	}
+}
+
+// TestHandleGetPartialDashboard_RendersFragment proves the htmx polling
+// endpoint at GET /partial/dashboard returns just the inner card block —
+// no <html>/<head>/<body> wrapper — so htmx's innerHTML swap drops it
+// cleanly into <main id="dashboard-content"> on the page.
+func TestHandleGetPartialDashboard_RendersFragment(t *testing.T) {
+	const (
+		fakeIP  = "203.0.113.1"
+		fakeKey = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK="
+	)
+
+	enteredAt := time.Now().Add(-(2*time.Hour + 3*time.Minute))
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: fakeIP},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte(fakeKey + "\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(enteredAt)
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t))
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial/dashboard", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want %q", got, "text/html; charset=utf-8")
+	}
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="server-info"`) {
+		t.Errorf("partial body missing server-info card:\n%s", body)
+	}
+	// Fragment must NOT contain a full document — that would break htmx
+	// innerHTML swapping by injecting nested <html>/<body> tags.
+	if strings.Contains(body, "<html") {
+		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
 	}
 }

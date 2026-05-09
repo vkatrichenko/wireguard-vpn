@@ -8,6 +8,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -15,8 +17,12 @@ import (
 	"net/http"
 	"time"
 
+	"wireguard-dashboard/internal/clientsfile"
+	"wireguard-dashboard/internal/db"
+	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/serverinfo"
 	"wireguard-dashboard/internal/systemd"
+	"wireguard-dashboard/internal/wg"
 )
 
 // server holds the shared dependencies routes need at request time. Keeping
@@ -25,9 +31,13 @@ import (
 // functions) so adding new dependencies in later slices doesn't ripple
 // through every handler signature.
 type server struct {
-	tmpl          *template.Template
-	serverinfoSvc *serverinfo.Service
-	systemdSvc    *systemd.Service
+	tmpl           *template.Template
+	serverinfoSvc  *serverinfo.Service
+	systemdSvc     *systemd.Service
+	clientsfileSvc *clientsfile.Service
+	wgSvc          *wg.Service
+	procSvc        *proc.Service
+	metricsDB      *db.DB
 }
 
 // pageData is the view-model for the dashboard index template. The *Error
@@ -41,6 +51,22 @@ type pageData struct {
 	ServerInfoError    string
 	ServiceStatus      systemd.ServiceStatus
 	ServiceStatusError string
+	ClientRows         []ClientRow
+	ClientsError       string
+	// Stats / StatsError back the system + network-rate cards. Stats is a
+	// pointer so the template can branch on `if .Stats` without the receive
+	// side having to special-case zero values (uptime=0 is technically a
+	// valid sample, however unlikely). StatsError is populated iff the
+	// proc.Service.Sample call returned an error.
+	Stats      *proc.Stats
+	StatsError string
+	// Events / EventsError back the (sub-task 4) handshake-events card.
+	// Events is the last-hour window of handshake_events rows. Nil when
+	// either the fetch failed (EventsError populated) or systemd itself
+	// failed and we skipped the events fetch — the events card is a child
+	// of service-status and renders nothing useful without it.
+	Events      []db.HandshakeEvent
+	EventsError string
 }
 
 // New returns an http.Handler with the wired routes. The caller passes in
@@ -61,30 +87,69 @@ type pageData struct {
 // startup rather than on the first request. The `humanUptime` FuncMap is
 // registered before ParseFS because templates/cards/uptime.html invokes it
 // and html/template binds funcs at parse time.
-func New(webFS fs.FS, serverinfoSvc *serverinfo.Service, systemdSvc *systemd.Service) (http.Handler, error) {
+func New(
+	webFS fs.FS,
+	serverinfoSvc *serverinfo.Service,
+	systemdSvc *systemd.Service,
+	clientsfileSvc *clientsfile.Service,
+	wgSvc *wg.Service,
+	procSvc *proc.Service,
+	metricsDB *db.DB,
+) (http.Handler, error) {
 	// Two globs because templates/*.html does not recurse into cards/. The
 	// cards/ directory holds named-template fragments ({{ define "..." }})
 	// that the page templates pull in via {{ template "..." . }}.
 	tmpl, err := template.New("dashboard").
-		Funcs(template.FuncMap{"humanUptime": humanUptime}).
+		Funcs(template.FuncMap{
+			"humanUptime":      humanUptime,
+			"humanBytes":       humanBytes,
+			"humanAgo":         humanAgo,
+			"humanBytesPerSec": humanBytesPerSec,
+			"humanBytesKB":     humanBytesKB,
+			"humanDuration":    humanDuration,
+		}).
 		ParseFS(webFS,
 			"templates/*.html",
 			"templates/cards/*.html",
+			"templates/cards/charts/*.html",
 		)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &server{
-		tmpl:          tmpl,
-		serverinfoSvc: serverinfoSvc,
-		systemdSvc:    systemdSvc,
+		tmpl:           tmpl,
+		serverinfoSvc:  serverinfoSvc,
+		systemdSvc:     systemdSvc,
+		clientsfileSvc: clientsfileSvc,
+		wgSvc:          wgSvc,
+		procSvc:        procSvc,
+		metricsDB:      metricsDB,
+	}
+
+	// Static-file route — serves the embedded `web/static/` subtree (Chart.js
+	// core, the date-fns adapter, and the dashboard's own charts.js) from the
+	// compiled binary. Using fs.Sub + http.FileServerFS (Go 1.22+) keeps the
+	// handler dependency-free: no third-party static-file library, and no
+	// disk reads at runtime. fs.Sub fails only if the named subtree doesn't
+	// exist; the `//go:embed all:web` declaration ensures it always does, so
+	// the error path here is theoretically unreachable but worth wrapping so
+	// a future refactor that breaks the embed surfaces here, not at first
+	// request.
+	staticFS, err := fs.Sub(webFS, "static")
+	if err != nil {
+		return nil, fmt.Errorf("staticFS sub: %w", err)
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", handleHealth)
 	mux.HandleFunc("GET /api/server", s.handleGetServer)
 	mux.HandleFunc("GET /api/service", s.handleGetService)
+	mux.HandleFunc("GET /api/clients", s.handleGetClients)
+	mux.HandleFunc("GET /api/snapshot", s.handleGetSnapshot)
+	mux.HandleFunc("GET /api/metrics", s.handleGetMetrics)
+	mux.HandleFunc("GET /partial/dashboard", s.handleGetPartialDashboard)
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(staticFS)))
 	mux.HandleFunc("GET /", s.handleIndex)
 	return mux, nil
 }
@@ -116,23 +181,7 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := pageData{}
-
-	info, err := s.serverinfoSvc.Get(r.Context())
-	if err != nil {
-		slog.Error("GET /: serverinfo fetch failed", "err", err)
-		data.ServerInfoError = err.Error()
-	} else {
-		data.ServerInfo = info
-	}
-
-	status, err := s.systemdSvc.Get(r.Context())
-	if err != nil {
-		slog.Error("GET /: systemd fetch failed", "err", err)
-		data.ServiceStatusError = err.Error()
-	} else {
-		data.ServiceStatus = status
-	}
+	data := s.buildPageData(r.Context())
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tmpl.ExecuteTemplate(w, "dashboard.html", data); err != nil {
@@ -142,6 +191,79 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "template render failed", http.StatusInternalServerError)
 		return
 	}
+}
+
+// buildPageData runs the five sequential fetches that populate the dashboard
+// view-model. Extracted from handleIndex so handleGetPartialDashboard can
+// reuse the same data-gathering — keeps the two refresh paths in lock-step
+// (any new card / new error gate is a single change here, not two).
+//
+// Each fetch failure becomes a per-card error string rather than a hard
+// error: the page (or the partial fragment) is still useful with one card
+// degraded, so callers always render whatever the returned pageData holds.
+func (s *server) buildPageData(ctx context.Context) pageData {
+	data := pageData{}
+
+	info, err := s.serverinfoSvc.Get(ctx)
+	if err != nil {
+		slog.Error("buildPageData: serverinfo fetch failed", "err", err)
+		data.ServerInfoError = err.Error()
+	} else {
+		data.ServerInfo = info
+	}
+
+	status, err := s.systemdSvc.Get(ctx)
+	if err != nil {
+		slog.Error("buildPageData: systemd fetch failed", "err", err)
+		data.ServiceStatusError = err.Error()
+	} else {
+		data.ServiceStatus = status
+	}
+
+	// Handshake events feed the (sub-task 4) events card, which sits inside
+	// the service-status group: skip the DB query when the parent card is
+	// already going to render an error — saves a query when the events
+	// card wouldn't render anyway. On a query failure we populate
+	// EventsError but leave Events nil so the template can branch on it.
+	if data.ServiceStatusError == "" {
+		now := time.Now()
+		events, eventsErr := s.metricsDB.QueryHandshakeEvents(ctx, now.Add(-1*time.Hour), now, 10)
+		if eventsErr != nil {
+			slog.Error("buildPageData: handshake events query failed", "err", eventsErr)
+			data.EventsError = eventsErr.Error()
+		} else {
+			data.Events = events
+		}
+	}
+
+	// Manifest + live wg state are fetched as a pair: if either fails the
+	// joined view is meaningless, so we surface the error and leave
+	// ClientRows nil rather than rendering a half-joined list. Per-card
+	// degradation is fine; partial-join inside one card is too confusing.
+	clients, clientsErr := s.clientsfileSvc.Load(ctx)
+	peers, peersErr := s.wgSvc.Show(ctx)
+	if joined := errors.Join(clientsErr, peersErr); joined != nil {
+		slog.Error("buildPageData: clients fetch failed", "err", joined)
+		data.ClientsError = joined.Error()
+	} else {
+		data.ClientRows = buildClientRows(clients, peers, time.Now())
+	}
+
+	// proc.Sample feeds the system + network-rate cards. The sample is
+	// inherently a delta against the prior reading held on s.procSvc, so the
+	// first render after process start returns CPU%/rates as zero — that's
+	// expected and the templates render the cumulative + absolute fields
+	// regardless. main.go fires a best-effort warm-sample at startup to
+	// reduce the chance of seeing a cold first render.
+	stats, statsErr := s.procSvc.Sample(ctx)
+	if statsErr != nil {
+		slog.Error("buildPageData: proc sample failed", "err", statsErr)
+		data.StatsError = statsErr.Error()
+	} else {
+		data.Stats = &stats
+	}
+
+	return data
 }
 
 // humanUptime formats time.Since(t) as a short human-readable duration like
@@ -172,5 +294,97 @@ func humanUptime(t time.Time) string {
 		return fmt.Sprintf("%dm %ds", minutes, seconds)
 	default:
 		return fmt.Sprintf("%ds", seconds)
+	}
+}
+
+// humanBytes formats a byte count as B / KB / MB / GB with one decimal.
+// Uses 1024-based units (KiB-style numbers, KB labels — matches what
+// most VPN UIs do). Returns "0 B" on negative or zero.
+func humanBytes(n int64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	units := []string{"KB", "MB", "GB", "TB"}
+	f := float64(n) / 1024
+	for _, u := range units {
+		if f < 1024 {
+			return fmt.Sprintf("%.1f %s", f, u)
+		}
+		f /= 1024
+	}
+	return fmt.Sprintf("%.1f PB", f)
+}
+
+// humanBytesPerSec formats a bytes-per-second rate using 1024-base units —
+// matches humanBytes' base for visual consistency. Returns "0 B/s" on zero.
+func humanBytesPerSec(n int64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B/s", n)
+	}
+	units := []string{"KB/s", "MB/s", "GB/s"}
+	f := float64(n) / 1024
+	for _, u := range units {
+		if f < 1024 {
+			return fmt.Sprintf("%.1f %s", f, u)
+		}
+		f /= 1024
+	}
+	return fmt.Sprintf("%.1f TB/s", f)
+}
+
+// humanBytesKB formats a kilobyte count. Multiplies by 1024 then delegates
+// to humanBytes — keeps a single source of truth for the byte-sizing logic.
+func humanBytesKB(n int64) string {
+	return humanBytes(n * 1024)
+}
+
+// humanDuration formats a Duration the same shape as humanUptime — but takes
+// a Duration rather than a time.Time. Used for proc.Stats.HostUptime which
+// is already a Duration.
+func humanDuration(d time.Duration) string {
+	if d <= 0 {
+		return "-"
+	}
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd %dh", days, hours)
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	case minutes > 0:
+		return fmt.Sprintf("%dm %ds", minutes, seconds)
+	default:
+		return fmt.Sprintf("%ds", seconds)
+	}
+}
+
+// humanAgo formats a time as "Ns ago" / "Nm ago" / "Nh ago" / "Nd ago"
+// relative to time.Now(). For a future time, returns "just now". For a
+// zero time, returns "never" — though templates should guard with
+// .IsZero() before calling this.
+func humanAgo(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	d := time.Since(t)
+	if d < 0 {
+		return "just now"
+	}
+	seconds := int(d.Seconds())
+	minutes := seconds / 60
+	hours := minutes / 60
+	days := hours / 24
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd ago", days)
+	case hours > 0:
+		return fmt.Sprintf("%dh ago", hours)
+	case minutes > 0:
+		return fmt.Sprintf("%dm ago", minutes)
+	default:
+		return fmt.Sprintf("%ds ago", seconds)
 	}
 }
