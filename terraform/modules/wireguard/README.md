@@ -32,6 +32,7 @@ No modules.
 | [aws_iam_policy.wireguard_policy](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/iam_policy) | resource |
 | [aws_iam_role.wireguard_role](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy_attachment.wireguard_roleattach](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.wireguard_ssm_core](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_instance.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/instance) | resource |
 | [aws_key_pair.ssh](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/key_pair) | resource |
 | [aws_launch_template.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/launch_template) | resource |

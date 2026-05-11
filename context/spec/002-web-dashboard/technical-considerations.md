@@ -1,7 +1,7 @@
 # Technical Specification: Web Dashboard for WireGuard VPN
 
 - **Functional Specification:** [`functional-spec.md`](./functional-spec.md)
-- **Status:** Draft (v3 — Go binary, VPN-only access)
+- **Status:** Completed (v3 — Go binary, VPN-only access)
 - **Author(s):** Vladyslav Katrychenko
 
 > **v3 note (2026-05-01):** Second architecture pivot. v1 used Next.js + Docker + ECR + ALB + ACM + Route53 + WAF. v2 swapped Next.js for a Go single binary delivered via S3, kept the ALB+ACM+Route53+WAF edge. v3 drops the public edge entirely: the dashboard listens on the WireGuard server's tunnel IP and is reachable **only by clients connected to the VPN**. HTTP is acceptable inside the WG tunnel (the tunnel itself is encrypted with ChaCha20-Poly1305). Basic auth is retained as defense-in-depth. No domain, no ACM, no Route53, no ALB, no WAF.

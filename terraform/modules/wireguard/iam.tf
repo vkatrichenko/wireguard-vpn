@@ -78,6 +78,19 @@ resource "aws_iam_role_policy_attachment" "wireguard_roleattach" {
   count      = (var.use_eip ? 1 : 0) # only used for EIP mode
 }
 
+# SSM-managed-node membership for the dashboard CI deploy path.
+# Without this attachment the instance's SSM agent cannot call
+# UpdateInstanceInformation, so SendCommand returns
+# "InvalidInstanceId: Instances not in a valid state for account".
+# AmazonSSMManagedInstanceCore is the AWS-recommended baseline and covers
+# ssmmessages/ec2messages plus the minimal S3/KMS perms the agent needs
+# to fetch SSM documents.
+resource "aws_iam_role_policy_attachment" "wireguard_ssm_core" {
+  role       = aws_iam_role.wireguard_role[0].name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+  count      = (var.use_eip ? 1 : 0) # only used for EIP mode
+}
+
 resource "aws_iam_instance_profile" "wireguard_profile" {
   name  = "tf-wireguard-${var.env}"
   role  = aws_iam_role.wireguard_role[0].name
