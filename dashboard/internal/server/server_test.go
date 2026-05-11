@@ -220,8 +220,8 @@ func TestHandleIndex_Success(t *testing.T) {
 		`/static/charts.js`,
 		// htmx wiring — sub-task 2 of Slice 11. The page polls
 		// /partial/dashboard every 10s and swaps the data-card block.
-		`<main id="dashboard-content"`,
-		`hx-get="/partial/dashboard"`,
+		`<main id="tab-body"`,
+		`class="tab-bar"`,
 		`/static/htmx.min.js`,
 		// Stale-data indicator — sub-task 3 of Slice 11. The pill lives
 		// outside #dashboard-content so it survives htmx innerHTML swaps,
@@ -396,5 +396,72 @@ func TestHandleGetPartialDashboard_RendersFragment(t *testing.T) {
 	// innerHTML swapping by injecting nested <html>/<body> tags.
 	if strings.Contains(body, "<html") {
 		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
+	}
+}
+
+// TestHandleGetPartialTabs proves each of the six tab partial routes registered
+// in Slice 1 sub-task 5 (overview, clients, system, network, events, about)
+// returns a 200 HTML fragment with the expected sentinel string and without a
+// full-document wrapper. The handler is constructed once and reused across
+// subtests — same fake wiring as TestHandleGetPartialDashboard_RendersFragment
+// because the overview path drives the full buildPageData call graph, while
+// the five placeholder tabs are template-only.
+func TestHandleGetPartialTabs(t *testing.T) {
+	const (
+		fakeIP  = "203.0.113.1"
+		fakeKey = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK="
+	)
+
+	enteredAt := time.Now().Add(-(2*time.Hour + 3*time.Minute))
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: fakeIP},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte(fakeKey + "\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(enteredAt)
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t))
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	tests := []struct {
+		name             string
+		path             string
+		wantBodyContains string
+	}{
+		{"overview", "/partial/overview", `id="server-info"`},
+		{"clients", "/partial/clients", "Coming soon"},
+		{"system", "/partial/system", "Coming soon"},
+		{"network", "/partial/network", "Coming soon"},
+		{"events", "/partial/events", "Coming soon"},
+		{"about", "/partial/about", "Coming soon"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+				t.Errorf("Content-Type = %q, want %q", got, "text/html; charset=utf-8")
+			}
+
+			body := rec.Body.String()
+			if !strings.Contains(body, tc.wantBodyContains) {
+				t.Errorf("body missing %q:\n%s", tc.wantBodyContains, body)
+			}
+			// Fragments must not include a full HTML document — htmx
+			// innerHTML swaps would otherwise inject nested <html>/<body>.
+			if strings.Contains(body, "<html") {
+				t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
+			}
+		})
 	}
 }

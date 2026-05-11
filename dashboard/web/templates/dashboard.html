@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/static/app.css" />
     <script src="/static/htmx.min.js" defer></script>
     <script src="/static/htmx-stale.js" defer></script>
+    <script src="/static/tabs.js" defer></script>
     <script src="/static/chart.umd.min.js" defer></script>
     <script src="/static/chartjs-adapter-date-fns.bundle.min.js" defer></script>
     <script src="/static/charts.js" defer></script>
@@ -17,10 +18,16 @@
       <span id="stale-pill" class="stale-pill" hidden>Stale data</span>
     </header>
 
-    <main id="dashboard-content"
-          hx-get="/partial/dashboard"
-          hx-trigger="every 10s"
-          hx-swap="innerHTML">
+    <nav class="tab-bar" aria-label="Dashboard sections">
+      <button class="tab-pill active" data-tab="overview" aria-current="page">Overview</button>
+      <button class="tab-pill" data-tab="clients">Clients</button>
+      <button class="tab-pill" data-tab="system">System</button>
+      <button class="tab-pill" data-tab="network">Network</button>
+      <button class="tab-pill" data-tab="events">Events</button>
+      <button class="tab-pill" data-tab="about">About</button>
+    </nav>
+
+    <main id="tab-body">
       {{ template "dashboard-content" . }}
     </main>
 
