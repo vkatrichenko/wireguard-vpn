@@ -38,7 +38,11 @@ resource "aws_ssm_document" "deploy" {
         name   = "deployDashboard"
         inputs = {
           runCommand = [
-            "set -euo pipefail",
+            # SSM RunShellScript executes with /bin/sh (dash on Ubuntu), not
+            # bash. `pipefail` is a bash-ism that dash rejects with "Illegal
+            # option -o pipefail". The script has no pipelines, so we only
+            # need errexit (-e) and nounset (-u).
+            "set -eu",
             "TMP=/opt/wireguard-dashboard/bin/wireguard-dashboard.new",
             "DEST=/opt/wireguard-dashboard/bin/wireguard-dashboard",
             # The instance role already grants s3:GetObject on the artifact bucket via Slice 1 sub-task 3.
@@ -78,6 +82,17 @@ data "aws_iam_policy_document" "deploy" {
   statement {
     sid       = "GetCommandInvocation"
     actions   = ["ssm:GetCommandInvocation"]
+    resources = ["*"]
+  }
+
+  # The deploy workflow resolves the target instance ID at runtime by tag
+  # (Name=wireguard-test) rather than hardcoding it, because Terraform may
+  # replace the EC2 on user-data changes. ec2:DescribeInstances does not
+  # support resource-level permissions per the AWS IAM action reference, so
+  # Resource must be "*".
+  statement {
+    sid       = "DescribeInstancesForTagLookup"
+    actions   = ["ec2:DescribeInstances"]
     resources = ["*"]
   }
 }

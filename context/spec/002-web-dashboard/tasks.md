@@ -163,7 +163,7 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 **Outcome:** No horizontal scroll at 360 px; charts re-flow to single column < 600 px; touch targets ≥ 44 px.
 
 - [x] Tweaks to `web/static/app.css` across cards + charts. **[Agent: go-fullstack]**
-- [ ] Verify in browser devtools at 360 px and 768 px viewports. **[Agent: go-fullstack]**
+- [x] Verify in browser devtools at 360 px and 768 px viewports. **[Agent: go-fullstack]**
 
 ---
 
@@ -193,7 +193,7 @@ Vertical slices — each leaves the system runnable with new verifiable value.
 - [x] TF: extend the OIDC role with `ssm:SendCommand` on the EC2 ARN, scoped to a hard-pinned SSM document. **[Agent: terraform-aws]** _(implemented as a dedicated `dashboard-ci-deploy` role in the github-oidc roles map, not as an extension of the existing `dashboard-ci-build` role — least-privilege per workflow)_
 - [x] TF: SSM document running `aws s3 cp` of the new binary + atomic `mv` + `systemctl restart wireguard-dashboard`. **[Agent: terraform-aws]**
 - [x] `.github/workflows/dashboard-deploy.yml` — `workflow_run` after successful build (or `workflow_dispatch`). **[Agent: cicd-github-actions]**
-- [ ] Push a commit; verify the SSM run succeeds; on a VPN client, `curl http://172.16.15.1:8080/api/health` returns `{"ok":true}`; SSM session into the EC2 confirms `/proc/$(pidof wireguard-dashboard)/exe` resolves to the new binary path. **[Agent: cicd-github-actions]**
+- [x] Push a commit; verify the SSM run succeeds; on a VPN client, `curl http://172.16.15.1:8080/api/health` returns `{"ok":true}`; SSM session into the EC2 confirms `/proc/$(pidof wireguard-dashboard)/exe` resolves to the new binary path. **[Agent: cicd-github-actions]** _(End-to-end deploy succeeded 2026-05-11 after a 4-step IAM/script hardening pass: deploy role gained `ec2:DescribeInstances`, instance role gained `AmazonSSMManagedInstanceCore`, on-host `snap.amazon-ssm-agent.amazon-ssm-agent` was restarted to pick up the new permissions, and the SSM document's `set -euo pipefail` was dropped to `set -eu` because `aws:runShellScript` runs under `/bin/sh` (dash), not bash.)_
 
 ---
 
