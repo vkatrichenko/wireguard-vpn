@@ -7,6 +7,13 @@
 // heading; the poller writes the first row at startup so this state is only
 // visible during the first ~30s of process lifetime. Fetch failures render a
 // red error message under each card heading and skip Chart construction.
+//
+// Theme-aware: gridline / tick / axis-border colors are read from the
+// `--gridline` and `--text-muted` CSS custom properties on :root at chart-init
+// time, and re-applied on the window `__themeChanged` event so a runtime
+// theme toggle re-colors live charts without a page reload. Per-series line
+// colors in PALETTE stay constant — they are semantic (CPU red, mem blue,
+// rx green, tx amber) and legible on both backgrounds.
 (function () {
   "use strict";
 
@@ -23,6 +30,21 @@
     rx: "Rx B/s",
     tx: "Tx B/s",
   };
+
+  // charts holds the Chart instances built by renderCharts so the
+  // __themeChanged handler can iterate and patch colors in place.
+  const charts = [];
+  let lastPayload = null;
+
+  // themeColors reads the active theme tokens from :root. Fallbacks match
+  // the light-mode defaults in app.css so a missing token still renders.
+  function themeColors() {
+    const root = getComputedStyle(document.documentElement);
+    return {
+      grid: root.getPropertyValue("--gridline").trim() || "rgba(0, 0, 0, 0.08)",
+      text: root.getPropertyValue("--text-muted").trim() || "#6b7280",
+    };
+  }
 
   // insertNotice puts a styled <p> right after the card's <h2>. Used for
   // both the empty-state and the fetch-error branches so they render in a
@@ -74,6 +96,11 @@
   }
 
   function renderCharts(payload) {
+    lastPayload = payload;
+    // Reset stored instances on each render so a re-fetch fallback (theme
+    // change → recreate path) doesn't leak the old ones.
+    while (charts.length) charts.pop();
+
     const canvases = document.querySelectorAll("canvas[data-chart]");
     const sysEmpty = !payload.system || payload.system.ts.length === 0;
     const trafficEmpty = !payload.traffic || payload.traffic.ts.length === 0;
@@ -82,10 +109,11 @@
       return;
     }
 
+    const colors = themeColors();
     canvases.forEach((canvas) => {
       const series = canvas.dataset.chart;
       const data = datasetFor(series, payload);
-      new Chart(canvas, {
+      const chart = new Chart(canvas, {
         type: "line",
         data: {
           datasets: [
@@ -100,15 +128,67 @@
         },
         options: {
           scales: {
-            x: { type: "time", time: { unit: "hour" } },
-            y: { beginAtZero: true },
+            x: {
+              type: "time",
+              time: { unit: "hour" },
+              grid: { color: colors.grid },
+              ticks: { color: colors.text },
+              border: { color: colors.grid },
+            },
+            y: {
+              beginAtZero: true,
+              grid: { color: colors.grid },
+              ticks: { color: colors.text },
+              border: { color: colors.grid },
+            },
           },
           plugins: { legend: { display: false } },
           animation: false,
         },
       });
+      charts.push(chart);
     });
   }
+
+  // applyThemeToCharts re-reads the active theme tokens and patches each
+  // chart's axis colors in place. Chart.js v4 update('none') skips the
+  // animation pass, which is what we want for a color swap.
+  function applyThemeToCharts() {
+    if (charts.length === 0) return;
+    const colors = themeColors();
+    try {
+      charts.forEach((chart) => {
+        const sx = chart.options.scales.x;
+        const sy = chart.options.scales.y;
+        sx.grid.color = colors.grid;
+        sy.grid.color = colors.grid;
+        sx.ticks.color = colors.text;
+        sy.ticks.color = colors.text;
+        sx.border.color = colors.grid;
+        sy.border.color = colors.grid;
+        chart.update("none");
+      });
+    } catch (err) {
+      // Defensive: Chart.js update() doesn't throw on color changes today,
+      // but the spec asks for a recreate fallback. Easiest correct path is
+      // to re-render from the last payload (or re-fetch if we never got one).
+      console.warn("charts.js: update() failed, recreating charts", err);
+      charts.forEach((c) => {
+        try { c.destroy(); } catch (e) { /* ignore */ }
+      });
+      while (charts.length) charts.pop();
+      if (lastPayload) {
+        renderCharts(lastPayload);
+      } else {
+        fetch("/api/metrics?range=24h")
+          .then((resp) => resp.json())
+          .then(renderCharts)
+          .catch((e) => console.error("charts.js: recreate refetch failed", e));
+      }
+    }
+  }
+
+  window.addEventListener("__themeChanged", applyThemeToCharts);
 
   fetch("/api/metrics?range=24h")
     .then((resp) => {

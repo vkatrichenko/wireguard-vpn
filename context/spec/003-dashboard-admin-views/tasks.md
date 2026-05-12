@@ -30,10 +30,10 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** Toggle button in the header flips light ↔ dark. First load matches `prefers-color-scheme`. Choice persists in `localStorage`. All four existing 24h charts honor the active theme.
 
-- [ ] Refactor `web/static/app.css` to define color tokens on `:root` (background, surface, text, muted, accent, danger, success, gridline) and override them under `:root[data-theme="dark"]`. Every existing rule that hard-codes a color migrates to a `var(--token)` reference. **[Agent: go-fullstack]**
-- [ ] Add `web/static/theme.js` — on load: read `localStorage.theme`, fall back to `prefers-color-scheme`; set `<html data-theme="…">` accordingly. On toggle-button click: flip the attribute and persist. Expose `window.__themeChanged` event for charts.js to listen to. **[Agent: go-fullstack]**
-- [ ] Update `web/templates/dashboard.html` — add a toggle button in the header (`<button id="theme-toggle" aria-label="Toggle dark mode">`), include `theme.js` with `defer` before `charts.js`. **[Agent: go-fullstack]**
-- [ ] Update `web/static/charts.js` — read color tokens via `getComputedStyle(document.documentElement)` at chart-init time; listen for `__themeChanged` and call each chart's `update()` after patching colors. Recreate only as a fallback if `update()` can't take a color. **[Agent: go-fullstack]**
+- [x] Refactor `web/static/app.css` to define color tokens on `:root` (background, surface, text, muted, accent, danger, success, gridline) and override them under `:root[data-theme="dark"]`. Every existing rule that hard-codes a color migrates to a `var(--token)` reference. **[Agent: go-fullstack]**
+- [x] Add `web/static/theme.js` — on load: read `localStorage.theme`, fall back to `prefers-color-scheme`; set `<html data-theme="…">` accordingly. On toggle-button click: flip the attribute and persist. Expose `window.__themeChanged` event for charts.js to listen to. **[Agent: go-fullstack]**
+- [x] Update `web/templates/dashboard.html` — add a toggle button in the header (`<button id="theme-toggle" aria-label="Toggle dark mode">`), include `theme.js` with `defer` before `charts.js`. **[Agent: go-fullstack]**
+- [x] Update `web/static/charts.js` — read color tokens via `getComputedStyle(document.documentElement)` at chart-init time; listen for `__themeChanged` and call each chart's `update()` after patching colors. Recreate only as a fallback if `update()` can't take a color. **[Agent: go-fullstack]**
 - [ ] Verify locally: toggle in light viewport, refresh — stays dark. Charts gridlines + series colors visibly change. Hard-reload with `prefers-color-scheme: dark` (devtools emulation) and no localStorage entry — starts dark. **[Agent: go-fullstack]**
 
 ---
