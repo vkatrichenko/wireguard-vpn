@@ -77,12 +77,12 @@ func TestOpen_BootstrapsSchema(t *testing.T) {
 		t.Errorf("QueryTrafficMetrics: want 0 rows on fresh db, got %d", len(trafRows))
 	}
 
-	clientRows, err := d.QueryClientTraffic(ctx, from, to)
+	clientRows, err := d.QueryClientTrafficAll(ctx, from, to)
 	if err != nil {
-		t.Fatalf("QueryClientTraffic on fresh db: %v", err)
+		t.Fatalf("QueryClientTrafficAll on fresh db: %v", err)
 	}
 	if len(clientRows) != 0 {
-		t.Errorf("QueryClientTraffic: want 0 rows on fresh db, got %d", len(clientRows))
+		t.Errorf("QueryClientTrafficAll: want 0 rows on fresh db, got %d", len(clientRows))
 	}
 }
 
@@ -166,9 +166,9 @@ func TestInsertClientTraffic_BatchRoundTrip(t *testing.T) {
 		t.Fatalf("InsertClientTraffic: %v", err)
 	}
 
-	got, err := d.QueryClientTraffic(ctx, t0.Add(-time.Minute), t0.Add(time.Minute))
+	got, err := d.QueryClientTrafficAll(ctx, t0.Add(-time.Minute), t0.Add(time.Minute))
 	if err != nil {
-		t.Fatalf("QueryClientTraffic: %v", err)
+		t.Fatalf("QueryClientTrafficAll: %v", err)
 	}
 	if len(got) != 3 {
 		t.Fatalf("want 3 rows, got %d", len(got))
@@ -212,9 +212,9 @@ func TestInsertClientTraffic_EmptyBatch(t *testing.T) {
 
 	from := t0.Add(-365 * 24 * time.Hour)
 	to := t0.Add(365 * 24 * time.Hour)
-	rows, err := d.QueryClientTraffic(ctx, from, to)
+	rows, err := d.QueryClientTrafficAll(ctx, from, to)
 	if err != nil {
-		t.Fatalf("QueryClientTraffic: %v", err)
+		t.Fatalf("QueryClientTrafficAll: %v", err)
 	}
 	if len(rows) != 0 {
 		t.Errorf("want 0 rows, got %d", len(rows))
@@ -424,9 +424,9 @@ func TestPruneBefore_AcrossAllThreeTables(t *testing.T) {
 		t.Errorf("traffic_metrics post-prune: want 1 row at cutoff, got %+v", trafRows)
 	}
 
-	clientRows, err := d.QueryClientTraffic(ctx, from, to)
+	clientRows, err := d.QueryClientTrafficAll(ctx, from, to)
 	if err != nil {
-		t.Fatalf("QueryClientTraffic post-prune: %v", err)
+		t.Fatalf("QueryClientTrafficAll post-prune: %v", err)
 	}
 	if len(clientRows) != 1 || !clientRows[0].TS.Equal(cutoff) {
 		t.Errorf("client_traffic post-prune: want 1 row at cutoff, got %+v", clientRows)
@@ -597,8 +597,8 @@ func TestOperationsAfterClose(t *testing.T) {
 	if _, err := d.QueryTrafficMetrics(ctx, t0, t0); err == nil {
 		t.Errorf("QueryTrafficMetrics on closed db: want error, got nil")
 	}
-	if _, err := d.QueryClientTraffic(ctx, t0, t0); err == nil {
-		t.Errorf("QueryClientTraffic on closed db: want error, got nil")
+	if _, err := d.QueryClientTrafficAll(ctx, t0, t0); err == nil {
+		t.Errorf("QueryClientTrafficAll on closed db: want error, got nil")
 	}
 	if _, err := d.PruneBefore(ctx, t0); err == nil {
 		t.Errorf("PruneBefore on closed db: want error, got nil")
@@ -631,4 +631,95 @@ func TestClose_Idempotent(t *testing.T) {
 		}
 	}()
 	_ = d.Close()
+}
+
+// TestQueryClientTraffic_ByKey pins the per-key range-scan contract for
+// the per-peer chart endpoint: given a (publicKey, from, to), return only
+// that peer's rows inside the inclusive window, ordered ASC by ts, with
+// every column round-tripped intact. The all-keys path is covered by
+// TestInsertClientTraffic_BatchRoundTrip — this test is exclusively about
+// the public_key filter (no peer-B bleed), the window narrowing, and the
+// unknown-key (empty, no error) branch.
+func TestQueryClientTraffic_ByKey(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	// Two peers, three samples each at t0, t0+1m, t0+2m. Distinct rx/tx
+	// values per row so a mis-scan (e.g. swapped columns) would be caught
+	// by the round-trip check below, not just the row count.
+	seed := []ClientTraffic{
+		{TS: t0, PublicKey: "peer-A", Name: "alice", Address: "10.0.0.2/32", RxBytesCum: 100, TxBytesCum: 200},
+		{TS: t0.Add(time.Minute), PublicKey: "peer-A", Name: "alice", Address: "10.0.0.2/32", RxBytesCum: 110, TxBytesCum: 210},
+		{TS: t0.Add(2 * time.Minute), PublicKey: "peer-A", Name: "alice", Address: "10.0.0.2/32", RxBytesCum: 120, TxBytesCum: 220},
+		{TS: t0, PublicKey: "peer-B", Name: "bob", Address: "10.0.0.3/32", RxBytesCum: 900, TxBytesCum: 800},
+		{TS: t0.Add(time.Minute), PublicKey: "peer-B", Name: "bob", Address: "10.0.0.3/32", RxBytesCum: 910, TxBytesCum: 810},
+		{TS: t0.Add(2 * time.Minute), PublicKey: "peer-B", Name: "bob", Address: "10.0.0.3/32", RxBytesCum: 920, TxBytesCum: 820},
+	}
+	if err := d.InsertClientTraffic(ctx, seed); err != nil {
+		t.Fatalf("InsertClientTraffic: %v", err)
+	}
+
+	// Wide window: all three peer-A rows, none of peer-B's.
+	wideFrom := t0.Add(-time.Second)
+	wideTo := t0.Add(2*time.Minute + time.Second)
+	got, err := d.QueryClientTraffic(ctx, "peer-A", wideFrom, wideTo)
+	if err != nil {
+		t.Fatalf("QueryClientTraffic(peer-A, wide): %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("wide window: want 3 rows for peer-A, got %d", len(got))
+	}
+	for i, row := range got {
+		if row.PublicKey != "peer-A" {
+			t.Errorf("row %d PublicKey: want %q, got %q", i, "peer-A", row.PublicKey)
+		}
+	}
+	// Strictly-ascending ts (also catches an accidental DESC re-introduction).
+	for i := 1; i < len(got); i++ {
+		if !got[i-1].TS.Before(got[i].TS) {
+			t.Errorf("rows not strictly ASC: got[%d].TS=%v, got[%d].TS=%v", i-1, got[i-1].TS, i, got[i].TS)
+		}
+	}
+	// Round-trip rx/tx on the middle row to confirm scan correctness.
+	if !got[1].TS.Equal(t0.Add(time.Minute)) {
+		t.Errorf("row 1 TS: want %v, got %v", t0.Add(time.Minute), got[1].TS)
+	}
+	if got[1].RxBytesCum != 110 {
+		t.Errorf("row 1 RxBytesCum: want 110, got %d", got[1].RxBytesCum)
+	}
+	if got[1].TxBytesCum != 210 {
+		t.Errorf("row 1 TxBytesCum: want 210, got %d", got[1].TxBytesCum)
+	}
+
+	// Narrow window: only the middle row of peer-A.
+	narrowFrom := t0.Add(30 * time.Second)
+	narrowTo := t0.Add(time.Minute + 30*time.Second)
+	mid, err := d.QueryClientTraffic(ctx, "peer-A", narrowFrom, narrowTo)
+	if err != nil {
+		t.Fatalf("QueryClientTraffic(peer-A, narrow): %v", err)
+	}
+	if len(mid) != 1 {
+		t.Fatalf("narrow window: want 1 row, got %d", len(mid))
+	}
+	if !mid[0].TS.Equal(t0.Add(time.Minute)) {
+		t.Errorf("narrow TS: want %v, got %v", t0.Add(time.Minute), mid[0].TS)
+	}
+	if mid[0].PublicKey != "peer-A" {
+		t.Errorf("narrow PublicKey: want %q, got %q", "peer-A", mid[0].PublicKey)
+	}
+	if mid[0].RxBytesCum != 110 {
+		t.Errorf("narrow RxBytesCum: want 110, got %d", mid[0].RxBytesCum)
+	}
+	if mid[0].TxBytesCum != 210 {
+		t.Errorf("narrow TxBytesCum: want 210, got %d", mid[0].TxBytesCum)
+	}
+
+	// Unknown key: empty slice, no error.
+	none, err := d.QueryClientTraffic(ctx, "peer-C", wideFrom, wideTo)
+	if err != nil {
+		t.Fatalf("QueryClientTraffic(peer-C): unexpected error: %v", err)
+	}
+	if len(none) != 0 {
+		t.Errorf("unknown key: want 0 rows, got %d", len(none))
+	}
 }
