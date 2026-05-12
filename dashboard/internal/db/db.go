@@ -56,9 +56,15 @@ const driverName = "sqlite"
 //     counters.
 //   - client_traffic has a composite PK (ts, public_key) because every
 //     poll snapshot writes one row per peer. The auxiliary index on ts
-//     accelerates the common range scan QueryClientTraffic does (BETWEEN
-//     ? AND ? ORDER BY ts) — without it SQLite would scan the whole
-//     composite-PK b-tree to find a time slice.
+//     accelerates the common range scan QueryClientTraffic (per-key,
+//     hit on every chart refresh) and QueryClientTrafficAll (all-keys,
+//     used by retention sweeps) issue — both narrow ts via BETWEEN
+//     before ORDER BY ts. Without the index SQLite would scan the
+//     whole composite-PK b-tree to find a time slice. A
+//     (public_key, ts) covering index would let the per-key variant
+//     skip the public_key filter pass entirely, but the current shape
+//     hasn't shown up as a hot spot — defer until profile evidence
+//     justifies the extra write cost.
 //   - handshake_events records a row per detected WireGuard handshake
 //     transition (poller-driven; see Slice 10). Composite PK (ts,
 //     public_key) lets two peers handshake in the same second without
@@ -343,14 +349,66 @@ func (d *DB) QueryTrafficMetrics(ctx context.Context, from, to time.Time) ([]Tra
 	return out, nil
 }
 
-// QueryClientTraffic returns client_traffic rows with ts in [from, to]
-// inclusive, ordered ASC by ts. Multiple rows share the same ts (one per
-// peer in a snapshot); secondary ordering is unspecified — callers that
-// care should sort by PublicKey themselves.
-func (d *DB) QueryClientTraffic(ctx context.Context, from, to time.Time) ([]ClientTraffic, error) {
+// QueryClientTrafficAll returns client_traffic rows with ts in [from, to]
+// inclusive across every peer, ordered ASC by ts. Multiple rows share the
+// same ts (one per peer in a snapshot); secondary ordering is unspecified
+// — callers that care should sort by PublicKey themselves.
+//
+// This is the all-keys variant used by the retention sweep tests and
+// future cross-peer aggregations. For single-peer chart queries hit on
+// every dashboard refresh, prefer QueryClientTraffic — it pushes the
+// public_key filter into SQLite instead of materialising every peer's
+// rows just to discard most of them.
+func (d *DB) QueryClientTrafficAll(ctx context.Context, from, to time.Time) ([]ClientTraffic, error) {
 	const q = `SELECT ts, public_key, name, address, rx_bytes_cum, tx_bytes_cum FROM client_traffic WHERE ts BETWEEN ? AND ? ORDER BY ts ASC`
 
 	rows, err := d.sql.QueryContext(ctx, q, from.Unix(), to.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("query client_traffic: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ClientTraffic
+	for rows.Next() {
+		var (
+			ts         int64
+			publicKey  string
+			name       string
+			address    string
+			rxBytesCum int64
+			txBytesCum int64
+		)
+		if err := rows.Scan(&ts, &publicKey, &name, &address, &rxBytesCum, &txBytesCum); err != nil {
+			return nil, fmt.Errorf("scan client_traffic: %w", err)
+		}
+		out = append(out, ClientTraffic{
+			TS:         time.Unix(ts, 0).UTC(),
+			PublicKey:  publicKey,
+			Name:       name,
+			Address:    address,
+			RxBytesCum: rxBytesCum,
+			TxBytesCum: txBytesCum,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate client_traffic: %w", err)
+	}
+	return out, nil
+}
+
+// QueryClientTraffic returns client_traffic rows for a single peer with
+// ts in [from, to] inclusive, ordered ASC by ts. This is the per-key
+// range scan the per-client chart endpoint hits on every refresh.
+//
+// The query relies on idx_client_traffic_ts to narrow the ts range
+// first, then filters on public_key. A dedicated (public_key, ts)
+// covering index could skip the post-filter step entirely, but adding
+// one is an optimisation question with write-amplification trade-offs
+// — leave until profile evidence justifies it.
+func (d *DB) QueryClientTraffic(ctx context.Context, publicKey string, from, to time.Time) ([]ClientTraffic, error) {
+	const q = `SELECT ts, public_key, name, address, rx_bytes_cum, tx_bytes_cum FROM client_traffic WHERE public_key = ? AND ts BETWEEN ? AND ? ORDER BY ts ASC`
+
+	rows, err := d.sql.QueryContext(ctx, q, publicKey, from.Unix(), to.Unix())
 	if err != nil {
 		return nil, fmt.Errorf("query client_traffic: %w", err)
 	}

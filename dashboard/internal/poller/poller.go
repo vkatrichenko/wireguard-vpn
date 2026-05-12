@@ -57,12 +57,17 @@ import (
 //   - DefaultRetentionEvery: prune sweeps every hour. Cheaper than per-
 //     tick pruning; 1h drift on the retention edge is invisible to the
 //     24h chart window.
-//   - DefaultRetention: 25h. The chart shows 24h; the extra hour gives
-//     the leftmost edge a non-zero anchor and absorbs clock skew.
+//   - DefaultRetention: 8d 1h. Spec 003 added a 1h / 6h / 24h / 7d range
+//     selector; the widest option is 7 days, so retention is 7d of chart
+//     window + 1h slack to give the leftmost edge a non-zero anchor and
+//     absorb clock skew. Expected on-disk DB size at 2 peers / 30s cadence
+//     ≈ 17 MB (system_metrics + traffic_metrics + client_traffic × peers
+//     + indexes). Worst-case at 20 peers ≈ 170 MB — still well within
+//     operational budget. See spec 003 §2.7 for the sizing math.
 const (
 	DefaultSampleEvery    = 30 * time.Second
 	DefaultRetentionEvery = 1 * time.Hour
-	DefaultRetention      = 25 * time.Hour
+	DefaultRetention      = 8*24*time.Hour + time.Hour
 )
 
 // Poller is the long-running background sampler. Construct with New for
@@ -76,7 +81,7 @@ type Poller struct {
 
 	SampleEvery    time.Duration // default DefaultSampleEvery
 	RetentionEvery time.Duration // default DefaultRetentionEvery
-	Retention      time.Duration // default DefaultRetention (>24h to give the chart's 24h window a buffer)
+	Retention      time.Duration // default DefaultRetention (~8d to back the 7d chart range)
 
 	Now func() time.Time // default time.Now — injectable for tests
 

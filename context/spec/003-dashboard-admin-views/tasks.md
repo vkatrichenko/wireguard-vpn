@@ -34,7 +34,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 - [x] Add `web/static/theme.js` — on load: read `localStorage.theme`, fall back to `prefers-color-scheme`; set `<html data-theme="…">` accordingly. On toggle-button click: flip the attribute and persist. Expose `window.__themeChanged` event for charts.js to listen to. **[Agent: go-fullstack]**
 - [x] Update `web/templates/dashboard.html` — add a toggle button in the header (`<button id="theme-toggle" aria-label="Toggle dark mode">`), include `theme.js` with `defer` before `charts.js`. **[Agent: go-fullstack]**
 - [x] Update `web/static/charts.js` — read color tokens via `getComputedStyle(document.documentElement)` at chart-init time; listen for `__themeChanged` and call each chart's `update()` after patching colors. Recreate only as a fallback if `update()` can't take a color. **[Agent: go-fullstack]**
-- [ ] Verify locally: toggle in light viewport, refresh — stays dark. Charts gridlines + series colors visibly change. Hard-reload with `prefers-color-scheme: dark` (devtools emulation) and no localStorage entry — starts dark. **[Agent: go-fullstack]**
+- [x] Verify locally: toggle in light viewport, refresh — stays dark. Charts gridlines + series colors visibly change. Hard-reload with `prefers-color-scheme: dark` (devtools emulation) and no localStorage entry — starts dark. **[Agent: go-fullstack]**
 
 ---
 
@@ -42,9 +42,9 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** No visible UI change. Dashboard now retains ~8 days of samples; a per-public-key query method exists for Slice 5 to consume. Existing 24h charts continue to render exactly as before.
 
-- [ ] In `internal/db/db.go`, add `QueryClientTraffic(ctx, publicKey, from, to)` returning `[]ClientTraffic` for a single key. Reuse the existing `idx_client_traffic_ts` index path. **[Agent: go-fullstack]**
-- [ ] Add a unit test in `internal/db/db_test.go` — seed two peers' rows, assert the new helper returns only the requested key's rows in `[from, to]` and in ts-ascending order. **[Agent: go-fullstack]**
-- [ ] In `internal/poller/poller.go`, change `DefaultRetention = 25 * time.Hour` to `DefaultRetention = 8*24*time.Hour + time.Hour`. Update the surrounding comment block to record the rationale (7-day chart window + 1 h slack, expected DB ≈ 17 MB at 2 peers / 30 s cadence). **[Agent: go-fullstack]**
+- [x] In `internal/db/db.go`, add `QueryClientTraffic(ctx, publicKey, from, to)` returning `[]ClientTraffic` for a single key. Reuse the existing `idx_client_traffic_ts` index path. **[Agent: go-fullstack]** _(existing all-keys variant renamed to `QueryClientTrafficAll`; per-key takes the bare name)_
+- [x] Add a unit test in `internal/db/db_test.go` — seed two peers' rows, assert the new helper returns only the requested key's rows in `[from, to]` and in ts-ascending order. **[Agent: go-fullstack]**
+- [x] In `internal/poller/poller.go`, change `DefaultRetention = 25 * time.Hour` to `DefaultRetention = 8*24*time.Hour + time.Hour`. Update the surrounding comment block to record the rationale (7-day chart window + 1 h slack, expected DB ≈ 17 MB at 2 peers / 30 s cadence). **[Agent: go-fullstack]**
 - [ ] Verify locally: run `make test` — existing prune sweep test continues to pass (cutoff arithmetic is parameterised in tests, not hard-coded to 25 h). Run `make run` with a seeded DB containing rows older than 25 h but younger than 8 d — they survive the first prune. **[Agent: go-fullstack]**
 
 ---
