@@ -22,7 +22,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 - [x] In `internal/server/`, add `handlers_partial_tabs.go` registering `GET /partial/overview`, `/partial/clients`, `/partial/system`, `/partial/network`, `/partial/events`, `/partial/about`. Each returns its tab body fragment. Keep `/partial/dashboard` as a thin alias of `/partial/overview` for one release. **[Agent: go-fullstack]** _(alias implemented by routing both `/partial/dashboard` and `/partial/overview` to `handleGetPartialOverview`; old `handlers_partial.go` deleted since the only handler moved)_
 - [x] Extend `web/static/app.css` — tab pill bar styles, active-pill state, horizontal scroll on viewports <600 px, 44 px touch targets. **[Agent: go-fullstack]**
 - [x] Add `internal/server/server_test.go` cases: `GET /partial/<each-tab>` returns 200, body contains the expected sentinel string (`"Coming soon"` for placeholders, the existing v3 card markers for overview). **[Agent: go-fullstack]**
-- [ ] Verify locally: `make run`, browse to `http://127.0.0.1:8080`, click each tab — body swaps, URL hash updates. Refresh on `#system` lands on System. **[Agent: go-fullstack]**
+- [x] Verify locally: `make run`, browse to `http://127.0.0.1:8080`, click each tab — body swaps, URL hash updates. Refresh on `#system` lands on System. **[Agent: go-fullstack]**
 
 ---
 
@@ -30,10 +30,10 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** Toggle button in the header flips light ↔ dark. First load matches `prefers-color-scheme`. Choice persists in `localStorage`. All four existing 24h charts honor the active theme.
 
-- [ ] Refactor `web/static/app.css` to define color tokens on `:root` (background, surface, text, muted, accent, danger, success, gridline) and override them under `:root[data-theme="dark"]`. Every existing rule that hard-codes a color migrates to a `var(--token)` reference. **[Agent: go-fullstack]**
-- [ ] Add `web/static/theme.js` — on load: read `localStorage.theme`, fall back to `prefers-color-scheme`; set `<html data-theme="…">` accordingly. On toggle-button click: flip the attribute and persist. Expose `window.__themeChanged` event for charts.js to listen to. **[Agent: go-fullstack]**
-- [ ] Update `web/templates/dashboard.html` — add a toggle button in the header (`<button id="theme-toggle" aria-label="Toggle dark mode">`), include `theme.js` with `defer` before `charts.js`. **[Agent: go-fullstack]**
-- [ ] Update `web/static/charts.js` — read color tokens via `getComputedStyle(document.documentElement)` at chart-init time; listen for `__themeChanged` and call each chart's `update()` after patching colors. Recreate only as a fallback if `update()` can't take a color. **[Agent: go-fullstack]**
+- [x] Refactor `web/static/app.css` to define color tokens on `:root` (background, surface, text, muted, accent, danger, success, gridline) and override them under `:root[data-theme="dark"]`. Every existing rule that hard-codes a color migrates to a `var(--token)` reference. **[Agent: go-fullstack]**
+- [x] Add `web/static/theme.js` — on load: read `localStorage.theme`, fall back to `prefers-color-scheme`; set `<html data-theme="…">` accordingly. On toggle-button click: flip the attribute and persist. Expose `window.__themeChanged` event for charts.js to listen to. **[Agent: go-fullstack]**
+- [x] Update `web/templates/dashboard.html` — add a toggle button in the header (`<button id="theme-toggle" aria-label="Toggle dark mode">`), include `theme.js` with `defer` before `charts.js`. **[Agent: go-fullstack]**
+- [x] Update `web/static/charts.js` — read color tokens via `getComputedStyle(document.documentElement)` at chart-init time; listen for `__themeChanged` and call each chart's `update()` after patching colors. Recreate only as a fallback if `update()` can't take a color. **[Agent: go-fullstack]**
 - [ ] Verify locally: toggle in light viewport, refresh — stays dark. Charts gridlines + series colors visibly change. Hard-reload with `prefers-color-scheme: dark` (devtools emulation) and no localStorage entry — starts dark. **[Agent: go-fullstack]**
 
 ---

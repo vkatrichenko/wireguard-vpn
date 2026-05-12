@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>WireGuard Dashboard</title>
     <link rel="stylesheet" href="/static/app.css" />
+    <script src="/static/theme.js" defer></script>
     <script src="/static/htmx.min.js" defer></script>
     <script src="/static/htmx-stale.js" defer></script>
     <script src="/static/tabs.js" defer></script>
@@ -16,6 +17,7 @@
     <header class="dashboard-header">
       <h1>WireGuard Dashboard</h1>
       <span id="stale-pill" class="stale-pill" hidden>Stale data</span>
+      <button id="theme-toggle" class="theme-toggle" aria-label="Toggle dark mode" type="button">Theme</button>
     </header>
 
     <nav class="tab-bar" aria-label="Dashboard sections">
