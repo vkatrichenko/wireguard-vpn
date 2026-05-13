@@ -476,7 +476,21 @@ body {
   display: block;
 }
 
-/* 14. Client-detail expand ------------------------------------------------ */
+/* 14. System-tab layout -------------------------------------------------- */
+
+#tab-body .system-charts {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
+}
+
+#tab-body > #disk,
+#tab-body > #processes {
+  grid-column: 1 / -1;
+}
+
+/* 15. Client-detail expand ------------------------------------------------ */
 
 .client-row {
   cursor: pointer;
@@ -517,7 +531,7 @@ body {
   display: block;
 }
 
-/* 15. Disk progress bar -------------------------------------------------- */
+/* 16. Disk progress bar -------------------------------------------------- */
 
 #disk {
   max-height: 360px;
@@ -592,7 +606,7 @@ body {
   pointer-events: none;
 }
 
-/* 16. Responsive ----------------------------------------------------------- */
+/* 17. Responsive ----------------------------------------------------------- */
 
 @media (max-width: 600px) {
   body {
@@ -606,6 +620,10 @@ body {
 
   #tab-body,
   .charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #tab-body .system-charts {
     grid-template-columns: 1fr;
   }
 
@@ -632,7 +650,7 @@ body {
   }
 }
 
-/* 17. Reduced motion ------------------------------------------------------- */
+/* 18. Reduced motion ------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
   *,
