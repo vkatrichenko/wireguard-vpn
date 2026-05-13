@@ -152,12 +152,14 @@ func New(
 	mux.HandleFunc("GET /api/clients", s.handleGetClients)
 	mux.HandleFunc("GET /api/snapshot", s.handleGetSnapshot)
 	mux.HandleFunc("GET /api/metrics", s.handleGetMetrics)
+	mux.HandleFunc("GET /api/metrics/client/{pubkey}", s.handleGetMetricsClient)
 	// /partial/dashboard is a thin alias of /partial/overview for one release
 	// — Slice 14 retires it. Both routes resolve to the same handler so the
 	// on-the-wire response stays identical for existing htmx clients.
 	mux.HandleFunc("GET /partial/dashboard", s.handleGetPartialOverview)
 	mux.HandleFunc("GET /partial/overview", s.handleGetPartialOverview)
 	mux.HandleFunc("GET /partial/clients", s.handleGetPartialClients)
+	mux.HandleFunc("GET /partial/clients/{pubkey}/detail", s.handleGetPartialClientDetail)
 	mux.HandleFunc("GET /partial/system", s.handleGetPartialSystem)
 	mux.HandleFunc("GET /partial/network", s.handleGetPartialNetwork)
 	mux.HandleFunc("GET /partial/events", s.handleGetPartialEvents)

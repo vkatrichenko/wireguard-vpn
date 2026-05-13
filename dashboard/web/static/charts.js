@@ -34,6 +34,9 @@
   // charts holds the Chart instances built by renderCharts so the
   // __themeChanged handler can iterate and patch colors in place.
   const charts = [];
+  // clientCharts holds per-row expand charts keyed by pubkey so reopening
+  // the same row tears down the prior instance cleanly.
+  const clientCharts = new Map();
   let lastPayload = null;
 
   // themeColors reads the active theme tokens from :root. Fallbacks match
@@ -154,10 +157,11 @@
   // chart's axis colors in place. Chart.js v4 update('none') skips the
   // animation pass, which is what we want for a color swap.
   function applyThemeToCharts() {
-    if (charts.length === 0) return;
+    if (charts.length === 0 && clientCharts.size === 0) return;
     const colors = themeColors();
+    const all = [...charts, ...clientCharts.values()];
     try {
-      charts.forEach((chart) => {
+      all.forEach((chart) => {
         const sx = chart.options.scales.x;
         const sy = chart.options.scales.y;
         sx.grid.color = colors.grid;
@@ -187,6 +191,93 @@
       }
     }
   }
+
+  // initClientChart fetches per-client rx/tx rate series and renders a
+  // two-dataset line chart into the canvas embedded in the expanded
+  // detail row. Re-entrant: a prior instance for the same pubkey is
+  // destroyed first so reopening the row doesn't leak Chart.js state.
+  function initClientChart(pubkey, range) {
+    const canvas = document.getElementById("client-chart-" + pubkey);
+    if (!canvas) return;
+    const prior = clientCharts.get(pubkey);
+    if (prior) {
+      try { prior.destroy(); } catch (e) { /* already destroyed */ }
+      clientCharts.delete(pubkey);
+    }
+    fetch("/api/metrics/client/" + encodeURIComponent(pubkey) + "?range=" + encodeURIComponent(range))
+      .then((resp) => {
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        return resp.json();
+      })
+      .then((payload) => {
+        if (!payload.ts || payload.ts.length === 0) {
+          insertNotice(canvas, "empty", "No data yet — collecting…");
+          return;
+        }
+        const colors = themeColors();
+        const rxData = payload.ts.map((t, i) => ({ x: t, y: payload.rx_rate_bps[i] }));
+        const txData = payload.ts.map((t, i) => ({ x: t, y: payload.tx_rate_bps[i] }));
+        const chart = new Chart(canvas, {
+          type: "line",
+          data: {
+            datasets: [
+              {
+                label: "Rx B/s",
+                data: rxData,
+                borderColor: PALETTE.rx,
+                tension: 0.2,
+                pointRadius: 0,
+              },
+              {
+                label: "Tx B/s",
+                data: txData,
+                borderColor: PALETTE.tx,
+                tension: 0.2,
+                pointRadius: 0,
+              },
+            ],
+          },
+          options: {
+            scales: {
+              x: {
+                type: "time",
+                time: { unit: "hour" },
+                grid: { color: colors.grid },
+                ticks: { color: colors.text },
+                border: { color: colors.grid },
+              },
+              y: {
+                beginAtZero: true,
+                grid: { color: colors.grid },
+                ticks: { color: colors.text },
+                border: { color: colors.grid },
+              },
+            },
+            plugins: { legend: { display: true } },
+            animation: false,
+          },
+        });
+        clientCharts.set(pubkey, chart);
+      })
+      .catch((err) => {
+        console.error("charts.js: failed to load per-client metrics", err);
+        insertNotice(canvas, "error", "Failed to load chart data");
+      });
+  }
+
+  // The detail fragment is htmx-swapped into the placeholder row when a
+  // client row is clicked. Match on requestConfig.path so we don't react
+  // to unrelated htmx swaps (e.g. tab partials, the 10s metrics refresh).
+  document.body.addEventListener("htmx:afterSwap", function (event) {
+    const path = (event.detail && event.detail.requestConfig && event.detail.requestConfig.path) || "";
+    const m = path.match(/^\/partial\/clients\/([^/]+)\/detail$/);
+    if (!m) return;
+    const pubkey = decodeURIComponent(m[1]);
+    const canvas = document.getElementById("client-chart-" + pubkey);
+    if (!canvas) return;
+    const range = canvas.dataset.range || "24h";
+    initClientChart(pubkey, range);
+  });
 
   window.addEventListener("__themeChanged", applyThemeToCharts);
 

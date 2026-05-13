@@ -1,0 +1,9 @@
+{{ define "client-detail" }}
+<td colspan="8">
+  <div class="client-detail">
+    <canvas id="client-chart-{{ .PublicKey }}" data-pubkey="{{ .PublicKey }}" data-range="{{ .Range }}"></canvas>
+    <p class="client-p95">p95 over {{ .Range }}: {{ humanBytesPerSec .P95Bps }}</p>
+    <small class="range-hint">Throughput over the last {{ .Range }}. Click the row again to collapse.</small>
+  </div>
+</td>
+{{ end }}

@@ -203,3 +203,138 @@ func (s *server) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(body)
 }
+
+// clientMetricsResponse is the payload of GET /api/metrics/client/{pubkey}.
+// Like metricsResponse it is column-oriented (parallel TS/value arrays) so
+// Chart.js can pass the arrays straight into a time-scale dataset without
+// reshaping in the browser. From/To echo the resolved window — Range echoes
+// the validated string ("1h"/"6h"/"24h"/"7d") so the front-end can label the
+// chart without re-parsing the duration.
+//
+// One sample per consecutive (i-1, i) pair of client_traffic rows, so the
+// arrays are always one element shorter than the underlying row count.
+type clientMetricsResponse struct {
+	PublicKey string      `json:"public_key"`
+	Range     string      `json:"range"`
+	From      time.Time   `json:"from"`
+	To        time.Time   `json:"to"`
+	TS        []time.Time `json:"ts"`
+	RxRateBps []int64     `json:"rx_rate_bps"`
+	TxRateBps []int64     `json:"tx_rate_bps"`
+}
+
+// clientRangeMap pins the four allowed `?range=` values for the per-client
+// chart endpoint to their Duration equivalents. Unlike /api/metrics (which
+// accepts arbitrary time.ParseDuration input), the per-client chart is
+// driven by a fixed range-picker in the UI — any input outside the enum is
+// a 400 per the spec.
+var clientRangeMap = map[string]time.Duration{
+	"1h":  1 * time.Hour,
+	"6h":  6 * time.Hour,
+	"24h": 24 * time.Hour,
+	"7d":  7 * 24 * time.Hour,
+}
+
+// handleGetMetricsClient serves the per-client rx/tx rate time-series for
+// the inline detail chart. Range is validated against the four-value enum
+// (1h/6h/24h/7d) — any other input is a 400. The pubkey path-param is
+// validated against the clientsfile manifest so a stale link doesn't get
+// a chart of an unknown peer.
+//
+// Rates are derived from consecutive QueryClientTraffic rows: for each pair
+// (rows[i-1], rows[i]) the output emits one sample at rows[i].TS with rates
+// computed as Δbytes / Δseconds. Negative byte deltas (counter resets after
+// a service restart) clamp to 0; non-positive Δt skips the pair.
+func (s *server) handleGetMetricsClient(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	pubkey := r.PathValue("pubkey")
+	if pubkey == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	rangeStr := r.URL.Query().Get("range")
+	if rangeStr == "" {
+		rangeStr = "24h"
+	}
+	duration, ok := clientRangeMap[rangeStr]
+	if !ok {
+		http.Error(w, fmt.Sprintf("invalid range %q: must be 1h, 6h, 24h, or 7d", rangeStr), http.StatusBadRequest)
+		return
+	}
+
+	clients, err := s.clientsfileSvc.Load(ctx)
+	if err != nil {
+		slog.Error("GET /api/metrics/client: clientsfile load failed", "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	found := false
+	for _, c := range clients {
+		if c.PublicKey == pubkey {
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+
+	now := time.Now().UTC()
+	from := now.Add(-duration)
+	to := now
+
+	rows, err := s.metricsDB.QueryClientTraffic(ctx, pubkey, from, to)
+	if err != nil {
+		slog.Error("GET /api/metrics/client: query client_traffic failed", "err", err, "pubkey", pubkey)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Pre-allocate non-nil empty slices so the encoder emits "[]" not "null"
+	// when there are <2 rows (or every pair gets skipped) — matches the
+	// /api/metrics response contract.
+	n := 0
+	if len(rows) > 1 {
+		n = len(rows) - 1
+	}
+	resp := clientMetricsResponse{
+		PublicKey: pubkey,
+		Range:     rangeStr,
+		From:      from,
+		To:        to,
+		TS:        make([]time.Time, 0, n),
+		RxRateBps: make([]int64, 0, n),
+		TxRateBps: make([]int64, 0, n),
+	}
+
+	for i := 1; i < len(rows); i++ {
+		dt := rows[i].TS.Sub(rows[i-1].TS).Seconds()
+		if dt <= 0 {
+			continue
+		}
+		dRx := rows[i].RxBytesCum - rows[i-1].RxBytesCum
+		dTx := rows[i].TxBytesCum - rows[i-1].TxBytesCum
+		if dRx < 0 {
+			dRx = 0
+		}
+		if dTx < 0 {
+			dTx = 0
+		}
+		resp.TS = append(resp.TS, rows[i].TS)
+		resp.RxRateBps = append(resp.RxRateBps, int64(float64(dRx)/dt))
+		resp.TxRateBps = append(resp.TxRateBps, int64(float64(dTx)/dt))
+	}
+
+	body, err := json.Marshal(resp)
+	if err != nil {
+		slog.Error("GET /api/metrics/client: json marshal failed", "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
+}
