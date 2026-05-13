@@ -147,8 +147,11 @@ func TestSample_ComputesUsedTotalPctFull(t *testing.T) {
 		}
 	})
 
-	t.Run("zero total avoids divide-by-zero", func(t *testing.T) {
+	t.Run("zero total mount is skipped", func(t *testing.T) {
 		t.Parallel()
+		// Pseudo filesystems that slip past isPseudo (or any future
+		// kernel-internal fs we haven't seen) always report total==0.
+		// Sample drops the row outright instead of rendering "0 B / 0 B".
 		svc := newTestService(t,
 			staticReader([]byte("/dev/empty /mnt/empty ext4 rw 0 0\n")),
 			fixedStatfs(4096, 0, 0),
@@ -157,16 +160,53 @@ func TestSample_ComputesUsedTotalPctFull(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Sample() returned unexpected error: %v", err)
 		}
-		if len(got) != 1 {
-			t.Fatalf("len(got) = %d, want 1", len(got))
-		}
-		if got[0].Total != 0 {
-			t.Errorf("Total = %d, want 0", got[0].Total)
-		}
-		if got[0].PctFull != 0.0 {
-			t.Errorf("PctFull = %v, want 0.0", got[0].PctFull)
+		if len(got) != 0 {
+			t.Fatalf("len(got) = %d, want 0; got = %#v", len(got), got)
 		}
 	})
+}
+
+func TestSample_SkipsExpandedPseudoFilesystems(t *testing.T) {
+	t.Parallel()
+
+	// The fstype-level denylist should drop these BEFORE Statfs is called,
+	// matching the screenshot from the production EC2 box where these mounts
+	// were leaking through the disk card.
+	fixture := "" +
+		"/dev/sda1 / ext4 rw 0 0\n" +
+		"securityfs /sys/kernel/security securityfs rw 0 0\n" +
+		"devpts /dev/pts devpts rw 0 0\n" +
+		"pstore /sys/fs/pstore pstore rw 0 0\n" +
+		"efivarfs /sys/firmware/efi/efivars efivarfs rw 0 0\n" +
+		"bpf /sys/fs/bpf bpf rw 0 0\n" +
+		"systemd-1 /proc/sys/fs/binfmt_misc autofs rw 0 0\n" +
+		"hugetlbfs /dev/hugepages hugetlbfs rw 0 0\n" +
+		"mqueue /dev/mqueue mqueue rw 0 0\n" +
+		"configfs /sys/kernel/config configfs rw 0 0\n"
+
+	statfs := func(path string, stat *unix.Statfs_t) error {
+		if path != "/" {
+			t.Errorf("Statfs called for pseudo-fs path %q; isPseudo should have filtered it", path)
+			return nil
+		}
+		stat.Bsize = bsizeField(4096)
+		stat.Blocks = 250_000
+		stat.Bavail = 100_000
+		return nil
+	}
+
+	svc := newTestService(t, staticReader([]byte(fixture)), statfs)
+
+	got, err := svc.Sample(context.Background())
+	if err != nil {
+		t.Fatalf("Sample() returned unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1; got = %#v", len(got), got)
+	}
+	if got[0].Path != "/" || got[0].FsType != "ext4" {
+		t.Errorf("got[0] = %+v, want Path=/, FsType=ext4", got[0])
+	}
 }
 
 func TestSample_StatfsErrorSkipsRow(t *testing.T) {

@@ -149,11 +149,17 @@ func (s *Service) Sample(ctx context.Context) ([]Mount, error) {
 		avail := int64(st.Bavail) * bsize
 		used := total - avail
 
-		var pct float64
-		if total > 0 {
-			pct = float64(used) / float64(total) * 100
-			pct = math.Round(pct*10) / 10
+		// Defense in depth: any pseudo fs that slipped past isPseudo (future
+		// kernel-internal fs we haven't seen yet) always reports total==0.
+		// Drop the row rather than rendering a "0 B / 0 B" line in the UI.
+		// The previous divide-by-zero guard below is now unreachable.
+		if total == 0 {
+			slog.Debug("disk: skipping zero-total mount", "path", mountpoint, "fstype", fstype)
+			continue
 		}
+
+		pct := float64(used) / float64(total) * 100
+		pct = math.Round(pct*10) / 10
 
 		mounts = append(mounts, Mount{
 			Path:    mountpoint,
@@ -192,7 +198,10 @@ func Threshold(pct float64) string {
 // disk" property.
 func isPseudo(fstype string) bool {
 	switch fstype {
-	case "tmpfs", "devtmpfs", "overlay", "squashfs", "proc", "sysfs", "debugfs", "tracefs":
+	case "tmpfs", "devtmpfs", "overlay", "squashfs", "proc", "sysfs", "debugfs", "tracefs",
+		"securityfs", "devpts", "pstore", "efivarfs", "bpf", "autofs", "hugetlbfs",
+		"mqueue", "configfs", "binfmt_misc", "fusectl", "selinuxfs", "nsfs",
+		"rpc_pipefs", "ramfs":
 		return true
 	}
 	return strings.HasPrefix(fstype, "cgroup")
