@@ -19,6 +19,7 @@ import (
 
 	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
+	"wireguard-dashboard/internal/disk"
 	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/serverinfo"
 	"wireguard-dashboard/internal/systemd"
@@ -39,6 +40,7 @@ type server struct {
 	procSvc        *proc.Service
 	metricsDB      *db.DB
 	geoipSvc       GeoResolver
+	diskSvc        *disk.Service
 }
 
 // pageData is the view-model for the dashboard index template. The *Error
@@ -97,6 +99,7 @@ func New(
 	procSvc *proc.Service,
 	metricsDB *db.DB,
 	geoipSvc GeoResolver,
+	diskSvc *disk.Service,
 ) (http.Handler, error) {
 	// Two globs because templates/*.html does not recurse into cards/. The
 	// cards/ directory holds named-template fragments ({{ define "..." }})
@@ -109,6 +112,7 @@ func New(
 			"humanBytesPerSec": humanBytesPerSec,
 			"humanBytesKB":     humanBytesKB,
 			"humanDuration":    humanDuration,
+			"threshold":        disk.Threshold,
 		}).
 		ParseFS(webFS,
 			"templates/*.html",
@@ -129,6 +133,7 @@ func New(
 		procSvc:        procSvc,
 		metricsDB:      metricsDB,
 		geoipSvc:       geoipSvc,
+		diskSvc:        diskSvc,
 	}
 
 	// Static-file route — serves the embedded `web/static/` subtree (Chart.js

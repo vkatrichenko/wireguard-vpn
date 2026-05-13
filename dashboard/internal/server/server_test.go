@@ -15,12 +15,15 @@ import (
 	dashboard "wireguard-dashboard"
 	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
+	"wireguard-dashboard/internal/disk"
 	"wireguard-dashboard/internal/geoip"
 	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/server"
 	"wireguard-dashboard/internal/serverinfo"
 	"wireguard-dashboard/internal/systemd"
 	"wireguard-dashboard/internal/wg"
+
+	"golang.org/x/sys/unix"
 )
 
 // newTestDB returns an in-memory *db.DB scoped to t — opened once, closed
@@ -131,6 +134,31 @@ func fakeProcSvc() *proc.Service {
 	}
 }
 
+// fakeDiskSvc returns a *disk.Service with an in-memory Reader that emits a
+// single-row /proc/mounts payload plus a fake Statfs that reports a 4 GiB ext4
+// volume at 50% full. Numeric values are arbitrary — the existing tests only
+// need Sample() to succeed so server.New() is satisfied and the system-tab
+// fragment renders with non-error branches.
+//
+// Bsize is wrapped through bsizeField to bridge the int64 (Linux) vs uint32
+// (Darwin) field type on unix.Statfs_t — the helper lives in
+// server_bsize_{linux,darwin}_test.go and mirrors the pattern from the disk
+// package's own test helpers.
+func fakeDiskSvc() *disk.Service {
+	return &disk.Service{
+		Reader: func(string) ([]byte, error) {
+			return []byte("/dev/sda1 / ext4 rw 0 0\n"), nil
+		},
+		Statfs: func(_ string, stat *unix.Statfs_t) error {
+			stat.Bsize = bsizeField(4096)
+			stat.Blocks = 1_000_000
+			stat.Bavail = 500_000
+			return nil
+		},
+		MountsPath: "/proc/mounts",
+	}
+}
+
 // systemdRunnerActive returns canned bytes representing a running unit. The
 // `is-active` call returns "active\n"; the `show -p ActiveEnterTimestamp`
 // call returns a fixed timestamp two hours in the past so humanUptime
@@ -208,7 +236,7 @@ func TestHandleIndex_Success(t *testing.T) {
 	systemdSvc := systemdRunnerActive(enteredAt)
 
 	// nil geo resolver is allowed — geo is advisory.
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -253,11 +281,11 @@ func TestHandleIndex_Success(t *testing.T) {
 		// network-rate card — first-sample rates render as "0 B/s".
 		`id="network-rate"`,
 		"0 B/s",
-		// Trend-chart partials — Slice 9 sub-task 5 wires the four
-		// chart cards into the page and references the embedded
-		// Chart.js bundle from /static/.
-		`id="chart-cpu"`,
-		`id="chart-memory"`,
+		// Trend-chart partials — Slice 9 sub-task 5 wires four chart cards
+		// into the page; Slice 6 sub-task 4 moves chart-cpu / chart-memory
+		// into the System tab body, so the index page renders only the
+		// rx/tx charts in the global grid. cpu/memory still render via the
+		// System tab fragment when the operator switches tabs.
 		`id="chart-rx"`,
 		`id="chart-tx"`,
 		`/static/chart.umd.min.js`,
@@ -310,7 +338,7 @@ func TestHandleIndex_BothErrors(t *testing.T) {
 	}
 
 	// nil geo resolver is allowed — geo is advisory.
-	handler, err := server.New(dashboard.WebFS(), infoSvc, systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -364,7 +392,7 @@ func TestHandleGetService_IncludesEvents(t *testing.T) {
 	}
 
 	// nil geo resolver is allowed — geo is advisory.
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -419,7 +447,7 @@ func TestHandleGetPartialDashboard_RendersFragment(t *testing.T) {
 	systemdSvc := systemdRunnerActive(enteredAt)
 
 	// nil geo resolver is allowed — geo is advisory.
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -470,7 +498,7 @@ func TestHandleGetPartialTabs(t *testing.T) {
 	systemdSvc := systemdRunnerActive(enteredAt)
 
 	// nil geo resolver is allowed — geo is advisory.
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -478,17 +506,22 @@ func TestHandleGetPartialTabs(t *testing.T) {
 	tests := []struct {
 		name             string
 		path             string
-		wantBodyContains string
+		wantBodyContains []string
 	}{
-		{"overview", "/partial/overview", `id="server-info"`},
+		{"overview", "/partial/overview", []string{`id="server-info"`}},
 		// sub-task 7 expands this with a seeded-row assertion; for now the
 		// fake clientsfile + fake wg both return empty so the template renders
 		// the empty-state branch.
-		{"clients", "/partial/clients", "No clients configured"},
-		{"system", "/partial/system", "Coming soon"},
-		{"network", "/partial/network", "Coming soon"},
-		{"events", "/partial/events", "Coming soon"},
-		{"about", "/partial/about", "Coming soon"},
+		{"clients", "/partial/clients", []string{"No clients configured"}},
+		// Slice 6 sub-task 4 promotes the System tab from placeholder: the
+		// fragment now embeds both the cards/system.html CPU/mem numerics
+		// card (id="system") and the cards/disk.html mount table
+		// (id="disk"). fakeDiskSvc seeds one /-mounted ext4 row at 50% full,
+		// so the populated table branch renders rather than the empty-state.
+		{"system", "/partial/system", []string{`id="system"`, `id="disk"`}},
+		{"network", "/partial/network", []string{"Coming soon"}},
+		{"events", "/partial/events", []string{"Coming soon"}},
+		{"about", "/partial/about", []string{"Coming soon"}},
 	}
 
 	for _, tc := range tests {
@@ -505,8 +538,10 @@ func TestHandleGetPartialTabs(t *testing.T) {
 			}
 
 			body := rec.Body.String()
-			if !strings.Contains(body, tc.wantBodyContains) {
-				t.Errorf("body missing %q:\n%s", tc.wantBodyContains, body)
+			for _, want := range tc.wantBodyContains {
+				if !strings.Contains(body, want) {
+					t.Errorf("body missing %q:\n%s", want, body)
+				}
 			}
 			// Fragments must not include a full HTML document — htmx
 			// innerHTML swaps would otherwise inject nested <html>/<body>.
@@ -514,6 +549,98 @@ func TestHandleGetPartialTabs(t *testing.T) {
 				t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
 			}
 		})
+	}
+}
+
+// TestHandleGetPartialSystem_RendersDiskCard pins the disk card surface of the
+// System tab fragment: the literal <h2>Disk</h2> heading, the table layout
+// from cards/disk.html (Mount/Filesystem/Used/Full columns), and the
+// progress-bar markup that wraps the per-mount fill div + label. The fake
+// statfs reports Bsize=4096, Blocks=1_000_000, Bavail=150_000 → Total≈4 GB,
+// Avail≈600 MB, Used≈3.4 GB, PctFull = 85.0 — squarely inside the amber band
+// (≥80% and <95%), so `disk.Threshold` returns "amber" and the template
+// emits `class="progress-bar-fill threshold-amber"`. This proves the
+// `threshold` template func wired up in sub-task 4 picks up the disk
+// package's bucket function for an 85%-full mount end-to-end. We assert on
+// the `style="width: 85` prefix because the rendered value is `85.0%` after
+// one-decimal rounding, and a tighter match would break if the rounding ever
+// shifts. The threshold-red branch is exercised in the disk-package unit
+// tests; here amber alone is enough to prove the wiring.
+func TestHandleGetPartialSystem_RendersDiskCard(t *testing.T) {
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	// Per-test disk fake: same canned single-row /proc/mounts as fakeDiskSvc,
+	// but Bavail=150_000 puts the mount at 85.0% full (amber). Kept inline
+	// so the per-test wiring stays one-stop and the global fakeDiskSvc keeps
+	// driving the existing 50%-full / threshold-ok tests unchanged.
+	amberDiskSvc := &disk.Service{
+		Reader: func(string) ([]byte, error) {
+			return []byte("/dev/sda1 / ext4 rw 0 0\n"), nil
+		},
+		Statfs: func(_ string, stat *unix.Statfs_t) error {
+			stat.Bsize = bsizeField(4096)
+			stat.Blocks = 1_000_000
+			stat.Bavail = 150_000
+			return nil
+		},
+		MountsPath: "/proc/mounts",
+	}
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, amberDiskSvc)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial/system", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want %q", got, "text/html; charset=utf-8")
+	}
+
+	body := rec.Body.String()
+	// Fragment invariant — htmx innerHTML swaps would otherwise nest <html>.
+	if strings.Contains(body, "<html") {
+		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
+	}
+
+	for _, want := range []string{
+		// System (large-numerics) card stays — sub-task 4 embeds it alongside
+		// the disk card in the same tab body.
+		`id="system"`,
+		// Chart cards moved into the System tab body in sub-task 4.
+		`id="chart-cpu"`,
+		`id="chart-memory"`,
+		// Literal disk heading from cards/disk.html.
+		`<h2>Disk</h2>`,
+		// Table layout — `<th>Full</th>` proves we're on the populated
+		// branch, not the empty-state <p class="empty">…</p> wrapper.
+		`<th>Full</th>`,
+		// Progress-bar wrapper + amber-threshold fill class + label markup.
+		// The threshold-amber class is the load-bearing assertion — proves
+		// the `threshold` template func wired up in sub-task 4 maps
+		// PctFull=85.0 to "amber" via disk.Threshold.
+		`class="progress-bar"`,
+		`class="progress-bar-fill threshold-amber"`,
+		`class="progress-bar-label"`,
+		// Inline width style — rendered as `style="width: 85.0%"` after
+		// one-decimal rounding. Asserting the prefix keeps the test tolerant
+		// to rounding-format tweaks while still pinning the numeric value.
+		`style="width: 85`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
+		}
 	}
 }
 
@@ -553,7 +680,7 @@ func TestHandleGetPartialClients_SeededRow(t *testing.T) {
 
 	geo := staticGeoResolver{country: "US", city: "San Francisco"}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -651,7 +778,7 @@ func TestHandleGetPartialClients_SeededRow_PubkeyWithSpecialChars(t *testing.T) 
 	clientsSvc := seededClientsfileSvc(peerName, peerAddress, peerPublicKey)
 	wgSvc := seededWgSvc(peerPublicKey, peerEndpoint, peerAddress, 10*time.Second, 1, 2)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -748,7 +875,7 @@ func TestHandleGetPartialClients_RFC1918Endpoint(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = geo.Close() })
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -805,7 +932,7 @@ func TestHandleGetPartialClientDetail_404OnUnknown(t *testing.T) {
 
 	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -847,7 +974,7 @@ func TestHandleGetPartialClientDetail_RendersFragment(t *testing.T) {
 		t.Fatalf("seed client_traffic: %v", err)
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -906,7 +1033,7 @@ func TestHandleGetMetricsClient_404OnUnknownPubkey(t *testing.T) {
 
 	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -937,7 +1064,7 @@ func TestHandleGetMetricsClient_400OnBadRange(t *testing.T) {
 
 	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -986,7 +1113,7 @@ func TestHandleGetMetricsClient_DefaultRange(t *testing.T) {
 
 	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1054,7 +1181,7 @@ func TestHandleGetMetricsClient_ComputesRates(t *testing.T) {
 		t.Fatalf("seed client_traffic: %v", err)
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1132,7 +1259,7 @@ func TestHandleGetMetricsClient_MonotonicTS(t *testing.T) {
 		t.Fatalf("seed client_traffic: %v", err)
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc())
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
