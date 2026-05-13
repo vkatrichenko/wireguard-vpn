@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"wireguard-dashboard/internal/disk"
+	"wireguard-dashboard/internal/processes"
 )
 
 // clientsTabData is the view-model handed to the `clients` template. It pairs
@@ -68,11 +69,13 @@ func (s *server) handleGetPartialClients(w http.ResponseWriter, r *http.Request)
 }
 
 // systemTabData is the view-model for the `system-tab` fragment. Disk backs
-// the disk-usage table; the System tab no longer carries the CPU/memory
-// large-numerics card — that lives exclusively on Overview to avoid the
-// duplicate render the operator flagged after Slice 6.
+// the disk-usage table; Processes backs the top-N CPU consumers card. The
+// System tab no longer carries the CPU/memory large-numerics card — that
+// lives exclusively on Overview to avoid the duplicate render the operator
+// flagged after Slice 6.
 type systemTabData struct {
-	Disk diskCardData
+	Disk      diskCardData
+	Processes processesCardData
 }
 
 // diskCardData mirrors the {Mounts, Error} shape the `disk` template branches
@@ -84,8 +87,20 @@ type diskCardData struct {
 	Error  string
 }
 
+// processesCardData mirrors the {Procs, Error} shape the `processes` template
+// branches on internally. Same rationale as diskCardData — type-checked
+// contract at the template boundary, no global helper.
+type processesCardData struct {
+	Procs []processes.Process
+	Error string
+}
+
 // handleGetPartialSystem renders the System tab body — the disk usage table
-// (sourced from disk.Sample) plus the CPU/memory trend-chart placeholders.
+// (sourced from disk.Sample), the top-N processes table (sourced from
+// processes.Sample), plus the CPU/memory trend-chart placeholders. Each
+// service is sampled independently and degrades per-card: a disk failure
+// doesn't blank the processes card and vice versa.
+//
 // proc.Sample is intentionally not called here: the CPU/memory numeric card
 // is rendered on Overview, and the chart-cpu / chart-memory partials are
 // pure markup driven by /api/metrics polled from charts.js.
@@ -98,6 +113,14 @@ func (s *server) handleGetPartialSystem(w http.ResponseWriter, r *http.Request) 
 		data.Disk.Error = err.Error()
 	} else {
 		data.Disk.Mounts = mounts
+	}
+
+	procs, err := s.processesSvc.Sample(r.Context())
+	if err != nil {
+		slog.Error("GET /partial/system: processes sample failed", "err", err)
+		data.Processes.Error = err.Error()
+	} else {
+		data.Processes.Procs = procs
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

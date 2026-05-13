@@ -1,0 +1,33 @@
+{{ define "processes" }}
+<section id="processes" class="card">
+  <h2>Top processes</h2>
+  {{ if .Error }}
+  <p class="error">Failed to load processes: {{ .Error }}</p>
+  {{ else if .Procs }}
+  <table class="process-table">
+    <thead>
+      <tr>
+        <th>PID</th>
+        <th>User</th>
+        <th>CPU%</th>
+        <th>Mem%</th>
+        <th>Command</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .Procs }}
+      <tr class="process-row">
+        <td>{{ .PID }}</td>
+        <td>{{ .User }}</td>
+        <td>{{ printf "%.1f" .CPUPct }}</td>
+        <td>{{ printf "%.1f" .MemPct }}</td>
+        <td title="{{ .CmdlineFull }}"><code>{{ .Command }}</code></td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+  {{ else }}
+  <p class="empty">No processes sampled yet.</p>
+  {{ end }}
+</section>
+{{ end }}
