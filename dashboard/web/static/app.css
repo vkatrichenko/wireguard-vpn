@@ -476,9 +476,10 @@ body {
   display: block;
 }
 
-/* 14. System-tab layout -------------------------------------------------- */
+/* 14. Tab layout grids ---------------------------------------------------- */
 
-#tab-body .system-charts {
+#tab-body .system-charts,
+#tab-body .network-charts {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -486,7 +487,10 @@ body {
 }
 
 #tab-body > #disk,
-#tab-body > #processes {
+#tab-body > #processes,
+#tab-body > #network-rate,
+#tab-body > #wg-iface-stats,
+#tab-body > #aggregate-traffic {
   grid-column: 1 / -1;
 }
 
@@ -623,7 +627,8 @@ body {
     grid-template-columns: 1fr;
   }
 
-  #tab-body .system-charts {
+  #tab-body .system-charts,
+  #tab-body .network-charts {
     grid-template-columns: 1fr;
   }
 

@@ -1,0 +1,14 @@
+{{ define "aggregate-traffic" }}
+<section id="aggregate-traffic" class="card">
+  <h2>Aggregate traffic</h2>
+  {{ if .Error }}
+  <p class="error">Failed to load aggregate traffic: {{ .Error }}</p>
+  {{ else }}
+  <p class="aggregate-traffic-line">
+    Last {{ .Range }}:
+    <strong>{{ humanBytes .RxBytesDelta }}</strong> in /
+    <strong>{{ humanBytes .TxBytesDelta }}</strong> out
+  </p>
+  {{ end }}
+</section>
+{{ end }}

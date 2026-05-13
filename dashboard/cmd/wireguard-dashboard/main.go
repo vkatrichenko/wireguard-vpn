@@ -23,6 +23,7 @@ import (
 	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/disk"
 	"wireguard-dashboard/internal/geoip"
+	"wireguard-dashboard/internal/netdev"
 	"wireguard-dashboard/internal/poller"
 	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/processes"
@@ -94,6 +95,21 @@ func main() {
 	// uniform across packages.
 	diskSvc := disk.New()
 
+	// netdev.New() reads /proc/net/dev for the wg0 interface row. PeerCount is
+	// the seam designed so this package never imports internal/wg directly —
+	// we wire a closure over wgSvc here so Sample returns Stats.Peers populated
+	// without dragging the systemd/exec graph into the netdev package's tests.
+	// Same singleton rationale as diskSvc: stateless today, but constructed
+	// once so adding a poller hook later is a one-line wire change.
+	netdevSvc := netdev.New()
+	netdevSvc.PeerCount = func(ctx context.Context) (int, error) {
+		peers, err := wgSvc.Show(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return len(peers), nil
+	}
+
 	// geoip.New parses the embedded GeoLite2-City.mmdb once at startup. A
 	// failure here means the committed mmdb is corrupt — the binary cannot
 	// recover at runtime, so fail fast before any handlers are wired. The
@@ -164,7 +180,7 @@ func main() {
 	pollerSvc := poller.New(metricsDB, procSvc, wgSvc, clientsfileSvc)
 	go pollerSvc.Run(ctx)
 
-	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc)
+	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc)
 	if err != nil {
 		log.Fatalf("server init failed: %v", err)
 	}

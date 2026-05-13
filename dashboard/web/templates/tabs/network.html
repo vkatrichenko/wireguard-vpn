@@ -1,1 +1,15 @@
-{{ define "network-tab" }}<section class="card empty"><p class="empty">Coming soon.</p></section>{{ end }}
+{{ define "network-tab" }}
+<div class="network-charts">
+  {{ template "chart-rx" }}
+  {{ template "chart-tx" }}
+</div>
+
+{{ if .StatsError }}
+<section class="card error">{{ .StatsError }}</section>
+{{ else if .Stats }}
+{{ template "network-rate" .Stats }}
+{{ end }}
+
+{{ template "wg-iface-stats" .WgIface }}
+{{ template "aggregate-traffic" .AggregateTraffic }}
+{{ end }}

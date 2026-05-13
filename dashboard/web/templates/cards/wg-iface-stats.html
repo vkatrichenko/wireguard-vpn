@@ -1,0 +1,33 @@
+{{ define "wg-iface-stats" }}
+<section id="wg-iface-stats" class="card">
+  <h2>WireGuard interface</h2>
+  {{ if .Error }}
+  <p class="error">Failed to load WireGuard interface stats: {{ .Error }}</p>
+  {{ else }}
+  <dl class="wg-iface-stats">
+    <dt>Peers</dt>
+    <dd>{{ .Stats.Peers }}</dd>
+
+    <dt>Rx bytes</dt>
+    <dd>{{ humanBytes .Stats.RxBytes }}</dd>
+    <dt>Tx bytes</dt>
+    <dd>{{ humanBytes .Stats.TxBytes }}</dd>
+
+    <dt>Rx packets</dt>
+    <dd>{{ .Stats.RxPackets }}</dd>
+    <dt>Tx packets</dt>
+    <dd>{{ .Stats.TxPackets }}</dd>
+
+    <dt>Rx errors</dt>
+    <dd>{{ .Stats.RxErrs }}</dd>
+    <dt>Tx errors</dt>
+    <dd>{{ .Stats.TxErrs }}</dd>
+
+    <dt>Rx dropped</dt>
+    <dd>{{ .Stats.RxDropped }}</dd>
+    <dt>Tx dropped</dt>
+    <dd>{{ .Stats.TxDropped }}</dd>
+  </dl>
+  {{ end }}
+</section>
+{{ end }}
