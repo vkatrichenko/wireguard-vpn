@@ -15,6 +15,7 @@ import (
 	dashboard "wireguard-dashboard"
 	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
+	"wireguard-dashboard/internal/geoip"
 	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/server"
 	"wireguard-dashboard/internal/serverinfo"
@@ -578,6 +579,15 @@ func TestHandleGetPartialClients_SeededRow(t *testing.T) {
 		peerAddress,
 		// Template renders "City, Country" when both fields are non-empty.
 		"San Francisco, US",
+		// Sub-task 5 row-expand wiring — htmx attrs on the data row plus
+		// the empty placeholder <tr> below it. We pin the URL/target/swap
+		// prefixes without committing to the exact pubkey encoding so a
+		// future urlquery rewrite doesn't break the test.
+		`hx-get="/partial/clients/`,
+		`hx-target="#detail-`,
+		`hx-swap="innerHTML"`,
+		`class="detail-row hidden"`,
+		`id="detail-`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
@@ -593,5 +603,487 @@ func TestHandleGetPartialClients_SeededRow(t *testing.T) {
 	// the other partial tests.
 	if strings.Contains(body, "<html") {
 		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
+	}
+}
+
+// TestHandleGetPartialClients_RFC1918Endpoint exercises the negative geo
+// branch end-to-end against the REAL *geoip.Service. The seeded peer's
+// endpoint sits in 10.0.0.0/8 — geoip.Service.Lookup's stdlib guards
+// (ip.IsPrivate) short-circuit before the mmdb is consulted, returning
+// ("", ""). The template's `{{ if .Country }}…{{ else }}—{{ end }}` branch
+// then renders the em-dash, proving the production resolver's RFC1918 path
+// reaches the UI as the spec requires.
+//
+// The exact em-dash searched for is the U+2014 byte sequence (0xE2 0x80
+// 0x94) literally embedded in web/templates/tabs/clients.html line 30.
+func TestHandleGetPartialClients_RFC1918Endpoint(t *testing.T) {
+	const (
+		fakeIP      = "203.0.113.1"
+		fakeKey     = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK="
+		peerName    = "bob"
+		peerAddress = "172.16.15.6/32"
+		// 44-char base64 — distinct from the SeededRow test's peer key so
+		// the two tests can't share state via package-level caches.
+		peerPublicKey = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+		peerEndpoint  = "10.0.0.5:51820"
+		// emDash is the literal U+2014 in clients.html line 30. The Geo
+		// cell renders to exactly "<td>—</td>" when both Country and City
+		// are empty (the `with .Geo` / `if .Country` / else branch).
+		emDash = "<td>\u2014</td>"
+	)
+
+	enteredAt := time.Now().Add(-(2*time.Hour + 3*time.Minute))
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: fakeIP},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte(fakeKey + "\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(enteredAt)
+
+	clientsSvc := seededClientsfileSvc(peerName, peerAddress, peerPublicKey)
+	// 10s ago — well within onlineThreshold so status renders "online";
+	// exercises the populated-row branch rather than "pending"/"offline".
+	wgSvc := seededWgSvc(peerPublicKey, peerEndpoint, peerAddress, 10*time.Second, 555, 777)
+
+	// Real *geoip.Service — embedded mmdb is decoded from embed.FS, no
+	// filesystem path resolution involved. RFC1918 short-circuit in
+	// Service.Lookup is what we're proving reaches the template.
+	geo, err := geoip.New()
+	if err != nil {
+		t.Fatalf("geoip.New: %v", err)
+	}
+	t.Cleanup(func() { _ = geo.Close() })
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial/clients", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		peerName,
+		peerAddress,
+		"<th>Geo</th>",
+		// The geo cell for an RFC1918 endpoint MUST be exactly "<td>—</td>".
+		// Searching the wrapped form (rather than a bare em-dash) avoids
+		// matching the WG-IP cell, which falls back to the same glyph when
+		// Address is empty — see clients.html line 24.
+		emDash,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
+		}
+	}
+
+	// Populated-branch invariant — empty-state copy would mean the join
+	// dropped the seeded row, which would also make the em-dash assertion
+	// pass vacuously.
+	if strings.Contains(body, "No clients configured") {
+		t.Errorf("body unexpectedly contains empty-state copy:\n%s", body)
+	}
+}
+
+// TestHandleGetPartialClientDetail_404OnUnknown proves the per-client expand
+// endpoint returns 404 when the requested pubkey is not in the manifest. The
+// 404 contract is what stops a stale htmx swap from rendering a chart for a
+// peer that no longer exists.
+func TestHandleGetPartialClientDetail_404OnUnknown(t *testing.T) {
+	const (
+		manifestKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+		unknownKey  = "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ="
+	)
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial/clients/"+unknownKey+"/detail", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleGetPartialClientDetail_RendersFragment proves the happy path:
+// a known pubkey returns a 200 HTML fragment carrying the chart canvas id
+// and the p95 line. Two seeded client_traffic rows ~60s apart give p95
+// a non-empty input — we don't pin the rendered byte value, only that the
+// p95 line is present (Slice 5 sub-task 3 will extract p95 into its own
+// package and pin the math there).
+func TestHandleGetPartialClientDetail_RendersFragment(t *testing.T) {
+	const peerPublicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", peerPublicKey)
+
+	testDB := newTestDB(t)
+	t0 := time.Now().Add(-2 * time.Minute)
+	if err := testDB.InsertClientTraffic(context.Background(), []db.ClientTraffic{
+		{TS: t0, PublicKey: peerPublicKey, Name: "alice", Address: "172.16.15.5/32", RxBytesCum: 1000, TxBytesCum: 2000},
+		{TS: t0.Add(60 * time.Second), PublicKey: peerPublicKey, Name: "alice", Address: "172.16.15.5/32", RxBytesCum: 61000, TxBytesCum: 122000},
+	}); err != nil {
+		t.Fatalf("seed client_traffic: %v", err)
+	}
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial/clients/"+peerPublicKey+"/detail", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want %q", got, "text/html; charset=utf-8")
+	}
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		"client-chart-" + peerPublicKey,
+		"p95 over 24h:",
+		// Range-hint element renders alongside the p95 line. We assert on
+		// the class name only — the exact wording is allowed to evolve.
+		`class="range-hint"`,
+		// Sub-task 5 wraps the detail body in <td colspan="8"> so the
+		// fragment is valid as innerHTML of a <tr>.
+		`<td colspan="8"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
+		}
+	}
+	// Fragments must not include a full HTML document — same invariant as
+	// the other partial tests.
+	if strings.Contains(body, "<html") {
+		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
+	}
+}
+
+// TestHandleGetMetricsClient_404OnUnknownPubkey proves the JSON time-series
+// endpoint enforces the same manifest-membership check as
+// /partial/clients/{pubkey}/detail — an unknown pubkey returns 404 before
+// the DB query runs, so a stale chart fetch from a removed peer can't leak
+// rates from a residual row in client_traffic.
+func TestHandleGetMetricsClient_404OnUnknownPubkey(t *testing.T) {
+	const (
+		manifestKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+		unknownKey  = "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ="
+	)
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/metrics/client/"+unknownKey, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleGetMetricsClient_400OnBadRange exercises the four-value enum
+// guard: anything other than 1h/6h/24h/7d returns 400 with the canonical
+// error string. Covers malformed durations, valid-but-not-allowed durations,
+// and a numeric-only string that ParseDuration would reject too.
+func TestHandleGetMetricsClient_400OnBadRange(t *testing.T) {
+	const manifestKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"malformed", "99x"},
+		{"valid_but_not_enum", "2h"},
+		{"numeric_only", "24"},
+		{"garbage", "yesterday"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/metrics/client/"+manifestKey+"?range="+tc.value, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, "must be 1h, 6h, 24h, or 7d") {
+				t.Errorf("body missing enum-error message:\n%s", body)
+			}
+		})
+	}
+}
+
+// TestHandleGetMetricsClient_DefaultRange proves that a request with no
+// `?range=` parameter falls back to 24h: the response echoes "24h" in the
+// range field and the from/to window spans ~24h. No seeded rows — the
+// arrays come back as empty `[]` so the encoder emits non-null slices.
+func TestHandleGetMetricsClient_DefaultRange(t *testing.T) {
+	const manifestKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/metrics/client/"+manifestKey, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", got, "application/json")
+	}
+
+	var got struct {
+		PublicKey string    `json:"public_key"`
+		Range     string    `json:"range"`
+		From      time.Time `json:"from"`
+		To        time.Time `json:"to"`
+		TS        []int64   `json:"ts"`
+		RxRateBps []int64   `json:"rx_rate_bps"`
+		TxRateBps []int64   `json:"tx_rate_bps"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+	}
+	if got.Range != "24h" {
+		t.Errorf("range = %q, want %q", got.Range, "24h")
+	}
+	if got.PublicKey != manifestKey {
+		t.Errorf("public_key = %q, want %q", got.PublicKey, manifestKey)
+	}
+	// Span should be ~24h — allow a 1m fudge for the time between
+	// httptest.NewRequest and handler.ServeHTTP.
+	span := got.To.Sub(got.From)
+	if span < 24*time.Hour-time.Minute || span > 24*time.Hour+time.Minute {
+		t.Errorf("to-from = %s, want ~24h", span)
+	}
+}
+
+// TestHandleGetMetricsClient_ComputesRates seeds two client_traffic rows for
+// a known pubkey 60s apart with Δrx=6000, Δtx=3000 and asserts the handler
+// emits exactly one sample with the correct per-second rates. Pins the
+// rate-math contract end-to-end (DB → handler → JSON).
+func TestHandleGetMetricsClient_ComputesRates(t *testing.T) {
+	const peerPublicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", peerPublicKey)
+
+	testDB := newTestDB(t)
+	t0 := time.Now().Add(-2 * time.Minute)
+	if err := testDB.InsertClientTraffic(context.Background(), []db.ClientTraffic{
+		{TS: t0, PublicKey: peerPublicKey, Name: "alice", Address: "172.16.15.5/32", RxBytesCum: 1000, TxBytesCum: 2000},
+		{TS: t0.Add(60 * time.Second), PublicKey: peerPublicKey, Name: "alice", Address: "172.16.15.5/32", RxBytesCum: 7000, TxBytesCum: 5000},
+	}); err != nil {
+		t.Fatalf("seed client_traffic: %v", err)
+	}
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/metrics/client/"+peerPublicKey+"?range=24h", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", got, "application/json")
+	}
+
+	var got struct {
+		PublicKey string      `json:"public_key"`
+		Range     string      `json:"range"`
+		TS        []time.Time `json:"ts"`
+		RxRateBps []int64     `json:"rx_rate_bps"`
+		TxRateBps []int64     `json:"tx_rate_bps"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+	}
+	if got.PublicKey != peerPublicKey {
+		t.Errorf("public_key = %q, want %q", got.PublicKey, peerPublicKey)
+	}
+	if got.Range != "24h" {
+		t.Errorf("range = %q, want %q", got.Range, "24h")
+	}
+	if len(got.TS) != 1 || len(got.RxRateBps) != 1 || len(got.TxRateBps) != 1 {
+		t.Fatalf("lengths = (ts=%d, rx=%d, tx=%d), want all 1; body=%s",
+			len(got.TS), len(got.RxRateBps), len(got.TxRateBps), rec.Body.String())
+	}
+	if got.RxRateBps[0] != 100 {
+		t.Errorf("rx_rate_bps[0] = %d, want 100 (6000/60)", got.RxRateBps[0])
+	}
+	if got.TxRateBps[0] != 50 {
+		t.Errorf("tx_rate_bps[0] = %d, want 50 (3000/60)", got.TxRateBps[0])
+	}
+}
+
+// TestHandleGetMetricsClient_MonotonicTS seeds five client_traffic rows at
+// strictly increasing timestamps with strictly increasing cumulative byte
+// counters and proves the handler returns a TS array that's strictly
+// ascending across the four resulting rate samples. The handler labels each
+// rate point with rows[i].TS (end-of-interval), so monotonic input rows must
+// yield monotonic output TS — this test pins that contract. The request omits
+// `?range=` to exercise the default-24h path; rate-math correctness and the
+// 400-on-bad-range surface are owned by sibling tests.
+func TestHandleGetMetricsClient_MonotonicTS(t *testing.T) {
+	const peerPublicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", peerPublicKey)
+
+	testDB := newTestDB(t)
+	now := time.Now()
+	rows := []db.ClientTraffic{
+		{TS: now.Add(-4 * time.Minute), PublicKey: peerPublicKey, Name: "alice", Address: "172.16.15.5/32", RxBytesCum: 1000, TxBytesCum: 2000},
+		{TS: now.Add(-3 * time.Minute), PublicKey: peerPublicKey, Name: "alice", Address: "172.16.15.5/32", RxBytesCum: 7000, TxBytesCum: 5000},
+		{TS: now.Add(-2 * time.Minute), PublicKey: peerPublicKey, Name: "alice", Address: "172.16.15.5/32", RxBytesCum: 13000, TxBytesCum: 8000},
+		{TS: now.Add(-1 * time.Minute), PublicKey: peerPublicKey, Name: "alice", Address: "172.16.15.5/32", RxBytesCum: 19000, TxBytesCum: 11000},
+		{TS: now, PublicKey: peerPublicKey, Name: "alice", Address: "172.16.15.5/32", RxBytesCum: 25000, TxBytesCum: 14000},
+	}
+	if err := testDB.InsertClientTraffic(context.Background(), rows); err != nil {
+		t.Fatalf("seed client_traffic: %v", err)
+	}
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	// No ?range= — exercises the default 24h path.
+	req := httptest.NewRequest(http.MethodGet, "/api/metrics/client/"+peerPublicKey, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", got, "application/json")
+	}
+
+	var got struct {
+		PublicKey string      `json:"public_key"`
+		Range     string      `json:"range"`
+		TS        []time.Time `json:"ts"`
+		RxRateBps []int64     `json:"rx_rate_bps"`
+		TxRateBps []int64     `json:"tx_rate_bps"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+	}
+	// 5 input rows yield 4 consecutive-pair rate samples.
+	if len(got.TS) != 4 {
+		t.Fatalf("len(ts) = %d, want 4; body=%s", len(got.TS), rec.Body.String())
+	}
+	for i := 1; i < len(got.TS); i++ {
+		if !got.TS[i].After(got.TS[i-1]) {
+			t.Errorf("ts[%d]=%s not strictly after ts[%d]=%s", i, got.TS[i], i-1, got.TS[i-1])
+		}
+	}
+	for i, r := range got.RxRateBps {
+		if r < 0 {
+			t.Errorf("rx_rate_bps[%d]=%d < 0", i, r)
+		}
+	}
+	for i, r := range got.TxRateBps {
+		if r < 0 {
+			t.Errorf("tx_rate_bps[%d]=%d < 0", i, r)
+		}
 	}
 }

@@ -60,7 +60,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 - [x] Extend `internal/server/handlers_clients.go` (or its successor) — build per-row `clientRow` that includes the resolved geo, sourced from the peer's `endpoint` column already returned by `wg show wg0 dump`. **[Agent: go-fullstack]** _(also updated `handlers_snapshot.go` — second `buildClientRows` call site the spec didn't list; mechanical `nil` / `s.geoipSvc` arg add. Added `Geo` struct + `GeoResolver` interface in `clientrows.go`; `server.New(...)` now takes `*geoip.Service` as trailing arg.)_
 - [x] Replace `web/templates/tabs/clients.html` placeholder with the real table. Columns: name, WG IP, online (pill), last-handshake, rx, tx, endpoint, geo. Empty state matches v3 wording ("No clients configured. Add via `terraform/dev/main.tf`."). **[Agent: go-fullstack]**
 - [x] Extend `internal/server/server_test.go` — `GET /partial/clients` returns 200 and includes the geo column header + a known peer's row. **[Agent: go-fullstack]**
-- [ ] Verify locally with a seeded SQLite: Clients tab renders all peers with country/city; RFC1918 endpoint shows "—". **[Agent: go-fullstack]**
+- [x] Verify locally with a seeded SQLite: Clients tab renders all peers with country/city; RFC1918 endpoint shows "—". **[Agent: go-fullstack]**
 
 ---
 
@@ -68,15 +68,15 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** Click a client row → inline expansion below it with a 24 h rx/tx chart and a p95 throughput figure over the active range. Only one row expanded at a time. `#clients?expand=<pubkey>` deep-links to a pre-expanded row.
 
-- [ ] New `internal/server/handlers_clients.go` (or extend) — `GET /partial/clients/{pubkey}/detail` returns the expand fragment (chart canvas wrapper + p95). 404 on unknown pubkey. **[Agent: go-fullstack]**
-- [ ] New `GET /api/metrics/client/{pubkey}?range=…` — JSON time-series `{ts, rx_rate_bps, tx_rate_bps}` from consecutive `QueryClientTraffic` rows. Range param validated to enum 1h/6h/24h/7d; default 24h. **[Agent: go-fullstack]**
-- [ ] New `internal/p95` helper (or inline in handler) — input `[]float64` rates, return p95 via nearest-rank. **[Agent: go-fullstack]**
-- [ ] New `web/templates/cards/client-detail.html` — chart canvas + "p95 over range: X B/s" + small range hint. **[Agent: go-fullstack]**
-- [ ] Update `web/templates/tabs/clients.html` rows — each row gets `hx-get="/partial/clients/{pubkey}/detail"`, `hx-target="#detail-{pubkey}"`, `hx-swap="innerHTML"`. Below each row, an empty `<tr id="detail-{pubkey}" class="detail-row hidden">` ready to fill. **[Agent: go-fullstack]**
-- [ ] Update `web/static/charts.js` — add `initClientChart(pubkey, range)` invoked after the detail fragment swaps in. Use the htmx `htmx:afterSwap` event. **[Agent: go-fullstack]**
-- [ ] Update `web/static/tabs.js` — on tab-body swap, if hash carries `?expand=<key>`, trigger the row's `hx-get` automatically. **[Agent: go-fullstack]**
-- [ ] CSS: `.detail-row` collapsed by default; one-row-expanded constraint enforced via JS (`tabs.js` collapses any other open detail before opening the new one). **[Agent: go-fullstack]**
-- [ ] Unit test: `GET /api/metrics/client/<known>` returns rates with monotonic ts; `GET /api/metrics/client/<known>?range=99x` returns 400. **[Agent: go-fullstack]**
+- [x] New `internal/server/handlers_clients.go` (or extend) — `GET /partial/clients/{pubkey}/detail` returns the expand fragment (chart canvas wrapper + p95). 404 on unknown pubkey. **[Agent: go-fullstack]**
+- [x] New `GET /api/metrics/client/{pubkey}?range=…` — JSON time-series `{ts, rx_rate_bps, tx_rate_bps}` from consecutive `QueryClientTraffic` rows. Range param validated to enum 1h/6h/24h/7d; default 24h. **[Agent: go-fullstack]**
+- [x] New `internal/p95` helper (or inline in handler) — input `[]float64` rates, return p95 via nearest-rank. **[Agent: go-fullstack]**
+- [x] New `web/templates/cards/client-detail.html` — chart canvas + "p95 over range: X B/s" + small range hint. **[Agent: go-fullstack]**
+- [x] Update `web/templates/tabs/clients.html` rows — each row gets `hx-get="/partial/clients/{pubkey}/detail"`, `hx-target="#detail-{pubkey}"`, `hx-swap="innerHTML"`. Below each row, an empty `<tr id="detail-{pubkey}" class="detail-row hidden">` ready to fill. **[Agent: go-fullstack]**
+- [x] Update `web/static/charts.js` — add `initClientChart(pubkey, range)` invoked after the detail fragment swaps in. Use the htmx `htmx:afterSwap` event. **[Agent: go-fullstack]**
+- [x] Update `web/static/tabs.js` — on tab-body swap, if hash carries `?expand=<key>`, trigger the row's `hx-get` automatically. **[Agent: go-fullstack]**
+- [x] CSS: `.detail-row` collapsed by default; one-row-expanded constraint enforced via JS (`tabs.js` collapses any other open detail before opening the new one). **[Agent: go-fullstack]**
+- [x] Unit test: `GET /api/metrics/client/<known>` returns rates with monotonic ts; `GET /api/metrics/client/<known>?range=99x` returns 400. **[Agent: go-fullstack]**
 - [ ] Verify locally + on EC2 after the next CI deploy: click a row, chart renders, p95 figure displays. Open `#clients?expand=<pubkey>` directly, that row is pre-expanded. **[Agent: go-fullstack]**
 
 ---

@@ -470,7 +470,48 @@ body {
   display: block;
 }
 
-/* 14. Responsive ----------------------------------------------------------- */
+/* 14. Client-detail expand ------------------------------------------------ */
+
+.client-row {
+  cursor: pointer;
+}
+
+.client-row:hover {
+  background-color: var(--btn-hover-bg);
+}
+
+.detail-row.hidden {
+  display: none;
+}
+
+.detail-row > td {
+  background-color: var(--card-bg);
+  border-top: 1px solid var(--card-border);
+  padding: 0;
+}
+
+.client-detail {
+  padding: 0.75rem 1rem;
+}
+
+.client-detail canvas {
+  width: 100%;
+  height: 240px;
+  display: block;
+}
+
+.client-p95 {
+  margin: 0.75rem 0 0.25rem;
+  font-weight: 600;
+}
+
+.range-hint {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  display: block;
+}
+
+/* 15. Responsive ----------------------------------------------------------- */
 
 @media (max-width: 600px) {
   body {
@@ -510,7 +551,7 @@ body {
   }
 }
 
-/* 15. Reduced motion ------------------------------------------------------- */
+/* 16. Reduced motion ------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
   *,

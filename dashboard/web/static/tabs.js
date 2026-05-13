@@ -32,12 +32,30 @@
     });
   }
 
+  function triggerExpand(pubkey) {
+    var placeholder = document.getElementById('detail-' + pubkey);
+    if (!placeholder) {
+      console.info('tabs.js: expand target not found', pubkey);
+      return;
+    }
+    var row = placeholder.previousElementSibling;
+    if (!row || !row.classList.contains('client-row')) {
+      console.info('tabs.js: expand row sibling missing', pubkey);
+      return;
+    }
+    row.click();
+  }
+
   function route() {
     var parsed = parseHash();
     markActive(parsed.tab);
     var range = parsed.params.get('range');
+    var expand = parsed.params.get('expand');
     var url = '/partial/' + parsed.tab + (range ? '?range=' + encodeURIComponent(range) : '');
-    htmx.ajax('GET', url, { target: '#tab-body', swap: 'innerHTML' });
+    var swap = htmx.ajax('GET', url, { target: '#tab-body', swap: 'innerHTML' });
+    if (parsed.tab === 'clients' && expand && swap && typeof swap.then === 'function') {
+      swap.then(function () { triggerExpand(expand); });
+    }
   }
 
   document.addEventListener('click', function (event) {
@@ -49,4 +67,42 @@
 
   window.addEventListener('hashchange', route);
   document.addEventListener('DOMContentLoaded', route);
+
+  // Client-detail toggle: same-row click collapses without re-fetching, and
+  // a click on a different row collapses any other open detail first so only
+  // one detail is ever expanded.
+  document.body.addEventListener('htmx:beforeRequest', function (event) {
+    var path = (event.detail && event.detail.requestConfig && event.detail.requestConfig.path) || '';
+    var m = path.match(/^\/partial\/clients\/([^/]+)\/detail$/);
+    if (!m) return;
+
+    var pubkey = decodeURIComponent(m[1]);
+    var target = document.getElementById('detail-' + pubkey);
+    if (!target) return;
+
+    if (!target.classList.contains('hidden')) {
+      target.classList.add('hidden');
+      // Leaks at most one stale Chart.js instance per pubkey in charts.js's
+      // clientCharts Map; initClientChart destroys the prior one on reopen.
+      target.innerHTML = '';
+      event.preventDefault();
+      return;
+    }
+
+    document.querySelectorAll('.detail-row:not(.hidden)').forEach(function (row) {
+      if (row.id !== 'detail-' + pubkey) {
+        row.classList.add('hidden');
+        // Same bounded-leak note as above applies on cross-row collapse.
+        row.innerHTML = '';
+      }
+    });
+  });
+
+  // Client-detail reveal: drop the .hidden class once htmx swaps the fragment
+  // in so the detail row becomes visible.
+  document.body.addEventListener('htmx:afterSwap', function (event) {
+    var target = event.detail && event.detail.target;
+    if (!target || !target.id || target.id.indexOf('detail-') !== 0) return;
+    target.classList.remove('hidden');
+  });
 })();
