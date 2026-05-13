@@ -19,7 +19,7 @@
     </thead>
     <tbody>
       {{ range .Rows }}
-      <tr class="client-row status-{{ .Status }}" hx-get="/partial/clients/{{ .PublicKey | urlquery }}/detail" hx-target="#detail-{{ .PublicKey }}" hx-swap="innerHTML">
+      <tr class="client-row status-{{ .Status }}" hx-get="/partial/clients/{{ .PublicKey | urlquery }}/detail" hx-target="[id='detail-{{ .PublicKey }}']" hx-swap="innerHTML">
         <td>{{ if .Name }}{{ .Name }}{{ else }}<em>(unknown)</em>{{ end }}</td>
         <td>{{ if .Address }}{{ .Address }}{{ else }}—{{ end }}</td>
         <td><span class="status-pill status-{{ .Status }}">{{ .Status }}</span></td>
