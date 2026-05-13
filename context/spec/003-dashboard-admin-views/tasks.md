@@ -105,7 +105,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 - [x] New `web/templates/cards/processes.html` — table: PID, user, CPU%, mem%, command (truncated to 60 chars, `title=` tooltip with full cmdline). **[Agent: go-fullstack]**
 - [x] Wire the processes card into `web/templates/tabs/system.html`. **[Agent: go-fullstack]**
 - [x] Server-side test: `GET /partial/system` body contains a PID row sentinel. **[Agent: go-fullstack]**
-- [ ] Verify locally: top-5 visibly re-orders as you hit the page with `stress --cpu 2` running in another terminal. **[Agent: go-fullstack]**
+- [x] Verify locally: top-5 visibly re-orders as you hit the page with `stress --cpu 2` running in another terminal. **[Agent: go-fullstack]**
 
 ---
 
@@ -113,12 +113,12 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** Network tab is no longer a placeholder: it shows current rx/tx (existing), the rx/tx 24 h charts (moved from the global grid), the new WG interface stats card, and the new aggregate-traffic-over-range card.
 
-- [ ] New package `internal/netdev/netdev.go` — parse `/proc/net/dev` for the `wg0` row, return `{Peers, RxBytes, TxBytes, RxPackets, TxPackets, RxErrs, TxErrs, RxDropped, TxDropped}`. Peer count comes from `wg show wg0 dump` (`wg.go` already shells out; reuse the existing helper). **[Agent: go-fullstack]**
-- [ ] Unit test — `/proc/net/dev` fixture for a known good wg0 row; assert each field. **[Agent: go-fullstack]**
-- [ ] New `web/templates/cards/wg-iface-stats.html` — single card with the eight fields + the peer count. **[Agent: go-fullstack]**
-- [ ] New `web/templates/cards/aggregate-traffic.html` — "Last 24h: A in / B out" using rx/tx cumulative deltas from `traffic_metrics` between (now-range, now). **[Agent: go-fullstack]**
-- [ ] Promote `web/templates/tabs/network.html` from placeholder — current rx/tx large numerics + 24 h rx/tx charts (moved out of global grid) + WG iface stats + aggregate-traffic. **[Agent: go-fullstack]**
-- [ ] Server-side test: `GET /partial/network` body contains the WG iface stats card heading + an "in / out" sentinel. **[Agent: go-fullstack]**
+- [x] New package `internal/netdev/netdev.go` — parse `/proc/net/dev` for the `wg0` row, return `{Peers, RxBytes, TxBytes, RxPackets, TxPackets, RxErrs, TxErrs, RxDropped, TxDropped}`. Peer count comes from `wg show wg0 dump` (`wg.go` already shells out; reuse the existing helper). **[Agent: go-fullstack]**
+- [x] Unit test — `/proc/net/dev` fixture for a known good wg0 row; assert each field. **[Agent: go-fullstack]**
+- [x] New `web/templates/cards/wg-iface-stats.html` — single card with the eight fields + the peer count. **[Agent: go-fullstack]**
+- [x] New `web/templates/cards/aggregate-traffic.html` — "Last 24h: A in / B out" using rx/tx cumulative deltas from `traffic_metrics` between (now-range, now). **[Agent: go-fullstack]**
+- [x] Promote `web/templates/tabs/network.html` from placeholder — current rx/tx large numerics + 24 h rx/tx charts (moved out of global grid) + WG iface stats + aggregate-traffic. **[Agent: go-fullstack]**
+- [x] Server-side test: `GET /partial/network` body contains the WG iface stats card heading + an "in / out" sentinel. **[Agent: go-fullstack]**
 - [ ] Verify locally: Network tab shows the four cards. Aggregate matches `wg show wg0 dump` rx/tx deltas over the last 24 h. **[Agent: go-fullstack]**
 
 ---

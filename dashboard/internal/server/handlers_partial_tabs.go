@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"wireguard-dashboard/internal/disk"
+	"wireguard-dashboard/internal/netdev"
+	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/processes"
 )
 
@@ -131,10 +133,94 @@ func (s *server) handleGetPartialSystem(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// handleGetPartialNetwork renders the Network tab body — placeholder in Slice 1.
-func (s *server) handleGetPartialNetwork(w http.ResponseWriter, _ *http.Request) {
+// networkTabData is the view-model for the `network-tab` fragment. Stats backs
+// the network-rate large-numerics card (same proc.Sample shape as buildPageData
+// uses for Overview's network-rate). WgIface backs the WireGuard interface
+// stats card (cumulative rx/tx bytes, packets, errs, dropped, peer count).
+// AggregateTraffic backs the in-period rx/tx delta line under the chart pair.
+//
+// Range is hardcoded to "24h" until Slice 9 plumbs the four-value range enum
+// (1h/6h/24h/7d) through to the Network tab handler.
+type networkTabData struct {
+	Stats            *proc.Stats
+	StatsError       string
+	WgIface          wgIfaceStatsCardData
+	AggregateTraffic aggregateTrafficCardData
+}
+
+// wgIfaceStatsCardData mirrors the {Stats, Error} shape the `wg-iface-stats`
+// template branches on internally. Same rationale as diskCardData — inline the
+// struct so the template's data contract stays type-checked at compile time.
+type wgIfaceStatsCardData struct {
+	Stats netdev.Stats
+	Error string
+}
+
+// aggregateTrafficCardData mirrors the {Range, RxBytesDelta, TxBytesDelta,
+// Error} shape the `aggregate-traffic` template renders. Range is the active
+// window label ("24h" today, expanded to the four-value enum in Slice 9). The
+// two deltas are clamped to zero so a counter reset (interface bounce) never
+// renders a negative byte count.
+type aggregateTrafficCardData struct {
+	Range        string
+	RxBytesDelta int64
+	TxBytesDelta int64
+	Error        string
+}
+
+// handleGetPartialNetwork renders the Network tab body — the network-rate
+// large-numerics card (proc.Sample), the WireGuard interface stats card
+// (netdev.Sample), and the aggregate-traffic line (delta across the last 24h
+// of traffic_metrics rows). Each fetch degrades per-card: a netdev failure
+// doesn't blank the rate or aggregate cards, and a DB query failure on
+// aggregate traffic leaves the other two cards intact.
+//
+// The 24h window is hardcoded until Slice 9 sub-task 9 plumbs the range
+// selector through. len(rows) < 2 leaves both deltas at 0 with no error —
+// the template renders "0 B in / 0 B out", which is the right shape for a
+// freshly-deployed dashboard before the poller has accumulated two samples.
+func (s *server) handleGetPartialNetwork(w http.ResponseWriter, r *http.Request) {
+	data := networkTabData{
+		AggregateTraffic: aggregateTrafficCardData{Range: "24h"},
+	}
+
+	if stats, err := s.procSvc.Sample(r.Context()); err != nil {
+		slog.Error("GET /partial/network: proc sample failed", "err", err)
+		data.StatsError = err.Error()
+	} else {
+		data.Stats = &stats
+	}
+
+	if ifaceStats, err := s.netdevSvc.Sample(r.Context()); err != nil {
+		slog.Error("GET /partial/network: netdev sample failed", "err", err)
+		data.WgIface.Error = err.Error()
+	} else {
+		data.WgIface.Stats = ifaceStats
+	}
+
+	// Delta across the active range. Negative deltas (counter reset on
+	// interface bounce or wraparound) clamp to zero rather than render as
+	// "-3.2 MB in"; len(rows) < 2 silently leaves the zero values in place.
+	now := time.Now()
+	rows, err := s.metricsDB.QueryTrafficMetrics(r.Context(), now.Add(-24*time.Hour), now)
+	if err != nil {
+		slog.Error("GET /partial/network: traffic metrics query failed", "err", err)
+		data.AggregateTraffic.Error = err.Error()
+	} else if len(rows) >= 2 {
+		rxDelta := rows[len(rows)-1].RxBytesCum - rows[0].RxBytesCum
+		txDelta := rows[len(rows)-1].TxBytesCum - rows[0].TxBytesCum
+		if rxDelta < 0 {
+			rxDelta = 0
+		}
+		if txDelta < 0 {
+			txDelta = 0
+		}
+		data.AggregateTraffic.RxBytesDelta = rxDelta
+		data.AggregateTraffic.TxBytesDelta = txDelta
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "network-tab", nil); err != nil {
+	if err := s.tmpl.ExecuteTemplate(w, "network-tab", data); err != nil {
 		slog.Error("GET /partial/network: template render failed", "err", err)
 		http.Error(w, "template render failed", http.StatusInternalServerError)
 		return
