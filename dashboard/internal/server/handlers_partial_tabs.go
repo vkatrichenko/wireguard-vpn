@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"wireguard-dashboard/internal/disk"
-	"wireguard-dashboard/internal/proc"
 )
 
 // clientsTabData is the view-model handed to the `clients` template. It pairs
@@ -68,16 +67,12 @@ func (s *server) handleGetPartialClients(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// systemTabData is the view-model for the `system-tab` fragment. Stats backs
-// the CPU/memory/host-uptime numeric card; Disk backs the disk-usage table.
-// Each section has its own *Error / inline-struct branch so a failure in one
-// subsystem renders an inline error without blanking the other — the tab body
-// IS the entire htmx response, so a hard 500 would leave the previous tab
-// content in place and hide the failure from the operator.
+// systemTabData is the view-model for the `system-tab` fragment. Disk backs
+// the disk-usage table; the System tab no longer carries the CPU/memory
+// large-numerics card — that lives exclusively on Overview to avoid the
+// duplicate render the operator flagged after Slice 6.
 type systemTabData struct {
-	Stats      *proc.Stats
-	StatsError string
-	Disk       diskCardData
+	Disk diskCardData
 }
 
 // diskCardData mirrors the {Mounts, Error} shape the `disk` template branches
@@ -89,20 +84,13 @@ type diskCardData struct {
 	Error  string
 }
 
-// handleGetPartialSystem renders the System tab body — combines the CPU/mem
-// large-numerics card (sourced from proc.Sample) with the disk usage table
-// (sourced from disk.Sample). Each fetch failure is surfaced inline on the
-// corresponding card; the other card still renders.
+// handleGetPartialSystem renders the System tab body — the disk usage table
+// (sourced from disk.Sample) plus the CPU/memory trend-chart placeholders.
+// proc.Sample is intentionally not called here: the CPU/memory numeric card
+// is rendered on Overview, and the chart-cpu / chart-memory partials are
+// pure markup driven by /api/metrics polled from charts.js.
 func (s *server) handleGetPartialSystem(w http.ResponseWriter, r *http.Request) {
 	data := systemTabData{}
-
-	stats, err := s.procSvc.Sample(r.Context())
-	if err != nil {
-		slog.Error("GET /partial/system: proc sample failed", "err", err)
-		data.StatsError = err.Error()
-	} else {
-		data.Stats = &stats
-	}
 
 	mounts, err := s.diskSvc.Sample(r.Context())
 	if err != nil {

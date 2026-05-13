@@ -9,7 +9,6 @@
 <section class="card error">{{ .ServiceStatusError }}</section>
 {{ else }}
 {{ template "service-status" .ServiceStatus }}
-{{ template "uptime" .ServiceStatus }}
 {{ if .EventsError }}
 <section class="card error">{{ .EventsError }}</section>
 {{ else }}
