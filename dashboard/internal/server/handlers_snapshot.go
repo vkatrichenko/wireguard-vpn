@@ -103,7 +103,7 @@ func (s *server) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
 			clientsErr = joined
 			return
 		}
-		clientList = buildClientRows(cs, ps, time.Now())
+		clientList = buildClientRows(cs, ps, time.Now(), s.geoipSvc)
 	}()
 
 	wg.Wait()

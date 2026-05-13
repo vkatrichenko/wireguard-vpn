@@ -45,7 +45,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 - [x] In `internal/db/db.go`, add `QueryClientTraffic(ctx, publicKey, from, to)` returning `[]ClientTraffic` for a single key. Reuse the existing `idx_client_traffic_ts` index path. **[Agent: go-fullstack]** _(existing all-keys variant renamed to `QueryClientTrafficAll`; per-key takes the bare name)_
 - [x] Add a unit test in `internal/db/db_test.go` — seed two peers' rows, assert the new helper returns only the requested key's rows in `[from, to]` and in ts-ascending order. **[Agent: go-fullstack]**
 - [x] In `internal/poller/poller.go`, change `DefaultRetention = 25 * time.Hour` to `DefaultRetention = 8*24*time.Hour + time.Hour`. Update the surrounding comment block to record the rationale (7-day chart window + 1 h slack, expected DB ≈ 17 MB at 2 peers / 30 s cadence). **[Agent: go-fullstack]**
-- [ ] Verify locally: run `make test` — existing prune sweep test continues to pass (cutoff arithmetic is parameterised in tests, not hard-coded to 25 h). Run `make run` with a seeded DB containing rows older than 25 h but younger than 8 d — they survive the first prune. **[Agent: go-fullstack]**
+- [x] Verify locally: run `make test` — existing prune sweep test continues to pass (cutoff arithmetic is parameterised in tests, not hard-coded to 25 h). Run `make run` with a seeded DB containing rows older than 25 h but younger than 8 d — they survive the first prune. **[Agent: go-fullstack]**
 
 ---
 
@@ -53,13 +53,13 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** Clients tab renders the full client table (name, WG IP, online/offline, last-handshake, cumulative rx/tx, peer public-IP endpoint, geolocation). No per-row expand yet — that's Slice 5.
 
-- [ ] Vendor `internal/geoip/GeoLite2-City.mmdb` (download from MaxMind; commit alongside `LICENSE-GeoLite2.txt` with CC BY-SA 4.0 attribution). Add an `internal/geoip/README.md` documenting the refresh procedure (replace file, rebuild). **[Agent: go-fullstack]**
-- [ ] Add `github.com/oschwald/geoip2-golang` to `go.mod` (`go get` at the current released version). Confirm CGO_ENABLED=0 build still works locally. **[Agent: go-fullstack]**
-- [ ] New package `internal/geoip/geoip.go` — load the `.mmdb` via `embed.FS` at startup; expose `Lookup(ip net.IP) (country, city string)` returning empty strings for unresolvable / RFC1918 / IPv6 link-local. Singleton initialised once in `cmd/wireguard-dashboard/main.go`. **[Agent: go-fullstack]**
-- [ ] Unit test in `internal/geoip/geoip_test.go` — table-driven cases: known US public IP, known EU public IP, RFC1918 10.x, RFC1918 192.168.x, IPv6 fe80::, malformed input. **[Agent: go-fullstack]**
-- [ ] Extend `internal/server/handlers_clients.go` (or its successor) — build per-row `clientRow` that includes the resolved geo, sourced from the peer's `endpoint` column already returned by `wg show wg0 dump`. **[Agent: go-fullstack]**
-- [ ] Replace `web/templates/tabs/clients.html` placeholder with the real table. Columns: name, WG IP, online (pill), last-handshake, rx, tx, endpoint, geo. Empty state matches v3 wording ("No clients configured. Add via `terraform/dev/main.tf`."). **[Agent: go-fullstack]**
-- [ ] Extend `internal/server/server_test.go` — `GET /partial/clients` returns 200 and includes the geo column header + a known peer's row. **[Agent: go-fullstack]**
+- [x] Vendor `internal/geoip/GeoLite2-City.mmdb` (download from MaxMind; commit alongside `LICENSE-GeoLite2.txt` with CC BY-SA 4.0 attribution). Add an `internal/geoip/README.md` documenting the refresh procedure (replace file, rebuild). **[Agent: go-fullstack]** _(actual size 63 MB, not the ~7 MB the spec originally estimated — that was Country, not City; binary grows accordingly. Refresh via `geoipupdate` per the README.)_
+- [x] Add `github.com/oschwald/geoip2-golang` to `go.mod` (`go get` at the current released version). Confirm CGO_ENABLED=0 build still works locally. **[Agent: go-fullstack]** _(v1.13.0 + transitive maxminddb-golang v1.13.0; marked `// indirect` until sub-task 3 imports them)_
+- [x] New package `internal/geoip/geoip.go` — load the `.mmdb` via `embed.FS` at startup; expose `Lookup(ip net.IP) (country, city string)` returning empty strings for unresolvable / RFC1918 / IPv6 link-local. Singleton initialised once in `cmd/wireguard-dashboard/main.go`. **[Agent: go-fullstack]**
+- [x] Unit test in `internal/geoip/geoip_test.go` — table-driven cases: known US public IP, known EU public IP, RFC1918 10.x, RFC1918 192.168.x, IPv6 fe80::, malformed input. **[Agent: go-fullstack]**
+- [x] Extend `internal/server/handlers_clients.go` (or its successor) — build per-row `clientRow` that includes the resolved geo, sourced from the peer's `endpoint` column already returned by `wg show wg0 dump`. **[Agent: go-fullstack]** _(also updated `handlers_snapshot.go` — second `buildClientRows` call site the spec didn't list; mechanical `nil` / `s.geoipSvc` arg add. Added `Geo` struct + `GeoResolver` interface in `clientrows.go`; `server.New(...)` now takes `*geoip.Service` as trailing arg.)_
+- [x] Replace `web/templates/tabs/clients.html` placeholder with the real table. Columns: name, WG IP, online (pill), last-handshake, rx, tx, endpoint, geo. Empty state matches v3 wording ("No clients configured. Add via `terraform/dev/main.tf`."). **[Agent: go-fullstack]**
+- [x] Extend `internal/server/server_test.go` — `GET /partial/clients` returns 200 and includes the geo column header + a known peer's row. **[Agent: go-fullstack]**
 - [ ] Verify locally with a seeded SQLite: Clients tab renders all peers with country/city; RFC1918 endpoint shows "—". **[Agent: go-fullstack]**
 
 ---

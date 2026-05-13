@@ -21,6 +21,7 @@ import (
 	dashboard "wireguard-dashboard"
 	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
+	"wireguard-dashboard/internal/geoip"
 	"wireguard-dashboard/internal/poller"
 	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/server"
@@ -77,6 +78,19 @@ func main() {
 	// forever.
 	procSvc := proc.New()
 
+	// geoip.New parses the embedded GeoLite2-City.mmdb once at startup. A
+	// failure here means the committed mmdb is corrupt — the binary cannot
+	// recover at runtime, so fail fast before any handlers are wired. The
+	// reader is held for the lifetime of the process and passed into
+	// server.New so buildClientRows can resolve each peer endpoint's country
+	// and city for the clients card.
+	geoipSvc, err := geoip.New()
+	if err != nil {
+		slog.Error("geoip: init failed", "err", err)
+		os.Exit(1)
+	}
+	defer func() { _ = geoipSvc.Close() }()
+
 	// Best-effort warm sample so the first /api/snapshot or page render
 	// has non-zero CPU% / rates. Errors here are non-fatal — failure on
 	// the Mac (no /proc) shouldn't block local dev, and on the EC2 a real
@@ -122,7 +136,7 @@ func main() {
 	pollerSvc := poller.New(metricsDB, procSvc, wgSvc, clientsfileSvc)
 	go pollerSvc.Run(ctx)
 
-	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB)
+	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc)
 	if err != nil {
 		log.Fatalf("server init failed: %v", err)
 	}

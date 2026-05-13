@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -55,6 +56,47 @@ func fakeWgSvc() *wg.Service {
 		Iface: "wg0",
 	}
 }
+
+// seededClientsfileSvc returns a clientsfile.Service whose Reader emits a
+// one-entry manifest matching the peer line that seededWgSvc returns. Kept
+// alongside fakeClientsfileSvc rather than parameterising the original so each
+// test's wiring stays readable at the call site.
+func seededClientsfileSvc(name, address, publicKey string) *clientsfile.Service {
+	manifest := fmt.Sprintf(`[{"name":%q,"address":%q,"public_key":%q}]`, name, address, publicKey)
+	return &clientsfile.Service{
+		Reader: func(string) ([]byte, error) { return []byte(manifest), nil },
+		Path:   "/test/clients.json",
+	}
+}
+
+// seededWgSvc returns a *wg.Service whose Runner emits the server-info line
+// followed by a single peer line. handshakeAgo positions the peer's latest
+// handshake relative to time.Now() so the test can drive online vs offline
+// status deterministically — pass a value under onlineThreshold (3m) to land
+// on "online". Endpoint / allowedIPs / rx / tx are caller-supplied so the
+// same helper covers both the geo-resolution and unresolvable-IP cases.
+func seededWgSvc(publicKey, endpoint, allowedIPs string, handshakeAgo time.Duration, rx, tx int64) *wg.Service {
+	handshake := time.Now().Add(-handshakeAgo).Unix()
+	peerLine := fmt.Sprintf("%s\t(none)\t%s\t%s\t%d\t%d\t%d\toff\n",
+		publicKey, endpoint, allowedIPs, handshake, rx, tx)
+	return &wg.Service{
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("server-key\tserver-pub\t51820\toff\n" + peerLine), nil
+		},
+		Iface: "wg0",
+	}
+}
+
+// staticGeoResolver implements server.GeoResolver with a constant return for
+// every Lookup. Used by the seeded-row partial-clients test to assert that
+// the geo cell renders the resolver's output — the resolver's real filtering
+// behaviour (RFC1918, mmdb misses) is covered separately in clientrows_test.go.
+type staticGeoResolver struct {
+	country string
+	city    string
+}
+
+func (s staticGeoResolver) Lookup(_ net.IP) (string, string) { return s.country, s.city }
 
 // fakeProcSvc returns a *proc.Service with an in-memory Reader that serves
 // canned /proc/stat, /proc/meminfo, /proc/uptime and /sys/class/net/wg0
@@ -164,7 +206,8 @@ func TestHandleIndex_Success(t *testing.T) {
 	}
 	systemdSvc := systemdRunnerActive(enteredAt)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t))
+	// nil geo resolver is allowed — geo is advisory.
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -265,7 +308,8 @@ func TestHandleIndex_BothErrors(t *testing.T) {
 		Runner: fakeSystemdRunnerErr,
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t))
+	// nil geo resolver is allowed — geo is advisory.
+	handler, err := server.New(dashboard.WebFS(), infoSvc, systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -318,7 +362,8 @@ func TestHandleGetService_IncludesEvents(t *testing.T) {
 		},
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB)
+	// nil geo resolver is allowed — geo is advisory.
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -372,7 +417,8 @@ func TestHandleGetPartialDashboard_RendersFragment(t *testing.T) {
 	}
 	systemdSvc := systemdRunnerActive(enteredAt)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t))
+	// nil geo resolver is allowed — geo is advisory.
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -422,7 +468,8 @@ func TestHandleGetPartialTabs(t *testing.T) {
 	}
 	systemdSvc := systemdRunnerActive(enteredAt)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t))
+	// nil geo resolver is allowed — geo is advisory.
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -433,7 +480,10 @@ func TestHandleGetPartialTabs(t *testing.T) {
 		wantBodyContains string
 	}{
 		{"overview", "/partial/overview", `id="server-info"`},
-		{"clients", "/partial/clients", "Coming soon"},
+		// sub-task 7 expands this with a seeded-row assertion; for now the
+		// fake clientsfile + fake wg both return empty so the template renders
+		// the empty-state branch.
+		{"clients", "/partial/clients", "No clients configured"},
 		{"system", "/partial/system", "Coming soon"},
 		{"network", "/partial/network", "Coming soon"},
 		{"events", "/partial/events", "Coming soon"},
@@ -463,5 +513,85 @@ func TestHandleGetPartialTabs(t *testing.T) {
 				t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
 			}
 		})
+	}
+}
+
+// TestHandleGetPartialClients_SeededRow proves the populated branch of the
+// clients template: when the clientsfile manifest joins cleanly with a peer
+// returned by `wg show wg0 dump`, the fragment renders the table header
+// (including the geo column added in Slice 4 sub-task 6) plus one row
+// containing the seeded name, WG IP, and resolved geo cell.
+//
+// The geo resolver is a constant-return fake — the real geoip.Service is
+// covered by its own tests; here we only need to prove the wiring runs the
+// resolver and the template emits "City, Country" as the cell text.
+func TestHandleGetPartialClients_SeededRow(t *testing.T) {
+	const (
+		fakeIP      = "203.0.113.1"
+		fakeKey     = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK="
+		peerName    = "alice"
+		peerAddress = "172.16.15.5/32"
+		// 44-char base64 — synthetic peer key, distinct from the server pub.
+		peerPublicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+		peerEndpoint  = "198.51.100.42:51820"
+	)
+
+	enteredAt := time.Now().Add(-(2*time.Hour + 3*time.Minute))
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: fakeIP},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte(fakeKey + "\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(enteredAt)
+
+	clientsSvc := seededClientsfileSvc(peerName, peerAddress, peerPublicKey)
+	// 10s ago — well within onlineThreshold (3m) so status renders "online".
+	wgSvc := seededWgSvc(peerPublicKey, peerEndpoint, peerAddress, 10*time.Second, 123456, 654321)
+
+	geo := staticGeoResolver{country: "US", city: "San Francisco"}
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial/clients", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want %q", got, "text/html; charset=utf-8")
+	}
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		// Geo column header was the Slice 4 sub-task 6 addition; its
+		// presence proves we're rendering the populated table, not the
+		// pre-Slice-4 layout.
+		"<th>Geo</th>",
+		peerName,
+		peerAddress,
+		// Template renders "City, Country" when both fields are non-empty.
+		"San Francisco, US",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
+		}
+	}
+
+	// Must be on the populated branch — the empty-state copy would mean
+	// the join silently dropped the row.
+	if strings.Contains(body, "No clients configured") {
+		t.Errorf("body unexpectedly contains empty-state copy:\n%s", body)
+	}
+	// Fragments must not include a full HTML document — same invariant as
+	// the other partial tests.
+	if strings.Contains(body, "<html") {
+		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
 	}
 }

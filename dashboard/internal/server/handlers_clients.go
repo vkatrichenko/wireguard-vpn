@@ -37,7 +37,7 @@ func (s *server) handleGetClients(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows := buildClientRows(clients, peers, time.Now())
+	rows := buildClientRows(clients, peers, time.Now(), s.geoipSvc)
 
 	// json.Marshal of a nil slice emits "null"; an empty `[]ClientRow{}`
 	// emits "[]". buildClientRows always returns a non-nil slice (it
