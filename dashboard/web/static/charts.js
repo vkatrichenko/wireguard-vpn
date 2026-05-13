@@ -269,14 +269,32 @@
   // client row is clicked. Match on requestConfig.path so we don't react
   // to unrelated htmx swaps (e.g. tab partials, the 10s metrics refresh).
   document.body.addEventListener("htmx:afterSwap", function (event) {
+    const target = event.detail && event.detail.target;
+
+    // Per-client detail expand — existing behavior.
     const path = (event.detail && event.detail.requestConfig && event.detail.requestConfig.path) || "";
     const m = path.match(/^\/partial\/clients\/([^/]+)\/detail$/);
-    if (!m) return;
-    const pubkey = decodeURIComponent(m[1]);
-    const canvas = document.getElementById("client-chart-" + pubkey);
-    if (!canvas) return;
-    const range = canvas.dataset.range || "24h";
-    initClientChart(pubkey, range);
+    if (m) {
+      const pubkey = decodeURIComponent(m[1]);
+      const canvas = document.getElementById("client-chart-" + pubkey);
+      if (canvas) {
+        const range = canvas.dataset.range || "24h";
+        initClientChart(pubkey, range);
+      }
+      return;
+    }
+
+    // Tab-body swap — may have brought new canvas[data-chart] elements in.
+    // System tab embeds chart-cpu + chart-memory; Network tab will embed
+    // chart-rx + chart-tx (Slice 8). If we have a cached payload, re-render
+    // against the new DOM. If lastPayload is still null, the initial fetch
+    // hasn't returned yet — when it does, renderCharts will find whatever
+    // canvases are in the DOM at that moment, so no action needed here.
+    if (target && target.id === "tab-body") {
+      if (lastPayload) {
+        renderCharts(lastPayload);
+      }
+    }
   });
 
   window.addEventListener("__themeChanged", applyThemeToCharts);
