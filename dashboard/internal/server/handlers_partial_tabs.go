@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"wireguard-dashboard/internal/disk"
+	"wireguard-dashboard/internal/proc"
 )
 
 // clientsTabData is the view-model handed to the `clients` template. It pairs
@@ -65,10 +68,52 @@ func (s *server) handleGetPartialClients(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// handleGetPartialSystem renders the System tab body — placeholder in Slice 1.
-func (s *server) handleGetPartialSystem(w http.ResponseWriter, _ *http.Request) {
+// systemTabData is the view-model for the `system-tab` fragment. Stats backs
+// the CPU/memory/host-uptime numeric card; Disk backs the disk-usage table.
+// Each section has its own *Error / inline-struct branch so a failure in one
+// subsystem renders an inline error without blanking the other — the tab body
+// IS the entire htmx response, so a hard 500 would leave the previous tab
+// content in place and hide the failure from the operator.
+type systemTabData struct {
+	Stats      *proc.Stats
+	StatsError string
+	Disk       diskCardData
+}
+
+// diskCardData mirrors the {Mounts, Error} shape the `disk` template branches
+// on internally. Inlining the struct here (rather than registering a `dict`
+// template helper) keeps the template's data contract type-checked at compile
+// time and avoids a global helper that has no other caller yet.
+type diskCardData struct {
+	Mounts []disk.Mount
+	Error  string
+}
+
+// handleGetPartialSystem renders the System tab body — combines the CPU/mem
+// large-numerics card (sourced from proc.Sample) with the disk usage table
+// (sourced from disk.Sample). Each fetch failure is surfaced inline on the
+// corresponding card; the other card still renders.
+func (s *server) handleGetPartialSystem(w http.ResponseWriter, r *http.Request) {
+	data := systemTabData{}
+
+	stats, err := s.procSvc.Sample(r.Context())
+	if err != nil {
+		slog.Error("GET /partial/system: proc sample failed", "err", err)
+		data.StatsError = err.Error()
+	} else {
+		data.Stats = &stats
+	}
+
+	mounts, err := s.diskSvc.Sample(r.Context())
+	if err != nil {
+		slog.Error("GET /partial/system: disk sample failed", "err", err)
+		data.Disk.Error = err.Error()
+	} else {
+		data.Disk.Mounts = mounts
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "system-tab", nil); err != nil {
+	if err := s.tmpl.ExecuteTemplate(w, "system-tab", data); err != nil {
 		slog.Error("GET /partial/system: template render failed", "err", err)
 		http.Error(w, "template render failed", http.StatusInternalServerError)
 		return

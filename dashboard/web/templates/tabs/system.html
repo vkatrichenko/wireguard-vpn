@@ -1,1 +1,12 @@
-{{ define "system-tab" }}<section class="card empty"><p class="empty">Coming soon.</p></section>{{ end }}
+{{ define "system-tab" }}
+{{ if .StatsError }}
+<section class="card error">{{ .StatsError }}</section>
+{{ else if .Stats }}
+{{ template "system" .Stats }}
+{{ end }}
+
+{{ template "chart-cpu" }}
+{{ template "chart-memory" }}
+
+{{ template "disk" .Disk }}
+{{ end }}

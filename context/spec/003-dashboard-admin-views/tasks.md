@@ -77,7 +77,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 - [x] Update `web/static/tabs.js` — on tab-body swap, if hash carries `?expand=<key>`, trigger the row's `hx-get` automatically. **[Agent: go-fullstack]**
 - [x] CSS: `.detail-row` collapsed by default; one-row-expanded constraint enforced via JS (`tabs.js` collapses any other open detail before opening the new one). **[Agent: go-fullstack]**
 - [x] Unit test: `GET /api/metrics/client/<known>` returns rates with monotonic ts; `GET /api/metrics/client/<known>?range=99x` returns 400. **[Agent: go-fullstack]**
-- [ ] Verify locally + on EC2 after the next CI deploy: click a row, chart renders, p95 figure displays. Open `#clients?expand=<pubkey>` directly, that row is pre-expanded. **[Agent: go-fullstack]**
+- [x] Verify locally + on EC2 after the next CI deploy: click a row, chart renders, p95 figure displays. Open `#clients?expand=<pubkey>` directly, that row is pre-expanded. **[Agent: go-fullstack]**
 
 ---
 
@@ -85,12 +85,12 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** System tab is no longer a "coming soon" placeholder: it shows current CPU/mem (existing) plus the new disk usage card. Time-range selector arrives in Slice 9; until then System defaults to 24 h.
 
-- [ ] New package `internal/disk/disk.go` — parse `/proc/mounts`; for each non-pseudo filesystem (skip `tmpfs`, `devtmpfs`, `overlay`, `squashfs`, `proc`, `sysfs`, `cgroup*`, `debugfs`, `tracefs`), call `unix.Statfs` and compute `{Path, FsType, Used, Total, PctFull}`. **[Agent: go-fullstack]**
-- [ ] Unit test in `internal/disk/disk_test.go` — synthesise a `/proc/mounts` fixture file, mock the Statfs call via an injected function, assert filter + math + threshold helpers. **[Agent: go-fullstack]**
-- [ ] New `web/templates/cards/disk.html` — rows per mount with mount path, used / total (human-formatted via existing `humanBytes`), percentage-full progress bar. Bar class amber ≥80 %, red ≥95 %. **[Agent: go-fullstack]**
-- [ ] Promote `web/templates/tabs/system.html` from placeholder — embeds existing CPU/mem large-numeric cards + the new disk card. Reuse existing CPU/mem 24 h charts inside the tab body (move them out of the global `<section class="charts-grid">`). **[Agent: go-fullstack]**
-- [ ] CSS for `.progress-bar` (foreground/background tokens, transition on percentage width). **[Agent: go-fullstack]**
-- [ ] Server-side test: `GET /partial/system` returns 200; body contains `"Top mounts"` (or whatever the disk card heading is) and the percentage bar markup. **[Agent: go-fullstack]**
+- [x] New package `internal/disk/disk.go` — parse `/proc/mounts`; for each non-pseudo filesystem (skip `tmpfs`, `devtmpfs`, `overlay`, `squashfs`, `proc`, `sysfs`, `cgroup*`, `debugfs`, `tracefs`), call `unix.Statfs` and compute `{Path, FsType, Used, Total, PctFull}`. **[Agent: go-fullstack]**
+- [x] Unit test in `internal/disk/disk_test.go` — synthesise a `/proc/mounts` fixture file, mock the Statfs call via an injected function, assert filter + math + threshold helpers. **[Agent: go-fullstack]**
+- [x] New `web/templates/cards/disk.html` — rows per mount with mount path, used / total (human-formatted via existing `humanBytes`), percentage-full progress bar. Bar class amber ≥80 %, red ≥95 %. **[Agent: go-fullstack]**
+- [x] Promote `web/templates/tabs/system.html` from placeholder — embeds existing CPU/mem large-numeric cards + the new disk card. Reuse existing CPU/mem 24 h charts inside the tab body (move them out of the global `<section class="charts-grid">`). **[Agent: go-fullstack]**
+- [x] CSS for `.progress-bar` (foreground/background tokens, transition on percentage width). **[Agent: go-fullstack]**
+- [x] Server-side test: `GET /partial/system` returns 200; body contains `"Top mounts"` (or whatever the disk card heading is) and the percentage bar markup. **[Agent: go-fullstack]**
 - [ ] Verify locally: System tab renders disk rows for `/` and any other mounts. Threshold colors verified by editing the test fixture to force a >95 % row. **[Agent: go-fullstack]**
 
 ---

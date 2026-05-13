@@ -21,6 +21,7 @@ import (
 	dashboard "wireguard-dashboard"
 	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
+	"wireguard-dashboard/internal/disk"
 	"wireguard-dashboard/internal/geoip"
 	"wireguard-dashboard/internal/poller"
 	"wireguard-dashboard/internal/proc"
@@ -77,6 +78,13 @@ func main() {
 	// would reset those priors and the dashboard would render zero rates
 	// forever.
 	procSvc := proc.New()
+
+	// disk.New() wires os.ReadFile + unix.Statfs against /proc/mounts. Unlike
+	// procSvc the service holds no prior-sample state — Sample is a fresh read
+	// each call — but it is still constructed once and shared by the poller
+	// (Slice 6 sub-task 5) and the system-tab handler so the seam stays
+	// uniform across packages.
+	diskSvc := disk.New()
 
 	// geoip.New parses the embedded GeoLite2-City.mmdb once at startup. A
 	// failure here means the committed mmdb is corrupt — the binary cannot
@@ -136,7 +144,7 @@ func main() {
 	pollerSvc := poller.New(metricsDB, procSvc, wgSvc, clientsfileSvc)
 	go pollerSvc.Run(ctx)
 
-	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc)
+	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc)
 	if err != nil {
 		log.Fatalf("server init failed: %v", err)
 	}

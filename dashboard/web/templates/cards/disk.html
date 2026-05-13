@@ -1,0 +1,36 @@
+{{ define "disk" }}
+<section id="disk" class="card">
+  <h2>Disk</h2>
+  {{ if .Error }}
+  <p class="error">Failed to load disk usage: {{ .Error }}</p>
+  {{ else if .Mounts }}
+  <table class="disk-table">
+    <thead>
+      <tr>
+        <th>Mount</th>
+        <th>Filesystem</th>
+        <th>Used / Total</th>
+        <th>Full</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .Mounts }}
+      <tr class="disk-row">
+        <td><code>{{ .Path }}</code></td>
+        <td>{{ .FsType }}</td>
+        <td>{{ humanBytes .Used }} / {{ humanBytes .Total }}</td>
+        <td>
+          <div class="progress-bar">
+            <div class="progress-bar-fill threshold-{{ threshold .PctFull }}" style="width: {{ .PctFull }}%"></div>
+            <span class="progress-bar-label">{{ printf "%.1f%%" .PctFull }}</span>
+          </div>
+        </td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+  {{ else }}
+  <p class="empty">No mounted filesystems detected.</p>
+  {{ end }}
+</section>
+{{ end }}
