@@ -25,6 +25,7 @@ import (
 	"wireguard-dashboard/internal/geoip"
 	"wireguard-dashboard/internal/poller"
 	"wireguard-dashboard/internal/proc"
+	"wireguard-dashboard/internal/processes"
 	"wireguard-dashboard/internal/server"
 	"wireguard-dashboard/internal/serverinfo"
 	"wireguard-dashboard/internal/systemd"
@@ -79,6 +80,13 @@ func main() {
 	// forever.
 	procSvc := proc.New()
 
+	// processes.New() must be a singleton for the same reason as procSvc —
+	// it holds the prior per-PID jiffies map under a mutex so each Sample
+	// call can compute per-process CPU% as a delta against the previous
+	// reading. A fresh Service per request would always be a "first sample"
+	// and render zero CPU% for every row.
+	processesSvc := processes.New()
+
 	// disk.New() wires os.ReadFile + unix.Statfs against /proc/mounts. Unlike
 	// procSvc the service holds no prior-sample state — Sample is a fresh read
 	// each call — but it is still constructed once and shared by the poller
@@ -108,6 +116,18 @@ func main() {
 		defer cancel()
 		if _, err := procSvc.Sample(ctx); err != nil {
 			slog.Warn("proc warm-sample failed", "err", err)
+		}
+	}()
+
+	// Same rationale as the procSvc warm-sample above: prime the prior
+	// per-PID jiffies map so the first System-tab render has non-zero
+	// per-process CPU% deltas. Non-fatal for the same reasons — no /proc
+	// on the Mac dev box, real EC2 failures resurface on the first request.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if _, err := processesSvc.Sample(ctx); err != nil {
+			slog.Warn("processes warm-sample failed", "err", err)
 		}
 	}()
 
@@ -144,7 +164,7 @@ func main() {
 	pollerSvc := poller.New(metricsDB, procSvc, wgSvc, clientsfileSvc)
 	go pollerSvc.Run(ctx)
 
-	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc)
+	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc)
 	if err != nil {
 		log.Fatalf("server init failed: %v", err)
 	}

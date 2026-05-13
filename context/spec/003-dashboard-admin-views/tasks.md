@@ -91,7 +91,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 - [x] Promote `web/templates/tabs/system.html` from placeholder — embeds existing CPU/mem large-numeric cards + the new disk card. Reuse existing CPU/mem 24 h charts inside the tab body (move them out of the global `<section class="charts-grid">`). **[Agent: go-fullstack]**
 - [x] CSS for `.progress-bar` (foreground/background tokens, transition on percentage width). **[Agent: go-fullstack]**
 - [x] Server-side test: `GET /partial/system` returns 200; body contains `"Top mounts"` (or whatever the disk card heading is) and the percentage bar markup. **[Agent: go-fullstack]**
-- [ ] Verify locally: System tab renders disk rows for `/` and any other mounts. Threshold colors verified by editing the test fixture to force a >95 % row. **[Agent: go-fullstack]**
+- [x] Verify locally: System tab renders disk rows for `/` and any other mounts. Threshold colors verified by editing the test fixture to force a >95 % row. **[Agent: go-fullstack]**
 
 ---
 
@@ -99,12 +99,12 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** System tab now also shows a top-5 process table that updates each 10 s tick.
 
-- [ ] New package `internal/processes/processes.go` — `Service` struct (singleton, mutex-guarded prior snapshot), `Sample(ctx)` reads `/proc/[pid]/stat`, `/proc/[pid]/status`, `/proc/[pid]/cmdline` for every PID, computes per-PID CPU% via `(utime + stime)` delta against `/proc/stat` total-jiffies delta, returns top-5 sorted by CPU%. ENOENT during walk → skip (PID exited race). **[Agent: go-fullstack]**
-- [ ] Unit test — populate a `TempDir`-rooted synthetic `/proc` tree at two snapshots; assert delta math + top-5 ordering + ENOENT tolerance. Inject the proc root path via constructor argument. **[Agent: go-fullstack]**
-- [ ] Wire `processes.New(...)` singleton in `cmd/wireguard-dashboard/main.go` alongside `proc.Service`. Add a warm-sample on startup so the first request has non-zero deltas. **[Agent: go-fullstack]**
-- [ ] New `web/templates/cards/processes.html` — table: PID, user, CPU%, mem%, command (truncated to 60 chars, `title=` tooltip with full cmdline). **[Agent: go-fullstack]**
-- [ ] Wire the processes card into `web/templates/tabs/system.html`. **[Agent: go-fullstack]**
-- [ ] Server-side test: `GET /partial/system` body contains a PID row sentinel. **[Agent: go-fullstack]**
+- [x] New package `internal/processes/processes.go` — `Service` struct (singleton, mutex-guarded prior snapshot), `Sample(ctx)` reads `/proc/[pid]/stat`, `/proc/[pid]/status`, `/proc/[pid]/cmdline` for every PID, computes per-PID CPU% via `(utime + stime)` delta against `/proc/stat` total-jiffies delta, returns top-5 sorted by CPU%. ENOENT during walk → skip (PID exited race). **[Agent: go-fullstack]**
+- [x] Unit test — populate a `TempDir`-rooted synthetic `/proc` tree at two snapshots; assert delta math + top-5 ordering + ENOENT tolerance. Inject the proc root path via constructor argument. **[Agent: go-fullstack]**
+- [x] Wire `processes.New(...)` singleton in `cmd/wireguard-dashboard/main.go` alongside `proc.Service`. Add a warm-sample on startup so the first request has non-zero deltas. **[Agent: go-fullstack]**
+- [x] New `web/templates/cards/processes.html` — table: PID, user, CPU%, mem%, command (truncated to 60 chars, `title=` tooltip with full cmdline). **[Agent: go-fullstack]**
+- [x] Wire the processes card into `web/templates/tabs/system.html`. **[Agent: go-fullstack]**
+- [x] Server-side test: `GET /partial/system` body contains a PID row sentinel. **[Agent: go-fullstack]**
 - [ ] Verify locally: top-5 visibly re-orders as you hit the page with `stress --cpu 2` running in another terminal. **[Agent: go-fullstack]**
 
 ---
