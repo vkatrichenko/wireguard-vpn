@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net"
 	"time"
 
 	"wireguard-dashboard/internal/clientsfile"
@@ -18,6 +19,26 @@ import (
 // arbitrary UI choice.
 const onlineThreshold = 3 * time.Minute
 
+// Geo is the resolved country/city pair for a peer's most recent endpoint IP.
+// Empty strings mean "unresolvable" (private/loopback range, mmdb miss, or no
+// endpoint at all) — the template renders them as an em-dash. Both fields
+// carry `omitempty` so a fully-empty Geo serialises to `{}` rather than two
+// empty strings; the outer field tag's `omitempty` on a struct value does NOT
+// drop the empty object itself (encoding/json only omits empty pointers /
+// nil interfaces / zero scalars), so a marshalled ClientRow with no geo
+// shows `"geo":{}`. Documented here so a reader doesn't mistake it for a bug.
+type Geo struct {
+	Country string `json:"country,omitempty"` // ISO-3166 alpha-2, e.g. "US"
+	City    string `json:"city,omitempty"`    // English city name
+}
+
+// GeoResolver looks up an IP. *geoip.Service satisfies this; tests can pass
+// a fake. Returning ("", "") is a valid no-op response, not an error — the
+// resolver is purely advisory.
+type GeoResolver interface {
+	Lookup(ip net.IP) (country, city string)
+}
+
 // ClientRow is the joined view-model that GET /api/clients returns and that
 // cards/client-list.html consumes. It pairs human-friendly manifest fields
 // (Name, Address) with live `wg show` state (handshake, byte counters,
@@ -34,6 +55,7 @@ type ClientRow struct {
 	TransferRx      int64     `json:"transfer_rx"`
 	TransferTx      int64     `json:"transfer_tx"`
 	Endpoint        string    `json:"endpoint,omitempty"`
+	Geo             Geo       `json:"geo,omitempty"` // see Geo's doc — `omitempty` on a struct value does not drop the empty object
 }
 
 // buildClientRows performs the manifest+wg outer-join and returns rows in
@@ -59,7 +81,12 @@ type ClientRow struct {
 //
 // The returned slice is never nil, even when both inputs are empty — callers
 // that JSON-marshal it get a stable `[]` rather than `null`.
-func buildClientRows(clients []clientsfile.Client, peers []wg.Peer, now time.Time) []ClientRow {
+//
+// geo is optional — pass nil to skip the lookup. The resolver is consulted
+// only when the row has a non-empty endpoint and the endpoint parses as
+// host:port with a recognisable IP. All failure paths leave Geo as its
+// zero value, never blocking the row.
+func buildClientRows(clients []clientsfile.Client, peers []wg.Peer, now time.Time, geo GeoResolver) []ClientRow {
 	// Inline index — only one caller; not worth a helper in the wg package.
 	peerByKey := make(map[string]wg.Peer, len(peers))
 	for _, p := range peers {
@@ -84,6 +111,7 @@ func buildClientRows(clients []clientsfile.Client, peers []wg.Peer, now time.Tim
 			row.TransferRx = p.TransferRx
 			row.TransferTx = p.TransferTx
 			row.Endpoint = p.Endpoint
+			row.Geo = resolveGeo(geo, row.Endpoint)
 			if !p.LatestHandshake.IsZero() && now.Sub(p.LatestHandshake) <= onlineThreshold {
 				row.Status = "online"
 			} else {
@@ -106,8 +134,28 @@ func buildClientRows(clients []clientsfile.Client, peers []wg.Peer, now time.Tim
 			TransferRx:      p.TransferRx,
 			TransferTx:      p.TransferTx,
 			Endpoint:        p.Endpoint,
+			Geo:             resolveGeo(geo, p.Endpoint),
 		})
 	}
 
 	return rows
+}
+
+// resolveGeo runs the resolver against a `host:port` endpoint string and
+// returns the resulting Geo. Empty/malformed/unresolvable inputs yield the
+// zero Geo. The nil-resolver guard lets callers (and tests) opt out cheaply.
+func resolveGeo(geo GeoResolver, endpoint string) Geo {
+	if geo == nil || endpoint == "" {
+		return Geo{}
+	}
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return Geo{}
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return Geo{}
+	}
+	country, city := geo.Lookup(ip)
+	return Geo{Country: country, City: city}
 }

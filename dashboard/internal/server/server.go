@@ -38,6 +38,7 @@ type server struct {
 	wgSvc          *wg.Service
 	procSvc        *proc.Service
 	metricsDB      *db.DB
+	geoipSvc       GeoResolver
 }
 
 // pageData is the view-model for the dashboard index template. The *Error
@@ -95,6 +96,7 @@ func New(
 	wgSvc *wg.Service,
 	procSvc *proc.Service,
 	metricsDB *db.DB,
+	geoipSvc GeoResolver,
 ) (http.Handler, error) {
 	// Two globs because templates/*.html does not recurse into cards/. The
 	// cards/ directory holds named-template fragments ({{ define "..." }})
@@ -126,6 +128,7 @@ func New(
 		wgSvc:          wgSvc,
 		procSvc:        procSvc,
 		metricsDB:      metricsDB,
+		geoipSvc:       geoipSvc,
 	}
 
 	// Static-file route — serves the embedded `web/static/` subtree (Chart.js
@@ -256,7 +259,7 @@ func (s *server) buildPageData(ctx context.Context) pageData {
 		slog.Error("buildPageData: clients fetch failed", "err", joined)
 		data.ClientsError = joined.Error()
 	} else {
-		data.ClientRows = buildClientRows(clients, peers, time.Now())
+		data.ClientRows = buildClientRows(clients, peers, time.Now(), s.geoipSvc)
 	}
 
 	// proc.Sample feeds the system + network-rate cards. The sample is

@@ -1,1 +1,39 @@
-{{ define "clients" }}<section class="card empty"><p class="empty">Coming soon.</p></section>{{ end }}
+{{ define "clients" }}
+<section class="card">
+  <h2>Clients</h2>
+  {{ if .Error }}
+  <p class="error">Failed to load clients: {{ .Error }}</p>
+  {{ else if .Rows }}
+  <table class="client-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>WG IP</th>
+        <th>Status</th>
+        <th>Last handshake</th>
+        <th>Rx</th>
+        <th>Tx</th>
+        <th>Endpoint</th>
+        <th>Geo</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .Rows }}
+      <tr class="client-row status-{{ .Status }}">
+        <td>{{ if .Name }}{{ .Name }}{{ else }}<em>(unknown)</em>{{ end }}</td>
+        <td>{{ if .Address }}{{ .Address }}{{ else }}—{{ end }}</td>
+        <td><span class="status-pill status-{{ .Status }}">{{ .Status }}</span></td>
+        <td>{{ if .LatestHandshake.IsZero }}never{{ else }}{{ humanAgo .LatestHandshake }}{{ end }}</td>
+        <td>{{ humanBytes .TransferRx }}</td>
+        <td>{{ humanBytes .TransferTx }}</td>
+        <td>{{ if .Endpoint }}{{ .Endpoint }}{{ else }}—{{ end }}</td>
+        <td>{{ with .Geo }}{{ if .Country }}{{ if .City }}{{ .City }}, {{ .Country }}{{ else }}{{ .Country }}{{ end }}{{ else }}—{{ end }}{{ end }}</td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+  {{ else }}
+  <p class="empty">No clients configured. Add via <code>terraform/dev/main.tf</code>.</p>
+  {{ end }}
+</section>
+{{ end }}
