@@ -1,6 +1,8 @@
 {{ define "system-tab" }}
-{{ template "chart-cpu" }}
-{{ template "chart-memory" }}
+<div class="system-charts">
+  {{ template "chart-cpu" }}
+  {{ template "chart-memory" }}
+</div>
 
 {{ template "disk" .Disk }}
 {{ template "processes" .Processes }}
