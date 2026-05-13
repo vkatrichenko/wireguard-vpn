@@ -584,7 +584,7 @@ func TestHandleGetPartialClients_SeededRow(t *testing.T) {
 		// prefixes without committing to the exact pubkey encoding so a
 		// future urlquery rewrite doesn't break the test.
 		`hx-get="/partial/clients/`,
-		`hx-target="#detail-`,
+		`hx-target="[id='detail-`,
 		`hx-swap="innerHTML"`,
 		`class="detail-row hidden"`,
 		`id="detail-`,
@@ -603,6 +603,98 @@ func TestHandleGetPartialClients_SeededRow(t *testing.T) {
 	// the other partial tests.
 	if strings.Contains(body, "<html") {
 		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
+	}
+}
+
+// TestHandleGetPartialClients_SeededRow_PubkeyWithSpecialChars locks in the
+// fix for the row-expand crash on pubkeys containing base64's `+`, `/`, or `=`
+// characters. The original `hx-target="#detail-{{ .PublicKey }}"` form fed the
+// raw pubkey to document.querySelector as a CSS id selector, which rejects
+// those characters and throws SyntaxError. The fix switches to an attribute
+// selector — `hx-target="[id='detail-...']"` — which tolerates any non-quote
+// content. This test pins the new shape end-to-end:
+//
+//   - html/template renders `+` as `&#43;` inside both the id and hx-target
+//     attribute values; the browser decodes the entity back to `+` at HTML
+//     parse time so getElementById and the attribute-selector match work on
+//     the runtime string. We assert on the escaped form because that's what
+//     is on the wire;
+//   - `/` and `=` pass through verbatim — htmx receives `[id='detail-.../...=']`
+//     at runtime, which CSS attribute selectors accept;
+//   - the broken `hx-target="#detail-` form MUST be absent — this is the
+//     regression guard;
+//   - the hx-get URL still encodes `+` as `%2B`, `/` as `%2F`, `=` as `%3D`
+//     via the existing `urlquery` pipeline.
+func TestHandleGetPartialClients_SeededRow_PubkeyWithSpecialChars(t *testing.T) {
+	const (
+		fakeIP      = "203.0.113.1"
+		fakeKey     = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK="
+		peerName    = "carol"
+		peerAddress = "172.16.15.7/32"
+		// Realistic 44-char base64 pubkey containing ALL three special
+		// chars that break the CSS id-selector form: `+`, `/`, and `=`
+		// (trailing pad). Locks the fix against any single-char regression.
+		peerPublicKey = "q3cv/s6T9o7E0+A6R6A4IJF9kL6D+SJX/FmgD9aAMWY="
+		peerEndpoint  = "198.51.100.42:51820"
+	)
+
+	enteredAt := time.Now().Add(-(2*time.Hour + 3*time.Minute))
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: fakeIP},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte(fakeKey + "\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(enteredAt)
+
+	clientsSvc := seededClientsfileSvc(peerName, peerAddress, peerPublicKey)
+	wgSvc := seededWgSvc(peerPublicKey, peerEndpoint, peerAddress, 10*time.Second, 1, 2)
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), nil)
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial/clients", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+
+	// html/template HTML-escapes `+` to `&#43;` inside attribute values.
+	// The browser decodes the entity at parse time, so the runtime DOM id
+	// equals the raw pubkey and getElementById round-trips cleanly. We
+	// assert on the wire form (what the server emits) — `/` and `=` are
+	// passed through verbatim, only `+` carries the entity escape.
+	wantIDOnWire := `id="detail-` + strings.ReplaceAll(peerPublicKey, "+", "&#43;") + `"`
+	if !strings.Contains(body, wantIDOnWire) {
+		t.Errorf("body missing %q (wire form of id attribute):\n%s", wantIDOnWire, body)
+	}
+
+	// hx-target MUST be on the attribute-selector form, not the broken
+	// `#detail-...` id-selector form. The single-quote passes through
+	// unescaped inside a `"..."` attribute (html/template only escapes the
+	// outer quote char), so the wire form carries a literal `'`.
+	if !strings.Contains(body, `hx-target="[id='detail-`) {
+		t.Errorf("body missing attribute-selector hx-target prefix:\n%s", body)
+	}
+	if strings.Contains(body, `hx-target="#detail-`) {
+		t.Errorf("body unexpectedly contains broken id-selector hx-target form:\n%s", body)
+	}
+
+	// hx-get URL MUST contain the URL-encoded form of `+`, `/`, and `=`
+	// so the PathValue("pubkey") decode round-trips to the manifest key.
+	// This proves the existing `urlquery` escape on the path side is
+	// untouched by the hx-target fix.
+	for _, want := range []string{"%2B", "%2F", "%3D"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q (URL-encoded special char) in hx-get:\n%s", want, body)
+		}
 	}
 }
 
