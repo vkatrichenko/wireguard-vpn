@@ -263,10 +263,6 @@ func TestHandleIndex_Success(t *testing.T) {
 		`id="service-status"`,
 		`state-active`,
 		"Active since",
-		// uptime card — `humanUptime` of ~2h ago should render "2h Ym".
-		`id="uptime"`,
-		`class="uptime"`,
-		"h ",
 		// client-list card — fakes return an empty manifest and a
 		// server-only `wg show`, so the card renders the empty-state
 		// branch rather than a populated table.
@@ -514,11 +510,13 @@ func TestHandleGetPartialTabs(t *testing.T) {
 		// the empty-state branch.
 		{"clients", "/partial/clients", []string{"No clients configured"}},
 		// Slice 6 sub-task 4 promotes the System tab from placeholder: the
-		// fragment now embeds both the cards/system.html CPU/mem numerics
-		// card (id="system") and the cards/disk.html mount table
-		// (id="disk"). fakeDiskSvc seeds one /-mounted ext4 row at 50% full,
-		// so the populated table branch renders rather than the empty-state.
-		{"system", "/partial/system", []string{`id="system"`, `id="disk"`}},
+		// fragment embeds the cards/disk.html mount table (id="disk").
+		// fakeDiskSvc seeds one /-mounted ext4 row at 50% full, so the
+		// populated table branch renders rather than the empty-state. The
+		// CPU/memory large-numerics card (id="system") was removed from the
+		// System tab after the post-Slice-6 UX pass — it lives on Overview
+		// only now.
+		{"system", "/partial/system", []string{`id="disk"`}},
 		{"network", "/partial/network", []string{"Coming soon"}},
 		{"events", "/partial/events", []string{"Coming soon"}},
 		{"about", "/partial/about", []string{"Coming soon"}},
@@ -615,10 +613,10 @@ func TestHandleGetPartialSystem_RendersDiskCard(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		// System (large-numerics) card stays — sub-task 4 embeds it alongside
-		// the disk card in the same tab body.
-		`id="system"`,
-		// Chart cards moved into the System tab body in sub-task 4.
+		// Chart cards moved into the System tab body in sub-task 4. The
+		// CPU/memory large-numerics card was removed from the System tab
+		// after the post-Slice-6 UX pass — it lives on Overview only now,
+		// so we no longer assert id="system" here.
 		`id="chart-cpu"`,
 		`id="chart-memory"`,
 		// Literal disk heading from cards/disk.html.

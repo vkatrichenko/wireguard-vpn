@@ -1,10 +1,4 @@
 {{ define "system-tab" }}
-{{ if .StatsError }}
-<section class="card error">{{ .StatsError }}</section>
-{{ else if .Stats }}
-{{ template "system" .Stats }}
-{{ end }}
-
 {{ template "chart-cpu" }}
 {{ template "chart-memory" }}
 
