@@ -40,7 +40,7 @@ type GeoResolver interface {
 }
 
 // ClientRow is the joined view-model that GET /api/clients returns and that
-// cards/client-list.html consumes. It pairs human-friendly manifest fields
+// the Clients tab template consumes. It pairs human-friendly manifest fields
 // (Name, Address) with live `wg show` state (handshake, byte counters,
 // endpoint) into a single row per peer.
 //

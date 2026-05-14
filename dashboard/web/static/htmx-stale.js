@@ -4,9 +4,9 @@
 // failed (network error or non-2xx response), not "200 with degraded cards".
 // On any failed swap we reveal #stale-pill; on the next successful swap we
 // hide it again. Listening on document.body works because all htmx events
-// bubble up there, and #dashboard-content (the swap target) gets its
-// innerHTML replaced — listeners attached to it would survive, but the body
-// is the conventional bus for these events.
+// bubble up there, and #tab-body (the swap target) gets its innerHTML
+// replaced — listeners attached to it would survive, but the body is the
+// conventional bus for these events.
 (function () {
   'use strict';
 
