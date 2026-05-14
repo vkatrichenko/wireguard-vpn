@@ -133,6 +133,33 @@
     charts.length = 0;
   }
 
+  // timeScaleConfig returns the Chart.js `scales.x.time` config tuned to the
+  // active range. Without this the unit was hardcoded to "hour" — fine for
+  // 1h/6h/24h, but on 7d the x-axis cycled "3pm 7pm 11pm 3pm 7pm…" with no
+  // way to tell which day a label belonged to. We pick a unit that fits the
+  // window and pair it with date-fns displayFormats so day-level ticks read
+  // "May 8" rather than a bare hour. tooltipFormat always carries the full
+  // date + time so hovering any point disambiguates regardless of unit.
+  function timeScaleConfig(range) {
+    var unit;
+    switch (range) {
+      case "1h": unit = "minute"; break;
+      case "7d": unit = "day"; break;
+      case "6h":
+      case "24h":
+      default:   unit = "hour"; break;
+    }
+    return {
+      unit: unit,
+      tooltipFormat: "MMM d, h:mm a",
+      displayFormats: {
+        minute: "h:mm a",
+        hour: "haaa",
+        day: "MMM d",
+      },
+    };
+  }
+
   // buildChart constructs a single Chart.js line chart on the given canvas
   // and pushes the instance into charts[] for later teardown / theme patch.
   // Extracted from renderCharts so the per-canvas options block stays in
@@ -156,7 +183,7 @@
         scales: {
           x: {
             type: "time",
-            time: { unit: "hour" },
+            time: timeScaleConfig(canvas.dataset.range || "24h"),
             grid: { color: colors.grid },
             ticks: { color: colors.text },
             border: { color: colors.grid },
@@ -414,7 +441,7 @@
             scales: {
               x: {
                 type: "time",
-                time: { unit: "hour" },
+                time: timeScaleConfig(range),
                 grid: { color: colors.grid },
                 ticks: { color: colors.text },
                 border: { color: colors.grid },
