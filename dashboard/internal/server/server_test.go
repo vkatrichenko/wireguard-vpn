@@ -1899,10 +1899,13 @@ func TestHandleGetPartialOverview_ConsolidatedView(t *testing.T) {
 	}
 
 	// Positive assertions — every consolidated card must render.
+	// The standalone Uptime card was dropped after the UX pass — "Active
+	// since…" lives inside service-status, "Host uptime" stays inside the
+	// System card. The wrapper .overview-grid div pins the new 2-col layout.
 	for _, want := range []string{
+		`class="overview-grid"`,
 		`id="server-info"`,
 		`id="service-status"`,
-		`id="uptime"`,
 		`id="client-count"`,
 		`id="system"`,        // CPU/Memory large-numerics card
 		`id="network-rate"`,  // rx/tx rate card
@@ -1927,6 +1930,9 @@ func TestHandleGetPartialOverview_ConsolidatedView(t *testing.T) {
 		`data-chart="tx"`,
 		// Events card moved to the Events tab.
 		`id="events"`,
+		// Standalone Uptime card was dropped — info is in service-status
+		// + the System card's Host uptime row.
+		`id="uptime"`,
 		// Full client list moved to the Clients tab; only the count summary
 		// appears on Overview. The seeded peer's name is the cleanest signal
 		// that the full list is NOT being rendered here.

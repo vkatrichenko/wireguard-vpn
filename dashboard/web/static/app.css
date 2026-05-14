@@ -762,6 +762,34 @@ body {
   white-space: nowrap;
 }
 
+/* 16g. Overview grid ------------------------------------------------------ */
+
+/* Overview is the compact "everything-OK?" view; the auto-fit grid on
+   #tab-body produced uneven heights and orphaned single cards on their
+   own rows (Server endpoint with its tall pubkey card next to the short
+   Uptime card was the worst offender). The two-tier ops-dashboard
+   pattern — KPI tiles on top, detail cards in the middle, full-width
+   reference at the bottom — fits the page far better.
+   .overview-grid is a child of #tab-body (which is itself a grid); the
+   `grid-column: 1 / -1` rule below spans the full tab-body row, then
+   the wrapper applies its own 2-column grid internally. */
+.overview-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
+  align-items: stretch;
+}
+
+/* Service-status + client-count sit side-by-side in row 1 (small KPI
+   tiles), system + network-rate side-by-side in row 2 (taller detail
+   cards). server-info spans both columns at the bottom — the pubkey
+   copy widget needs the width, and "reference info" reads naturally
+   below the status row. */
+.overview-grid > #server-info {
+  grid-column: 1 / -1;
+}
+
 /* 17. Responsive ----------------------------------------------------------- */
 
 @media (max-width: 600px) {
@@ -781,6 +809,11 @@ body {
 
   #tab-body .system-charts,
   #tab-body .network-charts {
+    grid-template-columns: 1fr;
+  }
+
+  /* Overview's 2-col grid collapses to a single stack at narrow widths. */
+  .overview-grid {
     grid-template-columns: 1fr;
   }
 
