@@ -267,7 +267,11 @@ func fakeSystemdRunnerErr(_ context.Context, _ string, _ ...string) ([]byte, err
 
 // fakeIMDS is a stub imdsClient that returns a canned public IP. It exists
 // only to drive the success-path render test; the production path uses the
-// real httpIMDS hitting 169.254.169.254.
+// real httpIMDS hitting 169.254.169.254. The InstanceType / AvailabilityZone
+// / AMIID methods are present to satisfy the extended imdsClient interface
+// from Slice 11; no test in this package exercises them yet (the about-tab
+// handler test lands in a later sub-task), so they all return the zero
+// string and share the same canned err.
 type fakeIMDS struct {
 	ip  string
 	err error
@@ -275,6 +279,18 @@ type fakeIMDS struct {
 
 func (f fakeIMDS) PublicIP(_ context.Context) (string, error) {
 	return f.ip, f.err
+}
+
+func (f fakeIMDS) InstanceType(_ context.Context) (string, error) {
+	return "", f.err
+}
+
+func (f fakeIMDS) AvailabilityZone(_ context.Context) (string, error) {
+	return "", f.err
+}
+
+func (f fakeIMDS) AMIID(_ context.Context) (string, error) {
+	return "", f.err
 }
 
 // TestHandleIndex_Success proves the dashboard.html template renders the
@@ -592,7 +608,10 @@ func TestHandleGetPartialTabs(t *testing.T) {
 		// fakeNetdevSvc serves a canned wg0 row so the populated branch
 		// renders rather than the error branch.
 		{"network", "/partial/network", []string{`id="wg-iface-stats"`}},
-		{"events", "/partial/events", []string{"Coming soon"}},
+		// Slice 10 promotes the Events tab from placeholder: with no seeded
+		// rows the cards/events.html empty branch renders the canonical
+		// "No recent handshakes." copy.
+		{"events", "/partial/events", []string{`id="events"`, "No recent handshakes."}},
 		{"about", "/partial/about", []string{"Coming soon"}},
 	}
 
@@ -1647,6 +1666,81 @@ func TestHandleGetMetricsSystem_7dRangeWindowFilters(t *testing.T) {
 	for i, v := range wantCPU {
 		if got.CPUPct[i] != v {
 			t.Errorf("cpu_pct[%d] = %v, want %v", i, got.CPUPct[i], v)
+		}
+	}
+}
+
+// TestHandleGetPartialEvents_RendersSeededRows seeds 55 handshake_events
+// rows at strictly increasing timestamps with distinct peer names ("peer-00"
+// through "peer-54"), hits /partial/events, and asserts the rendered fragment
+// (a) contains the events card heading, (b) renders the newest event's name
+// (peer-54), (c) does NOT contain the oldest seeded row's name (peer-00 ..
+// peer-04 — the five rows that fall outside the LIMIT 50 cut). Pins the
+// "50 newest" cap raised in Slice 10 from the Overview card's 10.
+func TestHandleGetPartialEvents_RendersSeededRows(t *testing.T) {
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	testDB := newTestDB(t)
+	// Seed 55 events: peer-00 is the oldest (now-55min), peer-54 is the
+	// newest (now-1min). QueryHandshakeEvents orders ts DESC LIMIT 50, so
+	// peer-54..peer-05 come back; peer-04..peer-00 are filtered by the cap.
+	now := time.Now()
+	events := make([]db.HandshakeEvent, 0, 55)
+	for i := 0; i < 55; i++ {
+		events = append(events, db.HandshakeEvent{
+			TS:        now.Add(-time.Duration(55-i) * time.Minute),
+			PublicKey: fmt.Sprintf("key-%02d", i),
+			Name:      fmt.Sprintf("peer-%02d", i),
+		})
+	}
+	if err := testDB.InsertHandshakeEvents(context.Background(), events); err != nil {
+		t.Fatalf("seed handshake_events: %v", err)
+	}
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc())
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial/events", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want %q", got, "text/html; charset=utf-8")
+	}
+
+	body := rec.Body.String()
+	// Fragment invariant — htmx innerHTML swaps would otherwise nest <html>.
+	if strings.Contains(body, "<html") {
+		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
+	}
+
+	for _, want := range []string{
+		`id="events"`,
+		"<h2>Recent handshakes</h2>",
+		// peer-54 is the newest seeded row — must render.
+		"peer-54",
+		// peer-05 is the 50th newest (still inside the LIMIT 50 cut).
+		"peer-05",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q:\n%s", want, body)
+		}
+	}
+	// peer-00..peer-04 are the 5 oldest rows — beyond the 50-row cap.
+	for _, dont := range []string{"peer-00", "peer-01", "peer-02", "peer-03", "peer-04"} {
+		if strings.Contains(body, dont) {
+			t.Errorf("body unexpectedly contains %q (should be filtered by LIMIT 50):\n%s", dont, body)
 		}
 	}
 }

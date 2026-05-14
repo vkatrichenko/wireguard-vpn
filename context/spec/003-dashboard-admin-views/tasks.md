@@ -133,7 +133,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 - [x] Extend `web/static/tabs.js` — parse `?range=` from the URL hash and rewrite the htmx swap URL to include it; on selector change, update the hash via `pushState`. **[Agent: go-fullstack]**
 - [x] Update `cards/aggregate-traffic.html` and its handler so the "Last Xh" label and the numbers honor the active range. **[Agent: go-fullstack]**
 - [x] Server-side test: `GET /api/metrics/system?range=7d` returns up to 8 d worth of points; `?range=99x` returns 400. **[Agent: go-fullstack]**
-- [ ] Verify locally with a DB seeded with >24 h of data: `#system?range=7d` shows the full 7-day curve; `#system?range=1h` zooms in. Refreshing the page preserves the range. **[Agent: go-fullstack]**
+- [x] Verify locally with a DB seeded with >24 h of data: `#system?range=7d` shows the full 7-day curve; `#system?range=1h` zooms in. Refreshing the page preserves the range. **[Agent: go-fullstack]**
 
 ---
 
@@ -141,10 +141,10 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** Events tab shows the 50 newest handshake events. Cap raised from 10 (Overview / v3 layout) to 50 because the dedicated tab has room.
 
-- [ ] Extend `internal/db/db.go` — `QueryHandshakeEvents` already supports a `limit` arg; the Events tab handler just calls it with `50`. No schema change. **[Agent: go-fullstack]**
-- [ ] Promote `web/templates/tabs/events.html` from placeholder — `{{ template "events" . }}` re-using the existing card with a 50-row dataset. Same empty state wording. **[Agent: go-fullstack]**
-- [ ] Server-side test: `GET /partial/events` returns 200; body contains the events table heading or empty-state copy. **[Agent: go-fullstack]**
-- [ ] Verify locally: with a seeded DB, the table shows up to 50 newest rows in descending ts order. **[Agent: go-fullstack]**
+- [x] Extend `internal/db/db.go` — `QueryHandshakeEvents` already supports a `limit` arg; the Events tab handler just calls it with `50`. No schema change. **[Agent: go-fullstack]**
+- [x] Promote `web/templates/tabs/events.html` from placeholder — `{{ template "events" . }}` re-using the existing card with a 50-row dataset. Same empty state wording. **[Agent: go-fullstack]**
+- [x] Server-side test: `GET /partial/events` returns 200; body contains the events table heading or empty-state copy. **[Agent: go-fullstack]**
+- [x] Verify locally: with a seeded DB, the table shows up to 50 newest rows in descending ts order. **[Agent: go-fullstack]**
 
 ---
 
@@ -152,7 +152,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** About tab is fully populated. Build SHA and timestamp are injected at build time via `-ldflags -X`.
 
-- [ ] Extend `internal/serverinfo/serverinfo.go` — IMDSv2 reads for `instance-type`, `placement/availability-zone`, `ami-id` (public IP already done). Add a `Kernel()` reader (uname-like via `unix.Uname`) and `OSRelease()` reader for `/etc/os-release`. **[Agent: go-fullstack]**
+- [x] Extend `internal/serverinfo/serverinfo.go` — IMDSv2 reads for `instance-type`, `placement/availability-zone`, `ami-id` (public IP already done). Add a `Kernel()` reader (uname-like via `unix.Uname`) and `OSRelease()` reader for `/etc/os-release`. **[Agent: go-fullstack]**
 - [ ] Build-time metadata — declare `var BuildSHA, BuildTime, GoVersion string` package-level in `cmd/wireguard-dashboard/main.go`; populate via `-ldflags "-X main.BuildSHA=… -X main.BuildTime=…"`. Update `dashboard/Makefile` `build` target to set the values from `git rev-parse --short HEAD` and `date -u +%FT%TZ`. Update the CI workflow `dashboard-build.yml` to set them from the workflow's SHA + run start time. **[Agent: cicd-github-actions]**
 - [ ] New `web/templates/cards/about-ec2.html`, `about-binary.html`, `about-os.html`. **[Agent: go-fullstack]**
 - [ ] Promote `web/templates/tabs/about.html` from placeholder — three cards. Include the existing server-public-key copy button as a fourth card (also stays on Overview's server-info). **[Agent: go-fullstack]**

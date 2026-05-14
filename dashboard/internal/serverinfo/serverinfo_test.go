@@ -3,9 +3,12 @@ package serverinfo
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // validKey is a 44-character base64 placeholder (the wire-format size of a
@@ -17,11 +20,16 @@ const validKey = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG="
 
 // fakeIMDS is a hand-rolled stub for the imdsClient interface. The optional
 // delay lets the cancellation test exercise the ctx.Done() branch in Service.Get
-// without racing the goroutine fan-out.
+// without racing the goroutine fan-out. instanceType / az / amiID default to
+// the empty string for existing callers that only care about the public-IP
+// path; the IMDS-extended test below sets them explicitly.
 type fakeIMDS struct {
-	ip    string
-	err   error
-	delay time.Duration
+	ip           string
+	instanceType string
+	az           string
+	amiID        string
+	err          error
+	delay        time.Duration
 }
 
 func (f fakeIMDS) PublicIP(ctx context.Context) (string, error) {
@@ -33,6 +41,39 @@ func (f fakeIMDS) PublicIP(ctx context.Context) (string, error) {
 		}
 	}
 	return f.ip, f.err
+}
+
+func (f fakeIMDS) InstanceType(ctx context.Context) (string, error) {
+	if f.delay > 0 {
+		select {
+		case <-time.After(f.delay):
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	return f.instanceType, f.err
+}
+
+func (f fakeIMDS) AvailabilityZone(ctx context.Context) (string, error) {
+	if f.delay > 0 {
+		select {
+		case <-time.After(f.delay):
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	return f.az, f.err
+}
+
+func (f fakeIMDS) AMIID(ctx context.Context) (string, error) {
+	if f.delay > 0 {
+		select {
+		case <-time.After(f.delay):
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	return f.amiID, f.err
 }
 
 // fakeRunner returns a runFunc closure that produces canned bytes / err. The
@@ -210,6 +251,184 @@ func TestNew_DefaultsAreSet(t *testing.T) {
 	if svc.Runner == nil {
 		t.Error("New().Runner is nil; expected default runner")
 	}
+	if svc.Uname == nil {
+		t.Error("New().Uname is nil; expected unix.Uname")
+	}
+	if svc.ReadFile == nil {
+		t.Error("New().ReadFile is nil; expected os.ReadFile")
+	}
 	// Intentionally do NOT invoke Get() — that would hit the real IMDS and
 	// shell out to sudo, neither of which is appropriate in a unit test.
+}
+
+// TestKernel_Mocked drives Service.Kernel through a stubbed unameFunc that
+// deposits canned C strings (with trailing NULs to mimic the real syscall
+// output) into the Utsname struct. The assertions prove each field is
+// surfaced AND that unix.ByteSliceToString stripped the \x00 terminator.
+func TestKernel_Mocked(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{
+		Uname: func(u *unix.Utsname) error {
+			copy(u.Sysname[:], "Linux\x00")
+			copy(u.Nodename[:], "wg-host\x00")
+			copy(u.Release[:], "6.8.0-1015-aws\x00")
+			copy(u.Version[:], "#16~22.04.1-Ubuntu SMP\x00")
+			copy(u.Machine[:], "x86_64\x00")
+			return nil
+		},
+	}
+
+	got, err := svc.Kernel()
+	if err != nil {
+		t.Fatalf("Kernel() returned unexpected error: %v", err)
+	}
+	want := KernelInfo{
+		Sysname:  "Linux",
+		Nodename: "wg-host",
+		Release:  "6.8.0-1015-aws",
+		Version:  "#16~22.04.1-Ubuntu SMP",
+		Machine:  "x86_64",
+	}
+	if got != want {
+		t.Errorf("Kernel() = %#v, want %#v", got, want)
+	}
+}
+
+// TestOSRelease_HappyPath drives Service.OSRelease through an in-memory
+// /etc/os-release matching the format Amazon Linux 2023 emits. Asserts each
+// of the four target keys lands on the right struct field; ignored keys
+// (HOME_URL etc.) must be dropped without affecting the parse.
+func TestOSRelease_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	fixture := []byte(`NAME=Amazon Linux
+VERSION=2023
+ID=amzn
+ID_LIKE="rhel fedora"
+PLATFORM_ID="platform:al2023"
+PRETTY_NAME=Amazon Linux 2023
+ANSI_COLOR="0;33"
+HOME_URL="https://amazonlinux.com/"
+`)
+	svc := &Service{
+		ReadFile: func(path string) ([]byte, error) {
+			if path != osReleasePath {
+				t.Errorf("ReadFile path = %q, want %q", path, osReleasePath)
+			}
+			return fixture, nil
+		},
+	}
+
+	got, err := svc.OSRelease()
+	if err != nil {
+		t.Fatalf("OSRelease() returned unexpected error: %v", err)
+	}
+	want := OSReleaseInfo{
+		ID:         "amzn",
+		Name:       "Amazon Linux",
+		Version:    "2023",
+		PrettyName: "Amazon Linux 2023",
+	}
+	if got != want {
+		t.Errorf("OSRelease() = %#v, want %#v", got, want)
+	}
+}
+
+// TestOSRelease_QuotedValues confirms the parser strips the surrounding
+// double quotes that real distros (Ubuntu, RHEL) emit on NAME / PRETTY_NAME.
+// Also smoke-tests blank lines and a leading '#' comment.
+func TestOSRelease_QuotedValues(t *testing.T) {
+	t.Parallel()
+
+	fixture := []byte(`# Ubuntu 24.04 LTS
+
+NAME="Ubuntu"
+VERSION="24.04 LTS (Noble Numbat)"
+ID=ubuntu
+PRETTY_NAME="Ubuntu 24.04 LTS"
+`)
+	svc := &Service{
+		ReadFile: func(_ string) ([]byte, error) { return fixture, nil },
+	}
+
+	got, err := svc.OSRelease()
+	if err != nil {
+		t.Fatalf("OSRelease() returned unexpected error: %v", err)
+	}
+	if got.Name != "Ubuntu" {
+		t.Errorf("Name = %q, want %q (quotes stripped)", got.Name, "Ubuntu")
+	}
+	if got.Version != "24.04 LTS (Noble Numbat)" {
+		t.Errorf("Version = %q, want %q (quotes stripped)", got.Version, "24.04 LTS (Noble Numbat)")
+	}
+	if got.PrettyName != "Ubuntu 24.04 LTS" {
+		t.Errorf("PrettyName = %q, want %q (quotes stripped)", got.PrettyName, "Ubuntu 24.04 LTS")
+	}
+	if got.ID != "ubuntu" {
+		t.Errorf("ID = %q, want %q", got.ID, "ubuntu")
+	}
+}
+
+// TestOSRelease_MissingFile proves the macOS-local-dev degradation contract:
+// when /etc/os-release is absent, OSRelease returns ID="unknown" alongside
+// the wrapped read error, rather than dropping a zero-value struct that the
+// handler would have to special-case.
+func TestOSRelease_MissingFile(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{
+		ReadFile: func(_ string) ([]byte, error) { return nil, os.ErrNotExist },
+	}
+
+	got, err := svc.OSRelease()
+	if err == nil {
+		t.Fatal("OSRelease() returned nil error, want wrapped os.ErrNotExist")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("error %v is not os.ErrNotExist", err)
+	}
+	if got.ID != "unknown" {
+		t.Errorf("ID = %q, want %q", got.ID, "unknown")
+	}
+}
+
+// TestService_IMDSExtended proves the three new imdsClient methods are
+// reachable through the Service.IMDS seam. One method is enough to pin the
+// interface extension; the other two share the same call shape so dedicated
+// tests would be near-duplicates.
+func TestService_IMDSExtended(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{
+		IMDS: fakeIMDS{
+			instanceType: "t3.micro",
+			az:           "us-east-1a",
+			amiID:        "ami-0abcdef1234567890",
+		},
+	}
+
+	gotType, err := svc.IMDS.InstanceType(context.Background())
+	if err != nil {
+		t.Fatalf("InstanceType returned unexpected error: %v", err)
+	}
+	if gotType != "t3.micro" {
+		t.Errorf("InstanceType = %q, want %q", gotType, "t3.micro")
+	}
+
+	gotAZ, err := svc.IMDS.AvailabilityZone(context.Background())
+	if err != nil {
+		t.Fatalf("AvailabilityZone returned unexpected error: %v", err)
+	}
+	if gotAZ != "us-east-1a" {
+		t.Errorf("AvailabilityZone = %q, want %q", gotAZ, "us-east-1a")
+	}
+
+	gotAMI, err := svc.IMDS.AMIID(context.Background())
+	if err != nil {
+		t.Fatalf("AMIID returned unexpected error: %v", err)
+	}
+	if gotAMI != "ami-0abcdef1234567890" {
+		t.Errorf("AMIID = %q, want %q", gotAMI, "ami-0abcdef1234567890")
+	}
 }

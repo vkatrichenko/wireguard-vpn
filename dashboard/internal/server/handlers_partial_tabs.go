@@ -295,10 +295,37 @@ func (s *server) handleGetPartialNetwork(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// handleGetPartialEvents renders the Events tab body — placeholder in Slice 1.
-func (s *server) handleGetPartialEvents(w http.ResponseWriter, _ *http.Request) {
+// eventsWindow caps how far back the Events tab looks for handshake rows.
+// 30d matches the retention horizon set in Slice 3 — anything older has
+// already been pruned, so widening past it would be wasted query effort.
+// The DESC ORDER BY plus LIMIT 50 below picks the 50 newest from within
+// this window; in practice operators will see the most-recent 50 regardless
+// of how recently the dashboard came up.
+const eventsWindow = 30 * 24 * time.Hour
+
+// eventsLimit is the cap raised from the 10-row Overview card to 50 for the
+// dedicated Events tab per Slice 10. Hardcoded here rather than threaded
+// through `?limit=…` because the spec pins one value and a URL knob would
+// invite scraping the full retention horizon, which is also why the window
+// is fixed above.
+const eventsLimit = 50
+
+// handleGetPartialEvents renders the Events tab body — the 50 newest
+// handshake_events rows over the retention horizon. A query failure renders
+// the empty-state ("No recent handshakes.") rather than a 500: htmx would
+// otherwise leave the previous tab body in place, and an empty list is a
+// less-confusing fallback than the wrong tab content. The error is logged
+// via slog so the operator still sees the actual cause in journald.
+func (s *server) handleGetPartialEvents(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	events, err := s.metricsDB.QueryHandshakeEvents(r.Context(), now.Add(-eventsWindow), now, eventsLimit)
+	if err != nil {
+		slog.Error("GET /partial/events: handshake events query failed", "err", err)
+		events = nil
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "events-tab", nil); err != nil {
+	if err := s.tmpl.ExecuteTemplate(w, "events-tab", events); err != nil {
 		slog.Error("GET /partial/events: template render failed", "err", err)
 		http.Error(w, "template render failed", http.StatusInternalServerError)
 		return
