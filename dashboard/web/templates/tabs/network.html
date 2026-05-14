@@ -1,7 +1,9 @@
 {{ define "network-tab" }}
+{{ template "range-selector" .RangeSelector }}
+
 <div class="network-charts">
-  {{ template "chart-rx" }}
-  {{ template "chart-tx" }}
+  {{ template "chart-rx" .Range }}
+  {{ template "chart-tx" .Range }}
 </div>
 
 {{ if .StatsError }}

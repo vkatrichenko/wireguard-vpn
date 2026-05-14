@@ -165,6 +165,8 @@ func New(
 	mux.HandleFunc("GET /api/clients", s.handleGetClients)
 	mux.HandleFunc("GET /api/snapshot", s.handleGetSnapshot)
 	mux.HandleFunc("GET /api/metrics", s.handleGetMetrics)
+	mux.HandleFunc("GET /api/metrics/system", s.handleGetMetricsSystem)
+	mux.HandleFunc("GET /api/metrics/traffic", s.handleGetMetricsTraffic)
 	mux.HandleFunc("GET /api/metrics/client/{pubkey}", s.handleGetMetricsClient)
 	// /partial/dashboard is a thin alias of /partial/overview for one release
 	// — Slice 14 retires it. Both routes resolve to the same handler so the

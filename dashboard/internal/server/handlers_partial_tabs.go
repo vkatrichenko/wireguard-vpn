@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -11,6 +12,38 @@ import (
 	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/processes"
 )
+
+// rangeSelectorData is the view-model for the shared `range-selector` partial
+// rendered above the System and Network tab bodies. Tab seeds the <select>'s
+// id (so the label/for pair stays unique when both tabs ever co-exist on a
+// debug page); Endpoint is the hx-get target for the form; Current is the
+// validated range string used to pre-select the right <option>; Options is
+// the canonical ordered enum (rangeEnumOptions) passed through so the template
+// stays loop-friendly without referencing the package-level var directly.
+type rangeSelectorData struct {
+	Tab      string
+	Endpoint string
+	Current  string
+	Options  []string
+}
+
+// parseRangeParam validates ?range= against rangeEnumMap, defaulting to "24h"
+// when absent. On miss it writes the canonical 400 body via rangeEnumErrMsg
+// and returns ok=false so the caller can return without further work. Shared
+// between handleGetPartialSystem and handleGetPartialNetwork — the API chart
+// handlers (handleGetMetricsSystem etc.) keep their inline validation so the
+// JSON-vs-HTML branches stay legible end-to-end.
+func parseRangeParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	rangeStr := r.URL.Query().Get("range")
+	if rangeStr == "" {
+		rangeStr = "24h"
+	}
+	if _, ok := rangeEnumMap[rangeStr]; !ok {
+		http.Error(w, fmt.Sprintf(rangeEnumErrMsg, rangeStr), http.StatusBadRequest)
+		return "", false
+	}
+	return rangeStr, true
+}
 
 // clientsTabData is the view-model handed to the `clients` template. It pairs
 // the joined ClientRow slice with a single error string so the fragment can
@@ -74,10 +107,15 @@ func (s *server) handleGetPartialClients(w http.ResponseWriter, r *http.Request)
 // the disk-usage table; Processes backs the top-N CPU consumers card. The
 // System tab no longer carries the CPU/memory large-numerics card — that
 // lives exclusively on Overview to avoid the duplicate render the operator
-// flagged after Slice 6.
+// flagged after Slice 6. Range is the validated `?range=` value plumbed down
+// to the chart partials so each <canvas> carries a data-range attribute and
+// the heading reflects the active window. RangeSelector seeds the shared
+// <form> rendered above the cards.
 type systemTabData struct {
-	Disk      diskCardData
-	Processes processesCardData
+	Range         string
+	RangeSelector rangeSelectorData
+	Disk          diskCardData
+	Processes     processesCardData
 }
 
 // diskCardData mirrors the {Mounts, Error} shape the `disk` template branches
@@ -107,7 +145,20 @@ type processesCardData struct {
 // is rendered on Overview, and the chart-cpu / chart-memory partials are
 // pure markup driven by /api/metrics polled from charts.js.
 func (s *server) handleGetPartialSystem(w http.ResponseWriter, r *http.Request) {
-	data := systemTabData{}
+	rangeStr, ok := parseRangeParam(w, r)
+	if !ok {
+		return
+	}
+
+	data := systemTabData{
+		Range: rangeStr,
+		RangeSelector: rangeSelectorData{
+			Tab:      "system",
+			Endpoint: "/partial/system",
+			Current:  rangeStr,
+			Options:  rangeEnumOptions,
+		},
+	}
 
 	mounts, err := s.diskSvc.Sample(r.Context())
 	if err != nil {
@@ -139,9 +190,12 @@ func (s *server) handleGetPartialSystem(w http.ResponseWriter, r *http.Request) 
 // stats card (cumulative rx/tx bytes, packets, errs, dropped, peer count).
 // AggregateTraffic backs the in-period rx/tx delta line under the chart pair.
 //
-// Range is hardcoded to "24h" until Slice 9 plumbs the four-value range enum
-// (1h/6h/24h/7d) through to the Network tab handler.
+// Range is the validated `?range=` value plumbed down to the chart partials
+// (data-range attribute + heading text). RangeSelector seeds the shared
+// <form> rendered above the cards.
 type networkTabData struct {
+	Range            string
+	RangeSelector    rangeSelectorData
 	Stats            *proc.Stats
 	StatsError       string
 	WgIface          wgIfaceStatsCardData
@@ -175,13 +229,26 @@ type aggregateTrafficCardData struct {
 // doesn't blank the rate or aggregate cards, and a DB query failure on
 // aggregate traffic leaves the other two cards intact.
 //
-// The 24h window is hardcoded until Slice 9 sub-task 9 plumbs the range
-// selector through. len(rows) < 2 leaves both deltas at 0 with no error —
-// the template renders "0 B in / 0 B out", which is the right shape for a
-// freshly-deployed dashboard before the poller has accumulated two samples.
+// The aggregate-traffic query window follows the validated ?range= via
+// rangeEnumMap (1h/6h/24h/7d → Duration). len(rows) < 2 leaves both deltas
+// at 0 with no error — the template renders "0 B in / 0 B out", which is the
+// right shape for a freshly-deployed dashboard before the poller has
+// accumulated two samples.
 func (s *server) handleGetPartialNetwork(w http.ResponseWriter, r *http.Request) {
+	rangeStr, ok := parseRangeParam(w, r)
+	if !ok {
+		return
+	}
+
 	data := networkTabData{
-		AggregateTraffic: aggregateTrafficCardData{Range: "24h"},
+		Range: rangeStr,
+		RangeSelector: rangeSelectorData{
+			Tab:      "network",
+			Endpoint: "/partial/network",
+			Current:  rangeStr,
+			Options:  rangeEnumOptions,
+		},
+		AggregateTraffic: aggregateTrafficCardData{Range: rangeStr},
 	}
 
 	if stats, err := s.procSvc.Sample(r.Context()); err != nil {
@@ -198,11 +265,12 @@ func (s *server) handleGetPartialNetwork(w http.ResponseWriter, r *http.Request)
 		data.WgIface.Stats = ifaceStats
 	}
 
-	// Delta across the active range. Negative deltas (counter reset on
-	// interface bounce or wraparound) clamp to zero rather than render as
-	// "-3.2 MB in"; len(rows) < 2 silently leaves the zero values in place.
+	// Delta across the active range (rangeEnumMap is the canonical 1h/6h/24h/7d
+	// → Duration map shared with the chart endpoints). Negative deltas (counter
+	// reset on interface bounce or wraparound) clamp to zero rather than render
+	// as "-3.2 MB in"; len(rows) < 2 silently leaves the zero values in place.
 	now := time.Now()
-	rows, err := s.metricsDB.QueryTrafficMetrics(r.Context(), now.Add(-24*time.Hour), now)
+	rows, err := s.metricsDB.QueryTrafficMetrics(r.Context(), now.Add(-rangeEnumMap[rangeStr]), now)
 	if err != nil {
 		slog.Error("GET /partial/network: traffic metrics query failed", "err", err)
 		data.AggregateTraffic.Error = err.Error()

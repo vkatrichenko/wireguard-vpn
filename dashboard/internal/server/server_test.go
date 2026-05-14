@@ -1532,3 +1532,121 @@ func TestHandleGetMetricsClient_MonotonicTS(t *testing.T) {
 		}
 	}
 }
+
+// TestHandleGetMetricsSystem_400OnBadRange exercises the four-value enum
+// guard on the global system-metrics endpoint. /api/metrics/system shares
+// rangeEnumMap + rangeEnumErrMsg with the per-client endpoint, so the same
+// canonical error string is asserted. Same table shape as the existing
+// TestHandleGetMetricsClient_400OnBadRange for sibling consistency.
+func TestHandleGetMetricsSystem_400OnBadRange(t *testing.T) {
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc())
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"malformed", "99x"},
+		{"valid_but_not_enum", "2h"},
+		{"numeric_only", "24"},
+		{"garbage", "yesterday"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/metrics/system?range="+tc.value, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "must be 1h, 6h, 24h, or 7d") {
+				t.Errorf("body missing enum-error message:\n%s", rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestHandleGetMetricsSystem_7dRangeWindowFilters seeds system_metrics rows
+// spanning the last 8 days and proves that ?range=7d returns only rows
+// inside the 7-day window — the 8-day-old row is filtered out by the
+// rangeEnumMap-derived (now-7d, now) bounds. Mirror test for the spec's
+// "up to 8 d worth of points" phrasing: the seeded data spans 8 days, but
+// the active window is 7 days, so the oldest seeded row is correctly excluded
+// and the three newer rows pass through in chronological order.
+func TestHandleGetMetricsSystem_7dRangeWindowFilters(t *testing.T) {
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	testDB := newTestDB(t)
+	now := time.Now().UTC()
+	seeded := []db.SystemMetric{
+		{TS: now.Add(-8 * 24 * time.Hour), CPUPct: 1, MemPct: 10}, // outside 7d window
+		{TS: now.Add(-6 * 24 * time.Hour), CPUPct: 2, MemPct: 20}, // inside
+		{TS: now.Add(-24 * time.Hour), CPUPct: 3, MemPct: 30},     // inside
+		{TS: now.Add(-1 * time.Hour), CPUPct: 4, MemPct: 40},      // inside
+	}
+	for _, row := range seeded {
+		if err := testDB.InsertSystemMetric(context.Background(), row); err != nil {
+			t.Fatalf("seed system_metrics: %v", err)
+		}
+	}
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc())
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/metrics/system?range=7d", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want %q", got, "application/json")
+	}
+
+	var got struct {
+		Range  string      `json:"range"`
+		From   time.Time   `json:"from"`
+		To     time.Time   `json:"to"`
+		TS     []time.Time `json:"ts"`
+		CPUPct []float64   `json:"cpu_pct"`
+		MemPct []float64   `json:"mem_pct"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, rec.Body.String())
+	}
+
+	if got.Range != "7d" {
+		t.Errorf("range = %q, want %q", got.Range, "7d")
+	}
+	// Three inside-window rows; the -8d row filtered out by the lower bound.
+	if len(got.TS) != 3 {
+		t.Fatalf("len(ts) = %d, want 3 (filtered out the -8d row); body=%s", len(got.TS), rec.Body.String())
+	}
+	wantCPU := []float64{2, 3, 4}
+	for i, v := range wantCPU {
+		if got.CPUPct[i] != v {
+			t.Errorf("cpu_pct[%d] = %v, want %v", i, got.CPUPct[i], v)
+		}
+	}
+}

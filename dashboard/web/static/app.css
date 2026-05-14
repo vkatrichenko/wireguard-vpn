@@ -665,3 +665,26 @@ body {
     transition: none !important;
   }
 }
+
+/* 19. Range selector ------------------------------------------------------- */
+
+/* The selector spans the full tab-body grid row so the chart pair below sits
+   on its own row; the form itself stays a compact label+select pair. */
+#tab-body > .range-selector {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 var(--gap);
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.range-selector select {
+  padding: 0.25rem 0.5rem;
+  background-color: var(--card-bg);
+  color: var(--text);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  font: inherit;
+}

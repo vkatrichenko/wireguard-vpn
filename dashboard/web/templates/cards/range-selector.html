@@ -1,0 +1,11 @@
+{{ define "range-selector" }}
+<form class="range-selector" hx-get="{{ .Endpoint }}" hx-target="#tab-body" hx-swap="innerHTML" hx-include="this">
+  <label for="range-{{ .Tab }}">Range:</label>
+  <select id="range-{{ .Tab }}" name="range" hx-trigger="change">
+    {{ $current := .Current }}
+    {{ range .Options }}
+    <option value="{{ . }}"{{ if eq . $current }} selected{{ end }}>{{ . }}</option>
+    {{ end }}
+  </select>
+</form>
+{{ end }}

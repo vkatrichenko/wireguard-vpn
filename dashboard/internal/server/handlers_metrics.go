@@ -223,16 +223,168 @@ type clientMetricsResponse struct {
 	TxRateBps []int64     `json:"tx_rate_bps"`
 }
 
-// clientRangeMap pins the four allowed `?range=` values for the per-client
-// chart endpoint to their Duration equivalents. Unlike /api/metrics (which
-// accepts arbitrary time.ParseDuration input), the per-client chart is
-// driven by a fixed range-picker in the UI — any input outside the enum is
-// a 400 per the spec.
-var clientRangeMap = map[string]time.Duration{
+// rangeEnumMap pins the four allowed `?range=` values for the chart endpoints
+// to their Duration equivalents. Shared deliberately by the per-client chart
+// (/api/metrics/client/{pubkey}) and the global system/traffic chart endpoints
+// (/api/metrics/system, /api/metrics/traffic) — the four-value enum is the
+// same UI affordance everywhere, so the canonical 400 message lives in one
+// place too (see rangeEnumErrMsg). The legacy /api/metrics handler keeps its
+// time.ParseDuration path so charts.js can be migrated in a follow-up task
+// without breaking on-the-wire today.
+var rangeEnumMap = map[string]time.Duration{
 	"1h":  1 * time.Hour,
 	"6h":  6 * time.Hour,
 	"24h": 24 * time.Hour,
 	"7d":  7 * 24 * time.Hour,
+}
+
+// rangeEnumErrMsg is the canonical 400 body for an out-of-enum ?range= value.
+// Centralised so the three chart endpoints emit byte-identical errors — keeps
+// front-end error-handling and server-side tests in lock-step.
+const rangeEnumErrMsg = "invalid range %q: must be 1h, 6h, 24h, or 7d"
+
+// rangeEnumOptions is the canonical ordered list of allowed ?range= values.
+// Co-located with rangeEnumMap so the keys-vs-display-order contract lives in
+// one place — Go map iteration order is non-deterministic, so we cannot just
+// range over rangeEnumMap when rendering the <select>. Used by the partial-tab
+// handlers to populate the range-selector dropdown.
+var rangeEnumOptions = []string{"1h", "6h", "24h", "7d"}
+
+// systemMetricsResponse is the payload of GET /api/metrics/system?range=…
+// (Slice 9). Column-oriented for the same reason as metricsResponse: Chart.js
+// passes parallel TS/value arrays straight into a time-scale dataset. Range
+// echoes the validated string so the front-end can label the chart without
+// re-parsing the duration; From/To echo the resolved window for stale-data
+// detection.
+type systemMetricsResponse struct {
+	Range  string      `json:"range"`
+	From   time.Time   `json:"from"`
+	To     time.Time   `json:"to"`
+	TS     []time.Time `json:"ts"`
+	CPUPct []float64   `json:"cpu_pct"`
+	MemPct []float64   `json:"mem_pct"`
+}
+
+// trafficMetricsResponse is the payload of GET /api/metrics/traffic?range=…
+// (Slice 9). Cumulative bytes are sent through as-is (counter-since-iface-up);
+// Chart.js callers derive a rate by subtracting neighbouring samples — same
+// contract as the legacy /api/metrics trafficSeries.
+type trafficMetricsResponse struct {
+	Range      string      `json:"range"`
+	From       time.Time   `json:"from"`
+	To         time.Time   `json:"to"`
+	TS         []time.Time `json:"ts"`
+	RxBytesCum []int64     `json:"rx_bytes_cum"`
+	TxBytesCum []int64     `json:"tx_bytes_cum"`
+}
+
+// handleGetMetricsSystem serves the system-metrics time-series feed for the
+// System tab chart. Range is validated against the four-value enum
+// (1h/6h/24h/7d) — any other input is a 400. No concurrent fan-out (unlike
+// /api/metrics) because there's only one DB query; goroutine overhead would
+// dwarf the saved latency.
+func (s *server) handleGetMetricsSystem(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	rangeStr := r.URL.Query().Get("range")
+	if rangeStr == "" {
+		rangeStr = "24h"
+	}
+	duration, ok := rangeEnumMap[rangeStr]
+	if !ok {
+		http.Error(w, fmt.Sprintf(rangeEnumErrMsg, rangeStr), http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC()
+	from := now.Add(-duration)
+	to := now
+
+	rows, err := s.metricsDB.QuerySystemMetrics(ctx, from, to)
+	if err != nil {
+		slog.Error("GET /api/metrics/system: query system_metrics failed", "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Pre-allocate non-nil empty slices so the JSON encoder emits "[]" not
+	// "null" — same contract as the other chart endpoints.
+	resp := systemMetricsResponse{
+		Range:  rangeStr,
+		From:   from,
+		To:     to,
+		TS:     make([]time.Time, 0, len(rows)),
+		CPUPct: make([]float64, 0, len(rows)),
+		MemPct: make([]float64, 0, len(rows)),
+	}
+	for _, row := range rows {
+		resp.TS = append(resp.TS, row.TS)
+		resp.CPUPct = append(resp.CPUPct, row.CPUPct)
+		resp.MemPct = append(resp.MemPct, row.MemPct)
+	}
+
+	body, err := json.Marshal(resp)
+	if err != nil {
+		slog.Error("GET /api/metrics/system: json marshal failed", "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
+}
+
+// handleGetMetricsTraffic serves the wg0 cumulative traffic time-series for
+// the Network tab chart. Same range-validation contract as
+// handleGetMetricsSystem; cumulative bytes pass through unchanged so the
+// front-end controls how rates are derived.
+func (s *server) handleGetMetricsTraffic(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	rangeStr := r.URL.Query().Get("range")
+	if rangeStr == "" {
+		rangeStr = "24h"
+	}
+	duration, ok := rangeEnumMap[rangeStr]
+	if !ok {
+		http.Error(w, fmt.Sprintf(rangeEnumErrMsg, rangeStr), http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC()
+	from := now.Add(-duration)
+	to := now
+
+	rows, err := s.metricsDB.QueryTrafficMetrics(ctx, from, to)
+	if err != nil {
+		slog.Error("GET /api/metrics/traffic: query traffic_metrics failed", "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	resp := trafficMetricsResponse{
+		Range:      rangeStr,
+		From:       from,
+		To:         to,
+		TS:         make([]time.Time, 0, len(rows)),
+		RxBytesCum: make([]int64, 0, len(rows)),
+		TxBytesCum: make([]int64, 0, len(rows)),
+	}
+	for _, row := range rows {
+		resp.TS = append(resp.TS, row.TS)
+		resp.RxBytesCum = append(resp.RxBytesCum, row.RxBytesCum)
+		resp.TxBytesCum = append(resp.TxBytesCum, row.TxBytesCum)
+	}
+
+	body, err := json.Marshal(resp)
+	if err != nil {
+		slog.Error("GET /api/metrics/traffic: json marshal failed", "err", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
 }
 
 // handleGetMetricsClient serves the per-client rx/tx rate time-series for
@@ -258,9 +410,9 @@ func (s *server) handleGetMetricsClient(w http.ResponseWriter, r *http.Request) 
 	if rangeStr == "" {
 		rangeStr = "24h"
 	}
-	duration, ok := clientRangeMap[rangeStr]
+	duration, ok := rangeEnumMap[rangeStr]
 	if !ok {
-		http.Error(w, fmt.Sprintf("invalid range %q: must be 1h, 6h, 24h, or 7d", rangeStr), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf(rangeEnumErrMsg, rangeStr), http.StatusBadRequest)
 		return
 	}
 

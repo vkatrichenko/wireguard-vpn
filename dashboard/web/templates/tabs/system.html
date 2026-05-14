@@ -1,7 +1,9 @@
 {{ define "system-tab" }}
+{{ template "range-selector" .RangeSelector }}
+
 <div class="system-charts">
-  {{ template "chart-cpu" }}
-  {{ template "chart-memory" }}
+  {{ template "chart-cpu" .Range }}
+  {{ template "chart-memory" .Range }}
 </div>
 
 {{ template "disk" .Disk }}

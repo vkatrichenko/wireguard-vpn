@@ -1,6 +1,6 @@
 {{ define "chart-tx" }}
 <section id="chart-tx" class="card">
-  <h2>Transmit rate (24h)</h2>
-  <canvas id="canvas-tx" data-chart="tx"></canvas>
+  <h2>Transmit rate ({{ . }})</h2>
+  <canvas id="canvas-tx" data-chart="tx" data-range="{{ . }}"></canvas>
 </section>
 {{ end }}
