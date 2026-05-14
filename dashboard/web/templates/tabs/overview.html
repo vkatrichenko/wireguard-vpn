@@ -1,33 +1,38 @@
 {{ define "overview" }}
-{{/* Slice 12: Overview is the compact "everything-OK?" view per §2.2 —
-     server-info, service-status + uptime, client-count summary, current
-     CPU%/Memory% large numerics, current rx/tx rate. No 24h charts (those
-     live on System / Network), no full client list (Clients tab), no
-     handshake event log (Events tab). */}}
+{{/* Overview layout — two-tier ops dashboard pattern (AWS Console / Linode /
+     Grafana stat-panel style):
+       Row 1: status KPI tiles (service status, clients online/total)
+       Row 2: detail cards (system metrics, network throughput)
+       Row 3: full-width reference (server endpoint + pubkey copy)
+     The standalone Uptime card was dropped — "Active since" lives inside
+     service-status, and the host kernel uptime stays inside the System card.
+     The wrapping .overview-grid gives explicit column control so cards land
+     in a clean 2-col pattern instead of the auto-fit raggedness that the
+     default #tab-body grid produced. */}}
+<div class="overview-grid">
+  {{ if .ServiceStatusError }}
+  <section class="card error">{{ .ServiceStatusError }}</section>
+  {{ else }}
+  {{ template "service-status" .ServiceStatus }}
+  {{ end }}
 
-{{ if .ServerInfoError }}
-<section class="card error">{{ .ServerInfoError }}</section>
-{{ else }}
-{{ template "server-info" .ServerInfo }}
-{{ end }}
+  {{ if .ClientsError }}
+  <section class="card error">{{ .ClientsError }}</section>
+  {{ else }}
+  {{ template "client-count" .ClientCount }}
+  {{ end }}
 
-{{ if .ServiceStatusError }}
-<section class="card error">{{ .ServiceStatusError }}</section>
-{{ else }}
-{{ template "service-status" .ServiceStatus }}
-{{ template "uptime" .ServiceStatus }}
-{{ end }}
+  {{ if .StatsError }}
+  <section class="card error">{{ .StatsError }}</section>
+  {{ else if .Stats }}
+  {{ template "system" .Stats }}
+  {{ template "network-rate" .Stats }}
+  {{ end }}
 
-{{ if .ClientsError }}
-<section class="card error">{{ .ClientsError }}</section>
-{{ else }}
-{{ template "client-count" .ClientCount }}
-{{ end }}
-
-{{ if .StatsError }}
-<section class="card error">{{ .StatsError }}</section>
-{{ else if .Stats }}
-{{ template "system" .Stats }}
-{{ template "network-rate" .Stats }}
-{{ end }}
+  {{ if .ServerInfoError }}
+  <section class="card error">{{ .ServerInfoError }}</section>
+  {{ else }}
+  {{ template "server-info" .ServerInfo }}
+  {{ end }}
+</div>
 {{ end }}
