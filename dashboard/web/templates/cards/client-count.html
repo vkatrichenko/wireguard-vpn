@@ -1,0 +1,11 @@
+{{ define "client-count" }}
+<section id="client-count" class="card">
+  <h2>Clients</h2>
+  {{/* "N online / M total" — the online count uses the existing
+       .status-online color token (green) so the at-a-glance summary
+       matches the per-row status pills on the Clients tab. */}}
+  <p class="client-count">
+    <strong class="status-online">{{ .Online }} online</strong> / {{ .Total }} total
+  </p>
+</section>
+{{ end }}

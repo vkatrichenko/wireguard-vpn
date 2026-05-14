@@ -53,6 +53,16 @@ type server struct {
 // Defined here (rather than exported) because it's the contract between
 // handleIndex and dashboard.html only — no other package needs to construct
 // it.
+// clientCountData backs the cards/client-count.html template — "N online / M
+// total" summary on the Overview tab. Computed by buildPageData from the same
+// ClientRows snapshot that drives the Clients tab so the count and the full
+// list can't disagree. Online means ClientRow.Status == "online"; "pending"
+// and "unknown" peers are NOT counted as online — only handshake-active rows.
+type clientCountData struct {
+	Online int
+	Total  int
+}
+
 type pageData struct {
 	ServerInfo         serverinfo.ServerInfo
 	ServerInfoError    string
@@ -60,6 +70,12 @@ type pageData struct {
 	ServiceStatusError string
 	ClientRows         []ClientRow
 	ClientsError       string
+	// ClientCount backs the Slice 12 client-count summary card on Overview.
+	// Computed from ClientRows so both views share one snapshot — the count
+	// always matches the full list rendered on the Clients tab. ClientsError
+	// gates rendering: a join failure leaves ClientRows nil, and the count
+	// card hides behind the same error branch as the list.
+	ClientCount clientCountData
 	// Stats / StatsError back the system + network-rate cards. Stats is a
 	// pointer so the template can branch on `if .Stats` without the receive
 	// side having to special-case zero values (uptime=0 is technically a
@@ -277,6 +293,15 @@ func (s *server) buildPageData(ctx context.Context) pageData {
 		data.ClientsError = joined.Error()
 	} else {
 		data.ClientRows = buildClientRows(clients, peers, time.Now(), s.geoipSvc)
+		// ClientCount drives the Slice 12 summary card. Counted inline rather
+		// than in a helper because the loop is one line and threading a helper
+		// from another file would obscure the "same snapshot" guarantee.
+		data.ClientCount.Total = len(data.ClientRows)
+		for _, row := range data.ClientRows {
+			if row.Status == "online" {
+				data.ClientCount.Online++
+			}
+		}
 	}
 
 	// proc.Sample feeds the system + network-rate cards. The sample is

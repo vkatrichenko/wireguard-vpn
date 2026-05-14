@@ -157,7 +157,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 - [x] New `web/templates/cards/about-ec2.html`, `about-binary.html`, `about-os.html`. **[Agent: go-fullstack]**
 - [x] Promote `web/templates/tabs/about.html` from placeholder — three cards. Include the existing server-public-key copy button as a fourth card (also stays on Overview's server-info). **[Agent: go-fullstack]**
 - [x] Server-side test: `GET /partial/about` body contains an "Instance type" sentinel and a "Build" sentinel. IMDSv2 reads need a mockable injection point to keep tests offline — same pattern as the existing serverinfo tests. **[Agent: go-fullstack]**
-- [ ] Verify locally with mocked metadata; verify on EC2 after deploy that the real values render. **[Agent: go-fullstack]**
+- [x] Verify locally with mocked metadata; verify on EC2 after deploy that the real values render. **[Agent: go-fullstack]**
 
 ---
 
@@ -165,11 +165,11 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** Overview is the compact "everything-OK?" view per §2.2 — no 24 h charts, no full client list, no event log. Adds the new client-count summary card.
 
-- [ ] Edit `web/templates/tabs/overview.html` to compose only: server-info, service-status, uptime, **new** client-count summary, current CPU% / memory% large numerics, current rx/tx rate. **[Agent: go-fullstack]**
-- [ ] New `web/templates/cards/client-count.html` — "**N online** / M total" with the existing online/offline color tokens. Handler computes from the same client snapshot used by the Clients tab. **[Agent: go-fullstack]**
-- [ ] Remove the legacy `<section class="charts-grid">` from `dashboard.html` (charts now live under System / Network). **[Agent: go-fullstack]**
-- [ ] Server-side test: `GET /partial/overview` body contains "N online" sentinel + the existing v3 server-info marker; does **not** contain the chart canvas IDs (those have moved). **[Agent: go-fullstack]**
-- [ ] Verify locally: Overview matches §2.2 acceptance criteria exactly. **[Agent: go-fullstack]**
+- [x] Edit `web/templates/tabs/overview.html` to compose only: server-info, service-status, uptime, **new** client-count summary, current CPU% / memory% large numerics, current rx/tx rate. **[Agent: go-fullstack]**
+- [x] New `web/templates/cards/client-count.html` — "**N online** / M total" with the existing online/offline color tokens. Handler computes from the same client snapshot used by the Clients tab. **[Agent: go-fullstack]**
+- [x] Remove the legacy `<section class="charts-grid">` from `dashboard.html` (charts now live under System / Network). **[Agent: go-fullstack]**
+- [x] Server-side test: `GET /partial/overview` body contains "N online" sentinel + the existing v3 server-info marker; does **not** contain the chart canvas IDs (those have moved). **[Agent: go-fullstack]**
+- [x] Verify locally: Overview matches §2.2 acceptance criteria exactly. **[Agent: go-fullstack]**
 
 ---
 
@@ -177,9 +177,9 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** Every new tab respects 360 px / 600 px / 44 px-touch-target. Tab pill bar scrolls horizontally on narrow viewports without page scroll. Per-client expand row stacks vertically below 600 px.
 
-- [ ] CSS audit pass on `app.css` across the new cards: disk progress bars, processes table, WG iface stats, aggregate-traffic, about cards, client-detail expand. **[Agent: go-fullstack]**
-- [ ] Add explicit `overflow-x: auto` + `scroll-snap` on the tab pill bar; ensure each pill is ≥44 px touch target. **[Agent: go-fullstack]**
-- [ ] Add a `@media (max-width: 600px)` block that re-flows multi-column cards (disk, processes, about) to single-column. **[Agent: go-fullstack]**
+- [x] CSS audit pass on `app.css` across the new cards: disk progress bars, processes table, WG iface stats, aggregate-traffic, about cards, client-detail expand. **[Agent: go-fullstack]**
+- [x] Add explicit `overflow-x: auto` + `scroll-snap` on the tab pill bar; ensure each pill is ≥44 px touch target. **[Agent: go-fullstack]**
+- [x] Add a `@media (max-width: 600px)` block that re-flows multi-column cards (disk, processes, about) to single-column. **[Agent: go-fullstack]**
 - [ ] Verify in browser devtools at 360 px and 768 px: every tab. No horizontal page scroll at 360. Pill bar scrolls horizontally. Tap targets pass. **[Agent: go-fullstack]**
 
 ---
