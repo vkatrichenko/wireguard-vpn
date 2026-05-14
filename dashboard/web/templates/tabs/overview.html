@@ -1,4 +1,10 @@
 {{ define "overview" }}
+{{/* Slice 12: Overview is the compact "everything-OK?" view per §2.2 —
+     server-info, service-status + uptime, client-count summary, current
+     CPU%/Memory% large numerics, current rx/tx rate. No 24h charts (those
+     live on System / Network), no full client list (Clients tab), no
+     handshake event log (Events tab). */}}
+
 {{ if .ServerInfoError }}
 <section class="card error">{{ .ServerInfoError }}</section>
 {{ else }}
@@ -9,17 +15,13 @@
 <section class="card error">{{ .ServiceStatusError }}</section>
 {{ else }}
 {{ template "service-status" .ServiceStatus }}
-{{ if .EventsError }}
-<section class="card error">{{ .EventsError }}</section>
-{{ else }}
-{{ template "events" .Events }}
-{{ end }}
+{{ template "uptime" .ServiceStatus }}
 {{ end }}
 
 {{ if .ClientsError }}
 <section class="card error">{{ .ClientsError }}</section>
 {{ else }}
-{{ template "client-list" .ClientRows }}
+{{ template "client-count" .ClientCount }}
 {{ end }}
 
 {{ if .StatsError }}

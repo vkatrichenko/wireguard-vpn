@@ -590,7 +590,12 @@ func TestHandleGetPartialTabs(t *testing.T) {
 		path             string
 		wantBodyContains []string
 	}{
-		{"overview", "/partial/overview", []string{`id="server-info"`}},
+		// Slice 12 consolidates Overview: server-info + service-status + uptime
+		// + client-count + system + network-rate. The client-count card lands
+		// from buildPageData with Online=0/Total=0 because fakeClientsfileSvc
+		// returns an empty manifest. Sibling test below asserts the negative
+		// (chart canvases NOT present).
+		{"overview", "/partial/overview", []string{`id="server-info"`, `id="client-count"`, "0 online"}},
 		// sub-task 7 expands this with a seeded-row assertion; for now the
 		// fake clientsfile + fake wg both return empty so the template renders
 		// the empty-state branch.
@@ -1843,6 +1848,92 @@ func TestHandleGetPartialAbout_RendersAllCards(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// TestHandleGetPartialOverview_ConsolidatedView pins the Slice 12 consolidation:
+// Overview should render server-info + service-status + uptime + client-count
+// + system + network-rate. It should NOT carry the chart canvas IDs (those
+// live on System / Network) and NOT render the full client list or the
+// handshake events log (those live on Clients / Events).
+//
+// One seeded peer drives a non-zero client-count so the "1 online / 1 total"
+// rendering is asserted, plus the cards/system.html `id="system"` for the
+// CPU/Memory large-numerics card and the cards/network-rate.html surface.
+func TestHandleGetPartialOverview_ConsolidatedView(t *testing.T) {
+	const (
+		peerName      = "alice"
+		peerAddress   = "172.16.15.5/32"
+		peerPublicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+		peerEndpoint  = "203.0.113.50:51820"
+	)
+
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+	clientsSvc := seededClientsfileSvc(peerName, peerAddress, peerPublicKey)
+	// 10s-ago handshake → status="online" so the client-count card reports 1.
+	wgSvc := seededWgSvc(peerPublicKey, peerEndpoint, peerAddress, 10*time.Second, 123456, 654321)
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc())
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial/overview", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+	if strings.Contains(body, "<html") {
+		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
+	}
+
+	// Positive assertions — every consolidated card must render.
+	for _, want := range []string{
+		`id="server-info"`,
+		`id="service-status"`,
+		`id="uptime"`,
+		`id="client-count"`,
+		`id="system"`,        // CPU/Memory large-numerics card
+		`id="network-rate"`,  // rx/tx rate card
+		"1 online",
+		"1 total",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q:\n%s", want, body)
+		}
+	}
+
+	// Negative assertions — these have moved to other tabs and must NOT
+	// appear on Overview. Chart canvases live on System / Network only.
+	for _, dont := range []string{
+		`id="canvas-cpu"`,
+		`id="canvas-memory"`,
+		`id="canvas-rx"`,
+		`id="canvas-tx"`,
+		`data-chart="cpu"`,
+		`data-chart="memory"`,
+		`data-chart="rx"`,
+		`data-chart="tx"`,
+		// Events card moved to the Events tab.
+		`id="events"`,
+		// Full client list moved to the Clients tab; only the count summary
+		// appears on Overview. The seeded peer's name is the cleanest signal
+		// that the full list is NOT being rendered here.
+		peerName,
+	} {
+		if strings.Contains(body, dont) {
+			t.Errorf("body unexpectedly contains %q (should be absent from Overview):\n%s", dont, body)
 		}
 	}
 }
