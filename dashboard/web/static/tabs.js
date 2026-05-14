@@ -65,6 +65,23 @@
     window.location.hash = '#' + pill.dataset.tab;
   });
 
+  // Range selector change: mirror the new range into the URL hash so a reload
+  // preserves it. Delegated on document.body because range-selector.html is
+  // re-rendered into the tab body on every htmx swap, so a direct listener
+  // wouldn't survive. pushState (not `location.hash = ...`) is deliberate:
+  // hash= fires hashchange, which would call route() and trigger a redundant
+  // htmx swap on top of the one htmx already fired from the form.
+  document.body.addEventListener('change', function (event) {
+    var select = event.target.closest('.range-selector select');
+    if (!select) return;
+    var parsed = parseHash();
+    if (select.value === parsed.params.get('range')) return;
+    parsed.params.set('range', select.value);
+    var qs = parsed.params.toString();
+    var newHash = '#' + parsed.tab + (qs ? '?' + qs : '');
+    history.pushState({}, '', newHash);
+  });
+
   window.addEventListener('hashchange', route);
   document.addEventListener('DOMContentLoaded', route);
 

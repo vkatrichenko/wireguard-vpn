@@ -1,6 +1,6 @@
 {{ define "chart-cpu" }}
 <section id="chart-cpu" class="card">
-  <h2>CPU (24h)</h2>
-  <canvas id="canvas-cpu" data-chart="cpu"></canvas>
+  <h2>CPU ({{ . }})</h2>
+  <canvas id="canvas-cpu" data-chart="cpu" data-range="{{ . }}"></canvas>
 </section>
 {{ end }}

@@ -119,7 +119,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 - [x] New `web/templates/cards/aggregate-traffic.html` — "Last 24h: A in / B out" using rx/tx cumulative deltas from `traffic_metrics` between (now-range, now). **[Agent: go-fullstack]**
 - [x] Promote `web/templates/tabs/network.html` from placeholder — current rx/tx large numerics + 24 h rx/tx charts (moved out of global grid) + WG iface stats + aggregate-traffic. **[Agent: go-fullstack]**
 - [x] Server-side test: `GET /partial/network` body contains the WG iface stats card heading + an "in / out" sentinel. **[Agent: go-fullstack]**
-- [ ] Verify locally: Network tab shows the four cards. Aggregate matches `wg show wg0 dump` rx/tx deltas over the last 24 h. **[Agent: go-fullstack]**
+- [x] Verify locally: Network tab shows the four cards. Aggregate matches `wg show wg0 dump` rx/tx deltas over the last 24 h. **[Agent: go-fullstack]**
 
 ---
 
@@ -127,12 +127,12 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** Each chart-bearing tab gets a single range selector at the top. Selection persists in the URL fragment alongside the tab name. 7d shows whatever data has accumulated since the retention bump in Slice 3.
 
-- [ ] Extend the chart JSON endpoints — `GET /api/metrics/system?range=…` and `GET /api/metrics/traffic?range=…` accept the four-value enum, default 24h, return 400 on anything else. The range maps to `now - duration` for the `from` timestamp. **[Agent: go-fullstack]**
-- [ ] Propagate `?range=` through the tab partial endpoints — `GET /partial/system?range=…` and `GET /partial/network?range=…` render the selector with the current value pre-selected and inject the range into chart bootstrap data attributes. **[Agent: go-fullstack]**
-- [ ] Extend `web/static/charts.js` — read the `data-range` attribute on chart elements; on `<select>` change, re-fetch the JSON endpoint with the new range and call `chart.update()`. **[Agent: go-fullstack]**
-- [ ] Extend `web/static/tabs.js` — parse `?range=` from the URL hash and rewrite the htmx swap URL to include it; on selector change, update the hash via `pushState`. **[Agent: go-fullstack]**
-- [ ] Update `cards/aggregate-traffic.html` and its handler so the "Last Xh" label and the numbers honor the active range. **[Agent: go-fullstack]**
-- [ ] Server-side test: `GET /api/metrics/system?range=7d` returns up to 8 d worth of points; `?range=99x` returns 400. **[Agent: go-fullstack]**
+- [x] Extend the chart JSON endpoints — `GET /api/metrics/system?range=…` and `GET /api/metrics/traffic?range=…` accept the four-value enum, default 24h, return 400 on anything else. The range maps to `now - duration` for the `from` timestamp. **[Agent: go-fullstack]**
+- [x] Propagate `?range=` through the tab partial endpoints — `GET /partial/system?range=…` and `GET /partial/network?range=…` render the selector with the current value pre-selected and inject the range into chart bootstrap data attributes. **[Agent: go-fullstack]**
+- [x] Extend `web/static/charts.js` — read the `data-range` attribute on chart elements; on `<select>` change, re-fetch the JSON endpoint with the new range and call `chart.update()`. **[Agent: go-fullstack]**
+- [x] Extend `web/static/tabs.js` — parse `?range=` from the URL hash and rewrite the htmx swap URL to include it; on selector change, update the hash via `pushState`. **[Agent: go-fullstack]**
+- [x] Update `cards/aggregate-traffic.html` and its handler so the "Last Xh" label and the numbers honor the active range. **[Agent: go-fullstack]**
+- [x] Server-side test: `GET /api/metrics/system?range=7d` returns up to 8 d worth of points; `?range=99x` returns 400. **[Agent: go-fullstack]**
 - [ ] Verify locally with a DB seeded with >24 h of data: `#system?range=7d` shows the full 7-day curve; `#system?range=1h` zooms in. Refreshing the page preserves the range. **[Agent: go-fullstack]**
 
 ---
