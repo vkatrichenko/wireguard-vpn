@@ -1,7 +1,12 @@
 {{ define "range-selector" }}
-<form class="range-selector" hx-get="{{ .Endpoint }}" hx-target="#tab-body" hx-swap="innerHTML" hx-include="this">
+{{/* hx-trigger="change" must live on the <form> (the element carrying the
+     verb attribute hx-get). htmx evaluates hx-trigger on the verb element;
+     putting it on the <select> alone does nothing because the select has
+     no hx-get. Native change events bubble from the select up to the form,
+     which fires the GET and swaps #tab-body with the new range partial. */}}
+<form class="range-selector" hx-get="{{ .Endpoint }}" hx-target="#tab-body" hx-swap="innerHTML" hx-trigger="change">
   <label for="range-{{ .Tab }}">Range:</label>
-  <select id="range-{{ .Tab }}" name="range" hx-trigger="change">
+  <select id="range-{{ .Tab }}" name="range">
     {{ $current := .Current }}
     {{ range .Options }}
     <option value="{{ . }}"{{ if eq . $current }} selected{{ end }}>{{ . }}</option>
