@@ -180,7 +180,7 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 - [x] CSS audit pass on `app.css` across the new cards: disk progress bars, processes table, WG iface stats, aggregate-traffic, about cards, client-detail expand. **[Agent: go-fullstack]**
 - [x] Add explicit `overflow-x: auto` + `scroll-snap` on the tab pill bar; ensure each pill is ≥44 px touch target. **[Agent: go-fullstack]**
 - [x] Add a `@media (max-width: 600px)` block that re-flows multi-column cards (disk, processes, about) to single-column. **[Agent: go-fullstack]**
-- [ ] Verify in browser devtools at 360 px and 768 px: every tab. No horizontal page scroll at 360. Pill bar scrolls horizontally. Tap targets pass. **[Agent: go-fullstack]**
+- [x] Verify in browser devtools at 360 px and 768 px: every tab. No horizontal page scroll at 360. Pill bar scrolls horizontally. Tap targets pass. **[Agent: go-fullstack]**
 
 ---
 
@@ -188,11 +188,11 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 
 **Outcome:** Old endpoints and templates that are no longer reachable are removed. `make pre-commit` is clean.
 
-- [ ] Remove `/partial/dashboard` alias from `handlers_partial.go` (or the file that owns it). Confirm no template or JS still references it. **[Agent: go-fullstack]**
-- [ ] Delete `web/templates/dashboard-content.html` if it is no longer referenced after the Slice 1 refactor. **[Agent: go-fullstack]**
-- [ ] Grep for orphan template names — any `{{ define "..." }}` block with zero callers gets removed. **[Agent: go-fullstack]**
-- [ ] Update `internal/server/server_test.go` to drop the alias-coverage test added in Slice 1. **[Agent: go-fullstack]**
-- [ ] Run `make test` and `make pre-commit` — green. **[Agent: devsecops-quality]**
+- [x] Remove `/partial/dashboard` alias from `handlers_partial.go` (or the file that owns it). Confirm no template or JS still references it. **[Agent: go-fullstack]**
+- [x] Delete `web/templates/dashboard-content.html` if it is no longer referenced after the Slice 1 refactor. **[Agent: go-fullstack]**
+- [x] Grep for orphan template names — any `{{ define "..." }}` block with zero callers gets removed. **[Agent: go-fullstack]**
+- [x] Update `internal/server/server_test.go` to drop the alias-coverage test added in Slice 1. **[Agent: go-fullstack]**
+- [x] Run `make test` and `make pre-commit` — green. **[Agent: devsecops-quality]**
 - [ ] CI deploy from `main`; on a VPN client visit each tab from a phone and a laptop. Confirm Slice 1–13 acceptance criteria all hold on the deployed binary. **[Agent: go-fullstack]**
 
 ---

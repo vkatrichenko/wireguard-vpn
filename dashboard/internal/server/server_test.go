@@ -350,11 +350,14 @@ func TestHandleIndex_Success(t *testing.T) {
 		`id="service-status"`,
 		`state-active`,
 		"Active since",
-		// client-list card — fakes return an empty manifest and a
-		// server-only `wg show`, so the card renders the empty-state
-		// branch rather than a populated table.
-		`id="client-list"`,
-		"No clients configured",
+		// client-count card — fakes return an empty manifest, so the
+		// count renders as "0 online / 0 total". The full client-list
+		// card was retired in Slice 14 (it lives only on the Clients tab).
+		`id="client-count"`,
+		"0 online",
+		// Overview-grid wrapper — Slice 12 layout: cards land in a 2-col
+		// grid via the wrapper div rather than #tab-body's auto-fit.
+		`class="overview-grid"`,
 		// system card — fakeProcSvc returns first-sample stats:
 		// CPUPercent is 0 (no prior sample to delta against), memory
 		// is MemTotal=8000000 kB / MemAvailable=4000000 kB so used = 50%.
@@ -364,29 +367,21 @@ func TestHandleIndex_Success(t *testing.T) {
 		// network-rate card — first-sample rates render as "0 B/s".
 		`id="network-rate"`,
 		"0 B/s",
-		// Trend-chart partials — Slice 9 sub-task 5 wires four chart cards
-		// into the page; Slice 6 sub-task 4 moves chart-cpu / chart-memory
-		// into the System tab body, and Slice 8 sub-task 5 moves chart-rx /
-		// chart-tx into the Network tab body, so the Overview page no longer
-		// renders any of the four trend charts. They render only inside
-		// their respective tab fragments when the operator switches tabs.
+		// Trend-chart partials moved into the System / Network tab bodies
+		// (Slices 6 + 8), so the cold-load Overview page no longer renders
+		// any of the four trend charts. The Chart.js JS asset is still
+		// loaded globally so tab swaps can hydrate canvases in-place.
 		`/static/chart.umd.min.js`,
 		`/static/charts.js`,
-		// htmx wiring — sub-task 2 of Slice 11. The page polls
-		// /partial/dashboard every 10s and swaps the data-card block.
+		// htmx wiring — the page swaps #tab-body via /partial/<tab>.
 		`<main id="tab-body"`,
 		`class="tab-bar"`,
 		`/static/htmx.min.js`,
-		// Stale-data indicator — sub-task 3 of Slice 11. The pill lives
-		// outside #dashboard-content so it survives htmx innerHTML swaps,
-		// and the IIFE listener is loaded after htmx itself.
+		// Stale-data indicator — the pill lives outside #tab-body so it
+		// survives htmx innerHTML swaps, and the IIFE listener is loaded
+		// after htmx itself.
 		`id="stale-pill"`,
 		`/static/htmx-stale.js`,
-		// events card — the test seeds no handshake events, so the
-		// card renders the empty-state branch (newest-first reverse
-		// is a no-op on an empty slice).
-		`id="events"`,
-		"No recent handshakes.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n--- body ---\n%s", want, body)
@@ -508,61 +503,12 @@ func TestHandleGetService_IncludesEvents(t *testing.T) {
 	}
 }
 
-// TestHandleGetPartialDashboard_RendersFragment proves the htmx polling
-// endpoint at GET /partial/dashboard returns just the inner card block —
-// no <html>/<head>/<body> wrapper — so htmx's innerHTML swap drops it
-// cleanly into <main id="dashboard-content"> on the page.
-func TestHandleGetPartialDashboard_RendersFragment(t *testing.T) {
-	const (
-		fakeIP  = "203.0.113.1"
-		fakeKey = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK="
-	)
-
-	enteredAt := time.Now().Add(-(2*time.Hour + 3*time.Minute))
-
-	infoSvc := &serverinfo.Service{
-		IMDS: fakeIMDS{ip: fakeIP},
-		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
-			return []byte(fakeKey + "\n"), nil
-		},
-	}
-	systemdSvc := systemdRunnerActive(enteredAt)
-
-	// nil geo resolver is allowed — geo is advisory.
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc())
-	if err != nil {
-		t.Fatalf("server.New: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/partial/dashboard", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
-		t.Errorf("Content-Type = %q, want %q", got, "text/html; charset=utf-8")
-	}
-
-	body := rec.Body.String()
-	if !strings.Contains(body, `id="server-info"`) {
-		t.Errorf("partial body missing server-info card:\n%s", body)
-	}
-	// Fragment must NOT contain a full document — that would break htmx
-	// innerHTML swapping by injecting nested <html>/<body> tags.
-	if strings.Contains(body, "<html") {
-		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
-	}
-}
-
-// TestHandleGetPartialTabs proves each of the six tab partial routes registered
-// in Slice 1 sub-task 5 (overview, clients, system, network, events, about)
-// returns a 200 HTML fragment with the expected sentinel string and without a
-// full-document wrapper. The handler is constructed once and reused across
-// subtests — same fake wiring as TestHandleGetPartialDashboard_RendersFragment
-// because the overview path drives the full buildPageData call graph, while
-// the five placeholder tabs are template-only.
+// TestHandleGetPartialTabs proves each of the six tab partial routes
+// (overview, clients, system, network, events, about) returns a 200 HTML
+// fragment with the expected sentinel string and without a full-document
+// wrapper. The handler is constructed once and reused across subtests; the
+// overview path drives the full buildPageData call graph while the five
+// other tabs are template-only or have their own focused data fetches.
 func TestHandleGetPartialTabs(t *testing.T) {
 	const (
 		fakeIP  = "203.0.113.1"

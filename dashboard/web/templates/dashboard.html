@@ -30,7 +30,11 @@
     </nav>
 
     <main id="tab-body">
-      {{ template "dashboard-content" . }}
+      {{/* Cold-load render: the Overview tab content. tabs.js immediately
+           re-fetches the active tab via htmx on DOMContentLoaded, so the
+           cold render is brief — but rendering the right content up-front
+           avoids the empty-state flash if htmx is slow to initialize. */}}
+      {{ template "overview" . }}
     </main>
   </body>
 </html>

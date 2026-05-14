@@ -2,8 +2,9 @@
  *
  * Design intent:
  *   - One source of truth for palette / spacing / radii via :root custom props.
- *   - #tab-body and .charts-grid use auto-fit / fixed-2col CSS grids
- *     so cards reflow without a per-breakpoint layout matrix.
+ *   - #tab-body uses an auto-fit CSS grid so cards reflow without a
+ *     per-breakpoint layout matrix; the Overview tab opts into an
+ *     explicit 2-col layout via .overview-grid (section 16g).
  *   - Status and state pills share a base style; per-state colors are layered
  *     on top so adding a new state is one rule, not a redesign.
  *   - Touch targets (.copy-btn) are >= 44x44 px to meet the spec.
@@ -160,13 +161,6 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: var(--gap);
-}
-
-.charts-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--gap);
-  margin-top: var(--gap);
 }
 
 /* 4b. Tab bar -------------------------------------------------------------- */
@@ -354,18 +348,9 @@ body {
   font-size: 0.85rem;
 }
 
-/* 8. Uptime ---------------------------------------------------------------- */
-
-.uptime {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.uptime.down {
-  color: var(--danger);
-}
+/* 8. (Removed — the dedicated uptime card was retired in Slice 12; "Active
+      since…" now lives inside service-status and "Host uptime" inside the
+      System card.) */
 
 /* 9. Copy button ----------------------------------------------------------- */
 
@@ -401,12 +386,6 @@ body {
 }
 
 /* 10. Client table --------------------------------------------------------- */
-
-#client-list {
-  /* The table can overflow horizontally on narrow viewports; let the card
-     scroll its own contents instead of the page. */
-  overflow-x: auto;
-}
 
 .client-table {
   width: 100%;
@@ -478,12 +457,6 @@ body {
 }
 
 /* 13. Charts --------------------------------------------------------------- */
-
-.charts-grid .card canvas {
-  width: 100%;
-  height: 220px;
-  display: block;
-}
 
 #tab-body .card canvas[data-chart] {
   width: 100%;
@@ -802,8 +775,7 @@ body {
     --gap: 0.75rem;
   }
 
-  #tab-body,
-  .charts-grid {
+  #tab-body {
     grid-template-columns: 1fr;
   }
 
@@ -819,10 +791,6 @@ body {
 
   .card h2 {
     font-size: 0.95rem;
-  }
-
-  .uptime {
-    font-size: 1.25rem;
   }
 
   .dashboard-header h1 {

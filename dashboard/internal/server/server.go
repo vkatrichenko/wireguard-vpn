@@ -83,13 +83,6 @@ type pageData struct {
 	// proc.Service.Sample call returned an error.
 	Stats      *proc.Stats
 	StatsError string
-	// Events / EventsError back the (sub-task 4) handshake-events card.
-	// Events is the last-hour window of handshake_events rows. Nil when
-	// either the fetch failed (EventsError populated) or systemd itself
-	// failed and we skipped the events fetch — the events card is a child
-	// of service-status and renders nothing useful without it.
-	Events      []db.HandshakeEvent
-	EventsError string
 }
 
 // New returns an http.Handler with the wired routes. The caller passes in
@@ -107,9 +100,9 @@ type pageData struct {
 // re-order.
 //
 // Templates are parsed eagerly so a malformed template fails fast on
-// startup rather than on the first request. The `humanUptime` FuncMap is
-// registered before ParseFS because templates/cards/uptime.html invokes it
-// and html/template binds funcs at parse time.
+// startup rather than on the first request. The FuncMap below is registered
+// before ParseFS because several card templates invoke its helpers and
+// html/template binds funcs at parse time.
 func New(
 	webFS fs.FS,
 	serverinfoSvc *serverinfo.Service,
@@ -184,10 +177,6 @@ func New(
 	mux.HandleFunc("GET /api/metrics/system", s.handleGetMetricsSystem)
 	mux.HandleFunc("GET /api/metrics/traffic", s.handleGetMetricsTraffic)
 	mux.HandleFunc("GET /api/metrics/client/{pubkey}", s.handleGetMetricsClient)
-	// /partial/dashboard is a thin alias of /partial/overview for one release
-	// — Slice 14 retires it. Both routes resolve to the same handler so the
-	// on-the-wire response stays identical for existing htmx clients.
-	mux.HandleFunc("GET /partial/dashboard", s.handleGetPartialOverview)
 	mux.HandleFunc("GET /partial/overview", s.handleGetPartialOverview)
 	mux.HandleFunc("GET /partial/clients", s.handleGetPartialClients)
 	mux.HandleFunc("GET /partial/clients/{pubkey}/detail", s.handleGetPartialClientDetail)
@@ -264,22 +253,6 @@ func (s *server) buildPageData(ctx context.Context) pageData {
 		data.ServiceStatusError = err.Error()
 	} else {
 		data.ServiceStatus = status
-	}
-
-	// Handshake events feed the (sub-task 4) events card, which sits inside
-	// the service-status group: skip the DB query when the parent card is
-	// already going to render an error — saves a query when the events
-	// card wouldn't render anyway. On a query failure we populate
-	// EventsError but leave Events nil so the template can branch on it.
-	if data.ServiceStatusError == "" {
-		now := time.Now()
-		events, eventsErr := s.metricsDB.QueryHandshakeEvents(ctx, now.Add(-1*time.Hour), now, 10)
-		if eventsErr != nil {
-			slog.Error("buildPageData: handshake events query failed", "err", eventsErr)
-			data.EventsError = eventsErr.Error()
-		} else {
-			data.Events = events
-		}
 	}
 
 	// Manifest + live wg state are fetched as a pair: if either fails the

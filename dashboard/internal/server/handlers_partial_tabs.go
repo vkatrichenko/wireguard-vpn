@@ -58,16 +58,14 @@ type clientsTabData struct {
 	Error string
 }
 
-// handleGetPartialOverview renders the v3 cards fragment for the Overview tab.
-// It is the successor to the old handleGetPartialDashboard: same data-gathering
-// (buildPageData) and same on-the-wire card markup, just executed via the
-// `overview` named template instead of `dashboard-content`. Slice 14 will
-// retire the /partial/dashboard alias entirely; until then both routes resolve
-// to this handler.
+// handleGetPartialOverview renders the cards fragment for the Overview tab.
+// Shares buildPageData with handleIndex so the cold-load page render and the
+// htmx tab swap stay in lock-step (any new card or new error gate is one
+// change in buildPageData, not two).
 //
 // On render error we still return a 500 — the fragment IS the entire response,
 // so htmx's default error handler will leave the previous content in place and
-// the next 10s tick will retry.
+// the next tab switch will retry.
 func (s *server) handleGetPartialOverview(w http.ResponseWriter, r *http.Request) {
 	data := s.buildPageData(r.Context())
 
