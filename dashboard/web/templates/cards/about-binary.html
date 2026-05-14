@@ -1,0 +1,16 @@
+{{ define "about-binary" }}
+<section id="about-binary" class="card">
+  <h2>Binary</h2>
+  {{/* No error branch — these are package vars injected at build time via
+       -ldflags. The fallback "unknown" defaults render when -ldflags is
+       absent (go run / go test), so this card always has something to show. */}}
+  <dl>
+    <dt>Build SHA</dt>
+    <dd><code>{{ .BuildSHA }}</code></dd>
+    <dt>Build time</dt>
+    <dd><time datetime="{{ .BuildTime }}">{{ .BuildTime }}</time></dd>
+    <dt>Go version</dt>
+    <dd>{{ .GoVersion }}</dd>
+  </dl>
+</section>
+{{ end }}

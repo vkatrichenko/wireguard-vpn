@@ -1,0 +1,19 @@
+{{ define "about-ec2" }}
+<section id="about-ec2" class="card">
+  <h2>EC2 instance</h2>
+  {{ if .Error }}
+  <p class="error">Failed to load EC2 metadata: {{ .Error }}</p>
+  {{ else }}
+  <dl>
+    <dt>Public IP</dt>
+    <dd>{{ .PublicIP }}</dd>
+    <dt>Instance type</dt>
+    <dd>{{ .InstanceType }}</dd>
+    <dt>Availability zone</dt>
+    <dd>{{ .AvailabilityZone }}</dd>
+    <dt>AMI id</dt>
+    <dd><code>{{ .AMIID }}</code></dd>
+  </dl>
+  {{ end }}
+</section>
+{{ end }}

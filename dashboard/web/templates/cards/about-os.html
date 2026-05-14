@@ -1,0 +1,34 @@
+{{ define "about-os" }}
+<section id="about-os" class="card">
+  <h2>Operating system</h2>
+  {{/* OSRelease and Kernel are independent readers — one failing shouldn't
+       blank the other. Each branches on its own *Error string; OSRelease's
+       "unknown" degradation (macOS local dev) flows through as a populated
+       row rather than an error. */}}
+  <dl>
+    {{ if .OSReleaseError }}
+    <dt>OS</dt>
+    <dd class="error">Failed to load /etc/os-release: {{ .OSReleaseError }}</dd>
+    {{ else }}
+    <dt>OS</dt>
+    <dd>{{ .OSRelease.PrettyName }}</dd>
+    <dt>ID</dt>
+    <dd>{{ .OSRelease.ID }}</dd>
+    <dt>Version</dt>
+    <dd>{{ .OSRelease.Version }}</dd>
+    {{ end }}
+
+    {{ if .KernelError }}
+    <dt>Kernel</dt>
+    <dd class="error">Failed to read uname: {{ .KernelError }}</dd>
+    {{ else }}
+    <dt>Kernel</dt>
+    <dd>{{ .Kernel.Sysname }} {{ .Kernel.Release }}</dd>
+    <dt>Hostname</dt>
+    <dd>{{ .Kernel.Nodename }}</dd>
+    <dt>Architecture</dt>
+    <dd>{{ .Kernel.Machine }}</dd>
+    {{ end }}
+  </dl>
+</section>
+{{ end }}

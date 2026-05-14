@@ -65,7 +65,22 @@ jobs:
           CGO_ENABLED: '0'
           GOOS: linux
           GOARCH: amd64
-        run: go build -ldflags "-s -w" -o wireguard-dashboard ./cmd/wireguard-dashboard
+        # Inject build-time metadata into main.BuildSHA / BuildTime / GoVersion
+        # via `-ldflags -X` so the About tab can render which commit and runner
+        # produced the binary. BuildSHA uses the 7-char prefix of GITHUB_SHA
+        # for parity with the Makefile's `git rev-parse --short HEAD`.
+        # BuildTime is the runner's wall clock at step start (close enough to
+        # workflow run start time — `${{ github.event.* }}` only carries
+        # commit-derived timestamps, not run-start ones).
+        run: |
+          BUILD_SHA="${GITHUB_SHA:0:7}"
+          BUILD_TIME="$(date -u +%FT%TZ)"
+          GO_VERSION="$(go env GOVERSION)"
+          go build -ldflags "-s -w \
+              -X main.BuildSHA=${BUILD_SHA} \
+              -X main.BuildTime=${BUILD_TIME} \
+              -X main.GoVersion=${GO_VERSION}" \
+            -o wireguard-dashboard ./cmd/wireguard-dashboard
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502  # v4.0.2

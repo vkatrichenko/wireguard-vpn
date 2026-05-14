@@ -52,6 +52,20 @@ const (
 	shutdownTimeout = 5 * time.Second
 )
 
+// Build-time metadata. Populated via -ldflags "-X main.BuildSHA=…
+// -X main.BuildTime=… -X main.GoVersion=…" from the Makefile and the
+// dashboard-build.yml CI workflow. All three carry sentinel "unknown"
+// defaults so a `go run`/`go test` invocation (which doesn't pass ldflags)
+// still produces a renderable About card rather than empty strings that
+// would surprise a future template branch. They MUST be `var` not `const`:
+// the `-X` linker flag overwrites variable initializers and silently
+// no-ops on constants.
+var (
+	BuildSHA  = "unknown"
+	BuildTime = "unknown"
+	GoVersion = "unknown"
+)
+
 func main() {
 	addr := getenv("LISTEN_ADDR", defaultListenAddr)
 
@@ -60,6 +74,15 @@ func main() {
 	// add it later only if there's a concrete need (test rigs, alternate WG
 	// interface name, etc.).
 	serverinfoSvc := serverinfo.New()
+	// Wire the build-time metadata (populated via -ldflags -X) onto the
+	// Service so the About-tab handler can render the Binary card. Defaults
+	// are the sentinel "unknown" values declared above, so a `go run` (no
+	// ldflags) still produces a stable card shape.
+	serverinfoSvc.Build = serverinfo.BuildInfo{
+		SHA:       BuildSHA,
+		Time:      BuildTime,
+		GoVersion: GoVersion,
+	}
 
 	// systemd.New() targets `wg-quick@wg0.service` via sudo systemctl. Like
 	// serverinfo, the unit name and runner are not env-configurable yet —
