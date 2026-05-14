@@ -153,10 +153,10 @@ Vertical slices — each leaves the dashboard runnable with new verifiable value
 **Outcome:** About tab is fully populated. Build SHA and timestamp are injected at build time via `-ldflags -X`.
 
 - [x] Extend `internal/serverinfo/serverinfo.go` — IMDSv2 reads for `instance-type`, `placement/availability-zone`, `ami-id` (public IP already done). Add a `Kernel()` reader (uname-like via `unix.Uname`) and `OSRelease()` reader for `/etc/os-release`. **[Agent: go-fullstack]**
-- [ ] Build-time metadata — declare `var BuildSHA, BuildTime, GoVersion string` package-level in `cmd/wireguard-dashboard/main.go`; populate via `-ldflags "-X main.BuildSHA=… -X main.BuildTime=…"`. Update `dashboard/Makefile` `build` target to set the values from `git rev-parse --short HEAD` and `date -u +%FT%TZ`. Update the CI workflow `dashboard-build.yml` to set them from the workflow's SHA + run start time. **[Agent: cicd-github-actions]**
-- [ ] New `web/templates/cards/about-ec2.html`, `about-binary.html`, `about-os.html`. **[Agent: go-fullstack]**
-- [ ] Promote `web/templates/tabs/about.html` from placeholder — three cards. Include the existing server-public-key copy button as a fourth card (also stays on Overview's server-info). **[Agent: go-fullstack]**
-- [ ] Server-side test: `GET /partial/about` body contains an "Instance type" sentinel and a "Build" sentinel. IMDSv2 reads need a mockable injection point to keep tests offline — same pattern as the existing serverinfo tests. **[Agent: go-fullstack]**
+- [x] Build-time metadata — declare `var BuildSHA, BuildTime, GoVersion string` package-level in `cmd/wireguard-dashboard/main.go`; populate via `-ldflags "-X main.BuildSHA=… -X main.BuildTime=…"`. Update `dashboard/Makefile` `build` target to set the values from `git rev-parse --short HEAD` and `date -u +%FT%TZ`. Update the CI workflow `dashboard-build.yml` to set them from the workflow's SHA + run start time. **[Agent: cicd-github-actions]**
+- [x] New `web/templates/cards/about-ec2.html`, `about-binary.html`, `about-os.html`. **[Agent: go-fullstack]**
+- [x] Promote `web/templates/tabs/about.html` from placeholder — three cards. Include the existing server-public-key copy button as a fourth card (also stays on Overview's server-info). **[Agent: go-fullstack]**
+- [x] Server-side test: `GET /partial/about` body contains an "Instance type" sentinel and a "Build" sentinel. IMDSv2 reads need a mockable injection point to keep tests offline — same pattern as the existing serverinfo tests. **[Agent: go-fullstack]**
 - [ ] Verify locally with mocked metadata; verify on EC2 after deploy that the real values render. **[Agent: go-fullstack]**
 
 ---

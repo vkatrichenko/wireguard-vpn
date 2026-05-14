@@ -128,10 +128,23 @@ type unameFunc func(*unix.Utsname) error
 // developer's macOS box is both racy and platform-specific.
 type readFileFunc func(path string) ([]byte, error)
 
+// BuildInfo carries the three build-time strings injected via `-ldflags -X`
+// in the Makefile / dashboard-build.yml workflow. main.go reads its own
+// package-level vars and assigns this struct onto Service.Build at startup
+// — the serverinfo package can't import main, so the wiring lives there.
+// Defaults are the sentinel "unknown" the main vars carry, so a `go run`
+// invocation (no ldflags) still renders the About card with a stable shape.
+type BuildInfo struct {
+	SHA       string `json:"sha"`
+	Time      string `json:"time"`
+	GoVersion string `json:"go_version"`
+}
+
 // Service composes every side-effecting dependency the package needs. Fields
 // are grouped by concern (IMDS / command runner / kernel & os-release
-// readers) and exported so tests can construct a Service{} literal with
-// fakes; production code should use New() to get the real implementations.
+// readers / build metadata) and exported so tests can construct a Service{}
+// literal with fakes; production code should use New() to get the real
+// implementations.
 type Service struct {
 	// IMDS-backed readers (public IP, instance type, AZ, AMI id).
 	IMDS imdsClient
@@ -142,6 +155,10 @@ type Service struct {
 	// Local system readers used by the About tab.
 	Uname    unameFunc
 	ReadFile readFileFunc
+
+	// Build-time metadata injected from main via -ldflags -X. Not populated
+	// by New() — main.go assigns it after construction (see cmd/main.go).
+	Build BuildInfo
 }
 
 // New returns a Service wired with the production defaults: an httpIMDS
@@ -196,6 +213,12 @@ func (s *Service) Get(ctx context.Context) (ServerInfo, error) {
 // unix.ByteSliceToString strips the terminator and any trailing garbage so
 // the resulting Go strings are safe to render directly.
 func (s *Service) Kernel() (KernelInfo, error) {
+	// Nil Uname is a test-construction signal (Service{} literal without
+	// the seam wired) — degrade to a clear error rather than panic so the
+	// handler's KernelError branch renders a useful message.
+	if s.Uname == nil {
+		return KernelInfo{}, errors.New("uname: reader not wired")
+	}
 	var uts unix.Utsname
 	if err := s.Uname(&uts); err != nil {
 		return KernelInfo{}, fmt.Errorf("uname: %w", err)
@@ -215,6 +238,10 @@ func (s *Service) Kernel() (KernelInfo, error) {
 // handler can render a stable "unknown" row rather than 500ing the whole
 // page when development happens off-Linux.
 func (s *Service) OSRelease() (OSReleaseInfo, error) {
+	// Nil ReadFile is a test-construction signal — same rationale as Kernel.
+	if s.ReadFile == nil {
+		return OSReleaseInfo{ID: "unknown"}, errors.New("os-release: reader not wired")
+	}
 	body, err := s.ReadFile(osReleasePath)
 	if err != nil {
 		return OSReleaseInfo{ID: "unknown"}, fmt.Errorf("read %s: %w", osReleasePath, err)

@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"wireguard-dashboard/internal/disk"
 	"wireguard-dashboard/internal/netdev"
 	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/processes"
+	"wireguard-dashboard/internal/serverinfo"
 )
 
 // rangeSelectorData is the view-model for the shared `range-selector` partial
@@ -332,10 +334,135 @@ func (s *server) handleGetPartialEvents(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// handleGetPartialAbout renders the About tab body — placeholder in Slice 1.
-func (s *server) handleGetPartialAbout(w http.ResponseWriter, _ *http.Request) {
+// aboutTabData is the view-model for the About tab. Four cards: EC2 metadata
+// (IMDSv2-sourced), build-time metadata (ldflags-injected package vars),
+// OS/kernel metadata (local syscalls + /etc/os-release), and the server-info
+// card re-used from Overview so the WireGuard public-key copy button is
+// reachable from both tabs. Each card branches on its own *Error field —
+// one fetch failing doesn't blank the others.
+type aboutTabData struct {
+	EC2             aboutEC2CardData
+	Binary          aboutBinaryCardData
+	OS              aboutOSCardData
+	ServerInfo      serverinfo.ServerInfo
+	ServerInfoError string
+}
+
+// aboutEC2CardData mirrors the keys cards/about-ec2.html branches on. The
+// four IMDS reads are joined into a single Error string via errors.Join so
+// the template doesn't need to know which of the four endpoints failed —
+// the operator sees the full join in the error message and dashboard logs
+// carry the structured slog line.
+type aboutEC2CardData struct {
+	PublicIP         string
+	InstanceType     string
+	AvailabilityZone string
+	AMIID            string
+	Error            string
+}
+
+// aboutBinaryCardData is the view-model for cards/about-binary.html. All
+// three fields are sourced from serverinfoSvc.Build (the BuildInfo struct
+// populated in cmd/main.go from the -ldflags -X package vars). No error
+// path — the package vars always have at least the sentinel "unknown".
+type aboutBinaryCardData struct {
+	BuildSHA  string
+	BuildTime string
+	GoVersion string
+}
+
+// aboutOSCardData is the view-model for cards/about-os.html. Kernel and
+// OSRelease are independent readers (uname syscall vs. /etc/os-release file
+// read), so each has its own *Error string. OSRelease's macOS-degraded
+// path returns OSReleaseInfo{ID: "unknown"} + a non-nil error — we still
+// surface the error so the operator can tell "running off-Linux" from
+// "real read failure on EC2".
+type aboutOSCardData struct {
+	Kernel         serverinfo.KernelInfo
+	OSRelease      serverinfo.OSReleaseInfo
+	KernelError    string
+	OSReleaseError string
+}
+
+// handleGetPartialAbout renders the About tab body. Fans out the four IMDS
+// reads + the ServerInfo fetch (which itself runs IMDS PublicIP + the wg
+// public-key shell-out in parallel) into one wg.Wait, then synchronously
+// reads kernel + OS-release (both cheap local calls — parallelism would be
+// overkill). Each card degrades independently per the *Error fields.
+//
+// Yes, PublicIP is fetched twice: once by the EC2 card's IMDS fan-out, once
+// by serverinfoSvc.Get() for the Server endpoint card. IMDSv2 reads are
+// single-digit-ms link-local calls and the parallel block hides the cost.
+// Coalescing them would require either splitting Get() or threading the
+// already-fetched value into a private helper — both more code than the
+// duplication is worth.
+func (s *server) handleGetPartialAbout(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	data := aboutTabData{
+		Binary: aboutBinaryCardData{
+			BuildSHA:  s.serverinfoSvc.Build.SHA,
+			BuildTime: s.serverinfoSvc.Build.Time,
+			GoVersion: s.serverinfoSvc.Build.GoVersion,
+		},
+	}
+
+	var (
+		wg sync.WaitGroup
+
+		ip, instanceType, az, ami           string
+		ipErr, typeErr, azErr, amiErr       error
+		info                                serverinfo.ServerInfo
+		infoErr                             error
+	)
+
+	wg.Add(5)
+	go func() { defer wg.Done(); ip, ipErr = s.serverinfoSvc.IMDS.PublicIP(ctx) }()
+	go func() { defer wg.Done(); instanceType, typeErr = s.serverinfoSvc.IMDS.InstanceType(ctx) }()
+	go func() { defer wg.Done(); az, azErr = s.serverinfoSvc.IMDS.AvailabilityZone(ctx) }()
+	go func() { defer wg.Done(); ami, amiErr = s.serverinfoSvc.IMDS.AMIID(ctx) }()
+	go func() { defer wg.Done(); info, infoErr = s.serverinfoSvc.Get(ctx) }()
+	wg.Wait()
+
+	if joined := errors.Join(ipErr, typeErr, azErr, amiErr); joined != nil {
+		slog.Error("GET /partial/about: EC2 metadata fetch failed", "err", joined)
+		data.EC2.Error = joined.Error()
+	} else {
+		data.EC2 = aboutEC2CardData{
+			PublicIP:         ip,
+			InstanceType:     instanceType,
+			AvailabilityZone: az,
+			AMIID:            ami,
+		}
+	}
+
+	if infoErr != nil {
+		slog.Error("GET /partial/about: server-info fetch failed", "err", infoErr)
+		data.ServerInfoError = infoErr.Error()
+	} else {
+		data.ServerInfo = info
+	}
+
+	// Kernel is a cheap syscall (microseconds); sequential is fine.
+	if kernel, err := s.serverinfoSvc.Kernel(); err != nil {
+		slog.Error("GET /partial/about: kernel read failed", "err", err)
+		data.OS.KernelError = err.Error()
+	} else {
+		data.OS.Kernel = kernel
+	}
+
+	// OSRelease returns OSReleaseInfo{ID: "unknown"} + a wrapped read error
+	// on macOS local dev; capture both so the template can decide whether to
+	// show the populated row (it does — KernelError is what gates blanking).
+	osInfo, osErr := s.serverinfoSvc.OSRelease()
+	data.OS.OSRelease = osInfo
+	if osErr != nil {
+		slog.Warn("GET /partial/about: os-release read failed", "err", osErr)
+		data.OS.OSReleaseError = osErr.Error()
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "about", nil); err != nil {
+	if err := s.tmpl.ExecuteTemplate(w, "about", data); err != nil {
 		slog.Error("GET /partial/about: template render failed", "err", err)
 		http.Error(w, "template render failed", http.StatusInternalServerError)
 		return

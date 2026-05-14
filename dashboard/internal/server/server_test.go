@@ -265,16 +265,16 @@ func fakeSystemdRunnerErr(_ context.Context, _ string, _ ...string) ([]byte, err
 	return nil, io.ErrUnexpectedEOF
 }
 
-// fakeIMDS is a stub imdsClient that returns a canned public IP. It exists
-// only to drive the success-path render test; the production path uses the
-// real httpIMDS hitting 169.254.169.254. The InstanceType / AvailabilityZone
-// / AMIID methods are present to satisfy the extended imdsClient interface
-// from Slice 11; no test in this package exercises them yet (the about-tab
-// handler test lands in a later sub-task), so they all return the zero
-// string and share the same canned err.
+// fakeIMDS is a stub imdsClient that returns canned IMDS values. The four
+// fields default to the empty string so existing tests that only care about
+// the public-IP path can keep using `fakeIMDS{ip: "..."}`; the about-tab
+// test in this package populates instanceType / az / amiID explicitly.
 type fakeIMDS struct {
-	ip  string
-	err error
+	ip           string
+	instanceType string
+	az           string
+	amiID        string
+	err          error
 }
 
 func (f fakeIMDS) PublicIP(_ context.Context) (string, error) {
@@ -282,15 +282,15 @@ func (f fakeIMDS) PublicIP(_ context.Context) (string, error) {
 }
 
 func (f fakeIMDS) InstanceType(_ context.Context) (string, error) {
-	return "", f.err
+	return f.instanceType, f.err
 }
 
 func (f fakeIMDS) AvailabilityZone(_ context.Context) (string, error) {
-	return "", f.err
+	return f.az, f.err
 }
 
 func (f fakeIMDS) AMIID(_ context.Context) (string, error) {
-	return "", f.err
+	return f.amiID, f.err
 }
 
 // TestHandleIndex_Success proves the dashboard.html template renders the
@@ -612,7 +612,13 @@ func TestHandleGetPartialTabs(t *testing.T) {
 		// rows the cards/events.html empty branch renders the canonical
 		// "No recent handshakes." copy.
 		{"events", "/partial/events", []string{`id="events"`, "No recent handshakes."}},
-		{"about", "/partial/about", []string{"Coming soon"}},
+		// Slice 11 promotes the About tab from placeholder: four cards
+		// (about-ec2 / about-binary / about-os / re-used server-info).
+		// The Uname/ReadFile seams aren't wired in this test's Service{}
+		// literal, so the OS card renders via the "reader not wired"
+		// error branches — placeholder-existence assertion is satisfied
+		// by the three new id attributes regardless of error state.
+		{"about", "/partial/about", []string{`id="about-ec2"`, `id="about-binary"`, `id="about-os"`}},
 	}
 
 	for _, tc := range tests {
@@ -1741,6 +1747,102 @@ func TestHandleGetPartialEvents_RendersSeededRows(t *testing.T) {
 	for _, dont := range []string{"peer-00", "peer-01", "peer-02", "peer-03", "peer-04"} {
 		if strings.Contains(body, dont) {
 			t.Errorf("body unexpectedly contains %q (should be filtered by LIMIT 50):\n%s", dont, body)
+		}
+	}
+}
+
+// TestHandleGetPartialAbout_RendersAllCards pins the About-tab fragment's
+// load-bearing surface: the four cards rendered by tabs/about.html with
+// canned IMDS values, stubbed Uname + ReadFile seams, and a populated Build
+// struct. Asserts the two spec-mandated sentinels ("Instance type", "Build")
+// plus the actual injected values, proving the end-to-end wiring from the
+// imdsClient stub through to the rendered <dd> cells.
+//
+// The IMDS / Uname / ReadFile stubs return offline values so this test
+// never touches the link-local metadata service, the real uname syscall,
+// or /etc/os-release on the host running `go test`.
+func TestHandleGetPartialAbout_RendersAllCards(t *testing.T) {
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{
+			ip:           "203.0.113.99",
+			instanceType: "t3.micro",
+			az:           "us-east-1a",
+			amiID:        "ami-0abcdef1234567890",
+		},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+		// Uname stub deposits canned kernel strings (NUL-terminated to mimic
+		// the real syscall) so the OS card renders the populated branch.
+		Uname: func(u *unix.Utsname) error {
+			copy(u.Sysname[:], "Linux\x00")
+			copy(u.Nodename[:], "wg-host\x00")
+			copy(u.Release[:], "6.8.0-1015-aws\x00")
+			copy(u.Version[:], "#16~22.04.1-Ubuntu SMP\x00")
+			copy(u.Machine[:], "x86_64\x00")
+			return nil
+		},
+		// ReadFile stub returns an Amazon Linux 2023-style /etc/os-release
+		// so the OS card's PrettyName / ID / Version rows populate.
+		ReadFile: func(_ string) ([]byte, error) {
+			return []byte("NAME=\"Amazon Linux\"\nVERSION=\"2023\"\nID=amzn\nPRETTY_NAME=\"Amazon Linux 2023\"\n"), nil
+		},
+		Build: serverinfo.BuildInfo{
+			SHA:       "d4e05cb",
+			Time:      "2026-05-14T12:35:08Z",
+			GoVersion: "go1.25.5",
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc())
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial/about", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want %q", got, "text/html; charset=utf-8")
+	}
+
+	body := rec.Body.String()
+	if strings.Contains(body, "<html") {
+		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
+	}
+
+	for _, want := range []string{
+		// Four card ids — proves the about template composed all four sections.
+		`id="about-ec2"`,
+		`id="about-binary"`,
+		`id="about-os"`,
+		`id="server-info"`,
+		// Spec-mandated sentinels: "Instance type" + "Build".
+		"Instance type",
+		"Build SHA",
+		"Build time",
+		// EC2 card body cells.
+		"203.0.113.99",
+		"t3.micro",
+		"us-east-1a",
+		"ami-0abcdef1234567890",
+		// Binary card body cells.
+		"d4e05cb",
+		"2026-05-14T12:35:08Z",
+		"go1.25.5",
+		// OS card body cells (PrettyName + kernel triple).
+		"Amazon Linux 2023",
+		"Linux 6.8.0-1015-aws",
+		"wg-host",
+		"x86_64",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q:\n%s", want, body)
 		}
 	}
 }

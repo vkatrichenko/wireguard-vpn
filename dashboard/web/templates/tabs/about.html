@@ -1,1 +1,15 @@
-{{ define "about" }}<section class="card empty"><p class="empty">Coming soon.</p></section>{{ end }}
+{{ define "about" }}
+{{ template "about-ec2" .EC2 }}
+{{ template "about-binary" .Binary }}
+{{ template "about-os" .OS }}
+{{/* Fourth card: the existing Server endpoint card from Overview. Re-used
+     here so the WireGuard public-key copy button is reachable from the
+     About tab without a separate widget. Public IP shows in both this card
+     and the EC2 card — acceptable duplication; coalescing would mean either
+     splitting the server-info template or threading a flag through. */}}
+{{ if .ServerInfoError }}
+<section class="card error">Failed to load server info: {{ .ServerInfoError }}</section>
+{{ else }}
+{{ template "server-info" .ServerInfo }}
+{{ end }}
+{{ end }}
