@@ -216,7 +216,7 @@ resources/
 #Claude
 
 # CLAUDE.md
-.claude/settings.local.json                            
+.claude/settings.local.json
 .claude/.credentials.json
 
 #JS related
@@ -266,3 +266,9 @@ backend/db_dumps
 
 # Docs
 product_docs
+.praxis/config/
+.praxis/scripts
+.praxis/prompts
+.praxis/assets
+scripts/enable-hooks.sh
+project-context/config/files_tree.md
