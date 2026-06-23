@@ -42,3 +42,14 @@ _Extend the server to support multiple clients and add quality gates for long-te
 - [ ] **Quality & Documentation**
   - [ ] **Pre-Commit Hooks:** Integrate fmt, tflint, trivy, and terraform-docs as pre-commit checks to enforce code quality and catch security issues before merge.
   - [ ] **User Journey Documentation:** Document the full clone-configure-deploy workflow so new users can go from zero to a working VPN with clear guidance.
+
+---
+
+### Phase 4
+
+_Modernize the peer deployment loop — eliminate the EC2 instance replacement requirement for client changes and validate the transport abstraction that unlocks future portability. Detailed rationale and options analysis in [`docs/deployment-options.md`](../../docs/deployment-options.md)._
+
+- [ ] **Runtime Client Reconcile (Archetype 1)**
+  - [ ] **SSM-Driven Client Transport:** Move the source of client data from EC2 user-data (rendered once at first boot) to AWS SSM Parameter Store (read at runtime), so adding or removing a client no longer requires replacing the EC2 instance.
+  - [ ] **Refresh & Apply UI:** Add a single dashboard control that fetches the current client list, previews the diff against running kernel state, and applies the change via `wg syncconf`, with no interruption to unrelated peers.
+  - [ ] **Read-Only Config Template Helper:** Surface a per-peer "download config template" action on the dashboard — server pubkey + endpoint + the peer's declared IP, with a private-key placeholder the operator fills in offline.
