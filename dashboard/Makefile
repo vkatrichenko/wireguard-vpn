@@ -18,7 +18,7 @@
 # `$LISTEN_ADDR` and `${LISTEN_ADDR:-127.0.0.1:8080}` resolves it (or applies
 # the default) at runtime.
 
-.PHONY: build run test
+.PHONY: build run test geoip-db
 
 # RELEASE_TAG is the published version (vX.Y.Z) the CI release workflow injects
 # from GITHUB_REF_NAME. Locally it defaults to "dev" — an untagged working tree
@@ -35,11 +35,30 @@ LDFLAGS := -s -w \
 	-X main.BuildTime=$(BUILD_TIME) \
 	-X main.GoVersion=$(GO_VERSION)
 
-build:
+# DB-IP IP-to-City Lite database (CC BY 4.0). Fetched at build rather than
+# committed (~124 MB) — see internal/geoip/README.md. `//go:embed` requires the
+# file present at compile time, so build/run/test depend on it; CI runs
+# `make geoip-db` before building. The monthly file is overridable via
+# GEOIP_DB_MONTH=YYYY-MM if the current month isn't published yet (DB-IP posts
+# new builds at the start of each month).
+GEOIP_DB       := internal/geoip/dbip-city-lite.mmdb
+GEOIP_DB_MONTH ?= $(shell date +%Y-%m)
+GEOIP_DB_URL   := https://download.db-ip.com/free/dbip-city-lite-$(GEOIP_DB_MONTH).mmdb.gz
+
+# Fetch only when missing (it's a file target, so an existing db is left as-is).
+$(GEOIP_DB):
+	@echo "Fetching DB-IP IP-to-City Lite ($(GEOIP_DB_MONTH), CC BY 4.0) ..."
+	curl -fsSL "$(GEOIP_DB_URL)" -o "$(GEOIP_DB).gz"
+	gunzip -f "$(GEOIP_DB).gz"
+
+# Explicit target for CI / first-time local setup.
+geoip-db: $(GEOIP_DB)
+
+build: $(GEOIP_DB)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o wireguard-dashboard ./cmd/wireguard-dashboard
 
-run:
+run: $(GEOIP_DB)
 	LISTEN_ADDR=$${LISTEN_ADDR:-127.0.0.1:8080} go run ./cmd/wireguard-dashboard
 
-test:
+test: $(GEOIP_DB)
 	go test ./...

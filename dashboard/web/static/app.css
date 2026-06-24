@@ -492,6 +492,32 @@ body {
   background-color: var(--btn-hover-bg);
 }
 
+/* Config download links (Clients tab CONFIG column — spec 004). The browser
+   default link color is too low-contrast, especially on the expanded/active
+   row; use the themed accent + bold + spacing so Full / Split read clearly in
+   both light and dark themes. */
+.config-actions {
+  white-space: nowrap;
+}
+
+.config-actions a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.config-actions a + a {
+  margin-left: 0.5rem;
+}
+
+.config-actions a:hover,
+.config-actions a:focus-visible {
+  color: var(--accent-fg);
+  background-color: var(--accent);
+  border-radius: 4px;
+  text-decoration: none;
+}
+
 .detail-row.hidden {
   display: none;
 }

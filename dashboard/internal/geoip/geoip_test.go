@@ -1,11 +1,11 @@
 // Tests for the geoip Service. These run against the real embedded
-// GeoLite2-City.mmdb — the database ships with the binary, so a unit test
+// dbip-city-lite.mmdb — the database ships with the binary, so a unit test
 // that constructs a Service via geoip.New() is the closest thing to a true
 // integration test we can run without network access.
 //
-// The public-IP assertions only pin country codes, never cities: MaxMind
-// rotates city mappings between releases, and a city assertion would turn
-// the suite into a quarterly maintenance burden for no real benefit. The
+// The public-IP assertions only pin country codes, never cities: DB-IP
+// rotates city mappings between monthly releases, and a city assertion would
+// turn the suite into a recurring maintenance burden for no real benefit. The
 // resolved city is surfaced via t.Logf so it remains visible in -v output.
 
 package geoip

@@ -29,7 +29,7 @@ This spec adds two read-only views built entirely on data the dashboard already 
     - [ ] A client is shown **online** when its latest handshake is within a freshness threshold (default: 3 minutes) and **offline** otherwise — consistent with the indicator already used in 003 §2.3.
     - [ ] For offline clients, a human-readable **last-seen** is shown (e.g. "last seen 2 days ago", or "never" if no handshake was ever recorded).
     - [ ] Expanding a client (reusing the 003 expand panel) shows a **connection timeline** over the selected time range: online/offline bands, plus a summary of total connected time and session count for the range.
-    - [ ] A "session" is **inferred** from consecutive handshakes (WireGuard has no explicit connect/disconnect): a gap larger than the session-gap threshold starts a new session. `[NEEDS CLARIFICATION: confirm session-gap threshold — proposed default 10 minutes.]`
+    - [ ] A "session" is **inferred** from consecutive handshakes (WireGuard has no explicit connect/disconnect): a gap larger than the session-gap threshold (**10 minutes**) starts a new session.
     - [ ] When insufficient history exists (fresh host), the timeline shows whatever exists without error.
 
 ### 2.2 Events / history retention
@@ -46,7 +46,7 @@ This spec adds two read-only views built entirely on data the dashboard already 
   - **Acceptance Criteria:**
     - [ ] A world map renders markers for peers with a resolvable public endpoint, positioned by GeoLite2 latitude/longitude.
     - [ ] **Online** peers are visually distinct from peers seen recently but currently offline (e.g. color/opacity); the legend explains the encoding.
-    - [ ] Hovering/tapping a marker shows the client name, city/country, and online/last-seen status. Overlapping markers at the same location remain distinguishable (e.g. a count badge or small cluster). `[NEEDS CLARIFICATION: confirm whether to cluster co-located peers or just stack/badge them — proposed: badge with count.]`
+    - [ ] Hovering/tapping a marker shows the client name, city/country, and online/last-seen status. Overlapping markers at the same location are **stacked into one marker with a count badge** (no clustering library); hover/tap lists the co-located peers.
     - [ ] Peers with RFC1918 / unresolvable endpoints are **excluded** from the map (consistent with the "—" geolocation rule in 003 §2.3) and noted in a small "N not mappable" caption.
     - [ ] The map is **fully offline**: the base map is an embedded/vendored asset; the dashboard makes **no** outbound request and loads no external tiles, fonts, or scripts.
     - [ ] Empty state when no peers are mappable: a neutral map with "No mappable peers."
@@ -56,7 +56,7 @@ This spec adds two read-only views built entirely on data the dashboard already 
 - **As the operator, I want** these to fit the existing layout, **so that** the dashboard stays coherent.
   - **Acceptance Criteria:**
     - [ ] The connection timeline lives in the **Clients** tab expand panel (extending 003 §2.3), not a new tab.
-    - [ ] The geo map lives as a card on `[NEEDS CLARIFICATION: confirm tab — proposed: the Clients tab (peer geography), alternative: a new "Map" card on Overview]`.
+    - [ ] The geo map lives as a **card on the Clients tab** (peer geography), keeping all peer/geography data together.
     - [ ] Tab/range state continues to persist in the URL fragment as in 003 §2.1 / §2.8.
 
 ### 2.5 Refresh & mobile

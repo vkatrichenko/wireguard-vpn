@@ -1,6 +1,12 @@
 # Locally built binary (cross-compiled for linux/amd64 by `make build`).
-# CI uploads its own artifact to S3; we never want a developer's binary checked in.
+# CI publishes its own binary as a GitHub Release asset; we never want a
+# developer's binary checked in.
 /wireguard-dashboard
+
+# DB-IP IP-to-City Lite database — fetched at build (`make geoip-db` / CI),
+# not committed (~124 MB; CC BY 4.0). See internal/geoip/README.md.
+/internal/geoip/dbip-city-lite.mmdb
+/internal/geoip/*.mmdb.gz
 
 # Go test/coverage artifacts
 *.test

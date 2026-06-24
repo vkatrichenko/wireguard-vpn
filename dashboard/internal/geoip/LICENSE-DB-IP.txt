@@ -1,0 +1,29 @@
+This product includes IP geolocation data created by DB-IP, available from
+https://db-ip.com.
+
+The DB-IP IP-to-City Lite database is distributed under the Creative Commons
+Attribution 4.0 International License (CC BY 4.0). The full license text is
+available at:
+
+    https://creativecommons.org/licenses/by/4.0/
+
+You are free to:
+  - Share — copy and redistribute the material in any medium or format
+  - Adapt — remix, transform, and build upon the material for any purpose,
+    even commercially
+
+Under the following terms:
+  - Attribution — You must give appropriate credit, provide a link to the
+    license, and indicate if changes were made. The required attribution is:
+
+        IP Geolocation by DB-IP (https://db-ip.com)
+
+Unlike CC BY-SA (the license MaxMind's older GeoLite2 used), CC BY 4.0 imposes
+no ShareAlike obligation, so bundling the unmodified database in this binary
+does not affect the license of the surrounding source code, and the database
+may be freely redistributed (including in a public repository) provided the
+attribution above is preserved.
+
+The bundled `dbip-city-lite.mmdb` is an unmodified DB-IP "IP to City Lite"
+release in the MaxMind GeoIP2-compatible MMDB format. Replace it in place to
+refresh; see `README.md` in this directory for the refresh procedure.

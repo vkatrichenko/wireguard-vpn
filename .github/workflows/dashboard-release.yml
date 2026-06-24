@@ -52,6 +52,14 @@ jobs:
           cache: true
           cache-dependency-path: dashboard/go.sum
 
+      - name: Fetch GeoIP database (DB-IP IP-to-City Lite, CC BY 4.0)
+        working-directory: dashboard
+        # The geoip package //go:embeds dbip-city-lite.mmdb, which is fetched at
+        # build (not committed). Must run before any Go step that compiles it
+        # (vet/test/build). `make geoip-db` pulls the current month's CC BY 4.0
+        # file from db-ip.com — no MaxMind account/key required.
+        run: make geoip-db
+
       - name: go vet
         working-directory: dashboard
         run: go vet ./...

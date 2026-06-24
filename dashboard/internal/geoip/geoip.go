@@ -1,7 +1,13 @@
 // Package geoip resolves peer endpoint IP addresses to a country and city
-// using an embedded MaxMind GeoLite2-City database. The .mmdb is baked into
+// using an embedded DB-IP IP-to-City Lite database. The .mmdb is baked into
 // the binary at build time via embed.FS so the dashboard needs zero outbound
 // network for geolocation and leaks no peer IPs to a third-party API.
+//
+// DB-IP IP-to-City Lite ships in the MaxMind GeoIP2-compatible MMDB schema,
+// so the github.com/oschwald/geoip2-golang reader works unchanged — the
+// City record's Country.IsoCode / City.Names / Location fields are identical.
+// (It replaced MaxMind GeoLite2, which is no longer freely redistributable
+// under CC BY; DB-IP Lite is CC BY 4.0 — attribution only.)
 //
 // One Service is constructed in main.go and shared across handlers; the
 // underlying maxminddb reader is safe for concurrent reads, and lookups are
@@ -16,21 +22,21 @@ import (
 	"github.com/oschwald/geoip2-golang"
 )
 
-// GeoLite2-City.mmdb is vendored alongside this file under CC BY-SA 4.0;
-// see LICENSE-GeoLite2.txt for the required attribution. Refreshed by hand
-// per README.md — there is intentionally no auto-update loop.
+// dbip-city-lite.mmdb is vendored alongside this file under CC BY 4.0; see
+// LICENSE-DB-IP.txt for the required attribution ("IP Geolocation by DB-IP").
+// Refreshed by hand per README.md — there is intentionally no auto-update loop.
 //
-//go:embed GeoLite2-City.mmdb
+//go:embed dbip-city-lite.mmdb
 var mmdbBytes []byte
 
-// Service wraps an in-memory MaxMind GeoLite2-City reader. Construct with
-// New; the embedded mmdb is decoded on construction and held for the lifetime
-// of the process. Safe for concurrent reads.
+// Service wraps an in-memory DB-IP IP-to-City Lite reader (GeoIP2-format mmdb).
+// Construct with New; the embedded mmdb is decoded on construction and held for
+// the lifetime of the process. Safe for concurrent reads.
 type Service struct {
 	reader *geoip2.Reader
 }
 
-// New constructs a Service from the embed.FS-bundled GeoLite2-City.mmdb.
+// New constructs a Service from the embed.FS-bundled dbip-city-lite.mmdb.
 // Returns an error only if the embedded blob fails to decode — which would
 // indicate a corrupt commit, not a runtime fault.
 func New() (*Service, error) {
