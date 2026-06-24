@@ -62,7 +62,7 @@ import (
 //     window + 1h slack to give the leftmost edge a non-zero anchor and
 //     absorb clock skew. Expected on-disk DB size at 2 peers / 30s cadence
 //     ≈ 17 MB (system_metrics + traffic_metrics + client_traffic × peers
-//     + indexes). Worst-case at 20 peers ≈ 170 MB — still well within
+//   - indexes). Worst-case at 20 peers ≈ 170 MB — still well within
 //     operational budget. See spec 003 §2.7 for the sizing math.
 const (
 	DefaultSampleEvery    = 30 * time.Second

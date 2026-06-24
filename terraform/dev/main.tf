@@ -36,11 +36,11 @@ module "wireguard" {
       address    = "172.16.15.6/32"
       public_key = "OVtCVOCizGvTVq2vhlymbEOmVnzfZaQKxXgUk+5eYwM="
     },
-    # {
-    #   name       = "<peer-name>"
-    #   address    = "10.222.123.9/32"
-    #   public_key = "<peer-public-key>"
-    # },
+    {
+      name       = "test"
+      address    = "172.16.15.7/32"
+      public_key = "pe3YV5lUvF01ow559PXk7W+mLsuGggRh6v57J1ywKU0="
+    },
   ]
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id

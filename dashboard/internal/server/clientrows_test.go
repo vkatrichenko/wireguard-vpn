@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"wireguard-dashboard/internal/geoip"
 	"wireguard-dashboard/internal/wg"
 )
 
@@ -18,6 +19,12 @@ type fakeGeoResolver struct {
 }
 
 func (f fakeGeoResolver) Lookup(_ net.IP) (string, string) { return f.country, f.city }
+
+// LookupGeo satisfies the GeoResolver interface (extended in spec 006 Slice 3).
+// buildClientRows only consults Lookup, so this returns a not-OK GeoPoint —
+// the /api/geo handler's resolver behaviour is exercised with staticGeoResolver
+// in server_test.go, which carries controllable coordinates.
+func (f fakeGeoResolver) LookupGeo(_ net.IP) geoip.GeoPoint { return geoip.GeoPoint{} }
 
 // TestBuildClientRows_Geo proves the resolver is invoked exactly when the
 // peer's Endpoint is a valid `host:port` with a parseable IP, and that every

@@ -1,7 +1,7 @@
 # Functional Specification: Dashboard Binary via GitHub Releases
 
 - **Roadmap Item:** Not yet on the roadmap (open-sourcing prerequisite; replaces the private S3 + SSM distribution path)
-- **Status:** Draft
+- **Status:** Completed
 - **Author:** Vladyslav Katrychenko
 
 ---
@@ -26,46 +26,46 @@ This removes a whole class of moving parts (S3 artifact bucket, instance S3 IAM 
 
 - **As an open-source user, I want to** download a specific dashboard version from GitHub Releases, **so that I can** run or inspect it without AWS access.
   - **Acceptance Criteria:**
-    - [ ] Pushing a SemVer tag `vX.Y.Z` publishes a GitHub Release for that tag.
-    - [ ] The release attaches the built `wireguard-dashboard` binary (Linux/amd64) as a downloadable asset.
-    - [ ] The release attaches a `SHA256SUMS` file covering the binary.
-    - [ ] The binary reports its version: invoking it (or an existing version field/endpoint) shows the release tag plus the existing build SHA / build time / Go version metadata.
-    - [ ] Releases are anonymously downloadable (depends on the repo being public — see precondition).
+    - [x] Pushing a SemVer tag `vX.Y.Z` publishes a GitHub Release for that tag.
+    - [x] The release attaches the built `wireguard-dashboard` binary (Linux/amd64) as a downloadable asset.
+    - [x] The release attaches a `SHA256SUMS` file covering the binary.
+    - [x] The binary reports its version: invoking it (or an existing version field/endpoint) shows the release tag plus the existing build SHA / build time / Go version metadata.
+    - [x] Releases are anonymously downloadable (depends on the repo being public — see precondition).
 
 ### 2.2 Tag-driven release process
 
 - **As the maintainer, I want** releases cut from SemVer tags only, **so that** the release list stays deliberate and human-readable.
   - **Acceptance Criteria:**
-    - [ ] Only `vX.Y.Z` tag pushes produce a release; pushes to `main` do **not** publish or deploy anything.
-    - [ ] The release build runs `make test` (or equivalent) and fails the release if tests fail.
-    - [ ] The release build requires **no AWS credentials** — it neither reads nor writes any AWS resource.
+    - [x] Only `vX.Y.Z` tag pushes produce a release; pushes to `main` do **not** publish or deploy anything.
+    - [x] The release build runs `make test` (or equivalent) and fails the release if tests fail.
+    - [x] The release build requires **no AWS credentials** — it neither reads nor writes any AWS resource.
 
 ### 2.3 Pinned version on the instance
 
 - **As the operator, I want** the running dashboard version pinned in code, **so that** the deployed version is always exactly what's committed.
   - **Acceptance Criteria:**
-    - [ ] The dashboard release tag is a single pinned value in `terraform/dev/locals.tf` (alongside the pinned AMI), threaded into user-data.
-    - [ ] On boot, the instance downloads the pinned release's binary from the public GitHub release URL and **verifies its SHA256** against the published checksum before installing it.
-    - [ ] If the download or checksum verification fails, provisioning fails loudly (the existing cloud-init log is the diagnostic surface) rather than starting a wrong or partial binary.
-    - [ ] The instance fetch uses no AWS credentials and no `s3:GetObject` (that IAM grant is removed).
+    - [x] The dashboard release tag is a single pinned value in `terraform/dev/locals.tf` (alongside the pinned AMI), threaded into user-data.
+    - [x] On boot, the instance downloads the pinned release's binary from the public GitHub release URL and **verifies its SHA256** against the published checksum before installing it.
+    - [x] If the download or checksum verification fails, provisioning fails loudly (the existing cloud-init log is the diagnostic surface) rather than starting a wrong or partial binary.
+    - [x] The instance fetch uses no AWS credentials and no `s3:GetObject` (that IAM grant is removed).
 
 ### 2.4 Updating the running version
 
 - **As the operator, I want to** update the host by changing one committed value, **so that** version changes are reviewable and reversible.
   - **Acceptance Criteria:**
-    - [ ] Updating the dashboard is: bump the pinned tag in `locals.tf` → `terraform plan` → `terraform apply`.
-    - [ ] A version bump rolls a new launch-template version and **replaces the instance** (`create_before_destroy`); the operator reviews the replacement in `terraform plan` before applying, per the repo's apply workflow. Because `local.user_data` is deterministic, the plan is clean between bumps (no spurious drift).
-    - [ ] Rolling back is the same operation with an earlier tag.
-    - [ ] The Elastic IP and server identity survive the update (EIP re-associates; server key still comes from SSM), so clients reconnect without config changes.
+    - [x] Updating the dashboard is: bump the pinned tag in `locals.tf` → `terraform plan` → `terraform apply`.
+    - [x] A version bump rolls a new launch-template version and **replaces the instance** (`create_before_destroy`); the operator reviews the replacement in `terraform plan` before applying, per the repo's apply workflow. Because `local.user_data` is deterministic, the plan is clean between bumps (no spurious drift).
+    - [x] Rolling back is the same operation with an earlier tag.
+    - [x] The Elastic IP and server identity survive the update (EIP re-associates; server key still comes from SSM), so clients reconnect without config changes.
 
 ### 2.5 Decommissioned distribution path
 
 - **As the maintainer, I want** the old private path removed, **so that** there's one obvious way to ship the binary.
   - **Acceptance Criteria:**
-    - [ ] The SSM-based deploy workflow and its SSM document are removed.
-    - [ ] The S3 artifacts bucket and the instance's `s3:GetObject` grant on it are removed.
-    - [ ] The CI deploy IAM role (and the build role's S3 permissions) are removed; CI retains only what a no-AWS release needs.
-    - [ ] The S3 **health-check** bucket used for boot-readiness signaling is **retained** (it is unrelated to artifact distribution).
+    - [x] The SSM-based deploy workflow and its SSM document are removed.
+    - [x] The S3 artifacts bucket and the instance's `s3:GetObject` grant on it are removed.
+    - [x] The CI deploy IAM role (and the build role's S3 permissions) are removed; CI retains only what a no-AWS release needs.
+    - [x] The S3 **health-check** bucket used for boot-readiness signaling is **retained** (it is unrelated to artifact distribution).
 
 ---
 

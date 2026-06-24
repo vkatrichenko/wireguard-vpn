@@ -94,15 +94,26 @@ func seededWgSvc(publicKey, endpoint, allowedIPs string, handshakeAgo time.Durat
 }
 
 // staticGeoResolver implements server.GeoResolver with a constant return for
-// every Lookup. Used by the seeded-row partial-clients test to assert that
-// the geo cell renders the resolver's output — the resolver's real filtering
-// behaviour (RFC1918, mmdb misses) is covered separately in clientrows_test.go.
+// every Lookup / LookupGeo. Used by the seeded-row partial-clients test to
+// assert that the geo cell renders the resolver's output — the resolver's real
+// filtering behaviour (RFC1918, mmdb misses) is covered separately in
+// clientrows_test.go.
+//
+// lat/lon/ok back LookupGeo for the /api/geo handler test: set ok=true with
+// coordinates to make a peer mappable, ok=false to exclude it.
 type staticGeoResolver struct {
 	country string
 	city    string
+	lat     float64
+	lon     float64
+	ok      bool
 }
 
 func (s staticGeoResolver) Lookup(_ net.IP) (string, string) { return s.country, s.city }
+
+func (s staticGeoResolver) LookupGeo(_ net.IP) geoip.GeoPoint {
+	return geoip.GeoPoint{Country: s.country, City: s.city, Lat: s.lat, Lon: s.lon, OK: s.ok}
+}
 
 // fakeProcSvc returns a *proc.Service with an in-memory Reader that serves
 // canned /proc/stat, /proc/meminfo, /proc/uptime and /sys/class/net/wg0
@@ -550,7 +561,9 @@ func TestHandleGetPartialTabs(t *testing.T) {
 		// sub-task 7 expands this with a seeded-row assertion; for now the
 		// fake clientsfile + fake wg both return empty so the template renders
 		// the empty-state branch.
-		{"clients", "/partial/clients", []string{"No clients configured"}},
+		// The geo map card (Slice 4) renders unconditionally — even with no
+		// clients — so its shell sentinels appear alongside the empty-state.
+		{"clients", "/partial/clients", []string{"No clients configured", `id="geo-map"`, "No mappable peers."}},
 		// Slice 6 sub-task 4 promotes the System tab from placeholder: the
 		// fragment embeds the cards/disk.html mount table (id="disk").
 		// fakeDiskSvc seeds one /-mounted ext4 row at 50% full, so the
@@ -602,6 +615,72 @@ func TestHandleGetPartialTabs(t *testing.T) {
 				t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
 			}
 		})
+	}
+}
+
+// TestHandleGetPartialClients_RendersGeoMapCard pins the server-rendered shell
+// of the geo map card (spec 006 Slice 4). The markers themselves are JS-driven
+// (world-map.js fetches /api/geo on the 10s tick), so this asserts only the
+// static surface the fragment must emit: the card container the JS hooks onto
+// (id="geo-map"), the embedded base-map <img> pointing at the local SVG, the
+// marker overlay container, the online/offline legend swatches, the
+// "N not mappable" caption element (id="geo-not-mappable") the JS fills, and
+// the cold-load empty state. The card renders unconditionally — the fakes here
+// return an empty fleet, exercising the no-clients branch alongside it.
+//
+// A sibling assertion on the index page confirms world-map.js is actually
+// referenced (the script tag is what hydrates the shell); without it the
+// server-rendered shell would never gain markers.
+func TestHandleGetPartialClients_RendersGeoMapCard(t *testing.T) {
+	infoSvc := &serverinfo.Service{
+		IMDS: fakeIMDS{ip: "203.0.113.1"},
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte("dummy-key=\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc())
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial/clients", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+
+	wantFragment := []string{
+		`id="geo-map"`,            // JS hook + render-test anchor
+		`src="/static/world.svg"`, // embedded base map, no external tiles
+		`class="geo-markers"`,     // marker overlay container
+		`class="geo-legend"`,      // legend
+		`geo-swatch online`,       // online legend swatch
+		`geo-swatch offline`,      // offline legend swatch
+		`id="geo-not-mappable"`,   // "N not mappable" caption element
+		"No mappable peers.",      // cold-load empty state
+	}
+	for _, want := range wantFragment {
+		if !strings.Contains(body, want) {
+			t.Errorf("clients fragment missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "<html") {
+		t.Errorf("partial body unexpectedly contains <html ...>:\n%s", body)
+	}
+
+	// The hydrating script must be wired into the page shell.
+	idxReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	idxRec := httptest.NewRecorder()
+	handler.ServeHTTP(idxRec, idxReq)
+	if idxRec.Code != http.StatusOK {
+		t.Fatalf("index status = %d, want 200", idxRec.Code)
+	}
+	if !strings.Contains(idxRec.Body.String(), `src="/static/world-map.js"`) {
+		t.Errorf("index page missing world-map.js script tag")
 	}
 }
 

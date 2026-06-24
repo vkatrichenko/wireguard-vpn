@@ -137,7 +137,7 @@ func main() {
 		return len(peers), nil
 	}
 
-	// geoip.New parses the embedded GeoLite2-City.mmdb once at startup. A
+	// geoip.New parses the embedded dbip-city-lite.mmdb once at startup. A
 	// failure here means the committed mmdb is corrupt — the binary cannot
 	// recover at runtime, so fail fast before any handlers are wired. The
 	// reader is held for the lifetime of the process and passed into

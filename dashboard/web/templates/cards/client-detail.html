@@ -3,6 +3,28 @@
   <div class="client-detail">
     <canvas id="client-chart-{{ .PublicKey }}" data-pubkey="{{ .PublicKey }}" data-range="{{ .Range }}"></canvas>
     <p class="client-p95">p95 over {{ .Range }}: {{ humanBytesPerSec .P95Bps }}</p>
+    {{/* Connection timeline (spec 006 Slice 2): online/offline bands over the
+         selected range. The session spans + [from,to] window are embedded as
+         JSON below so client-timeline.js draws the floating-bar chart from
+         already-rendered data — no second fetch, and the band data is
+         server-asserted by the render test. Empty history → empty timeline. */}}
+    <canvas
+      id="client-timeline-{{ .PublicKey }}"
+      class="client-timeline"
+      data-pubkey="{{ .PublicKey }}"
+      data-range="{{ .Range }}"></canvas>
+    <script id="client-timeline-data-{{ .PublicKey }}" type="application/json">{{ .TimelineJSON }}</script>
+    <dl class="client-history">
+      <dt>Status</dt>
+      <dd>
+        {{ if .Online }}<span class="status-online">online</span>
+        {{ else }}<span class="status-offline">last seen {{ .LastSeenText }}</span>{{ end }}
+      </dd>
+      <dt>Sessions ({{ .Range }})</dt>
+      <dd>{{ .SessionCount }}</dd>
+      <dt>Connected ({{ .Range }})</dt>
+      <dd>{{ humanDuration .ConnectedTime }}</dd>
+    </dl>
     <small class="range-hint">Throughput over the last {{ .Range }}. Click the row again to collapse.</small>
   </div>
 </td>

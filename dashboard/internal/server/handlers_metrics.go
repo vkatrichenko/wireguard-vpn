@@ -106,7 +106,7 @@ func (s *server) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 		sysErr error
 
 		trafficRows []struct {
-			ts         time.Time
+			ts           time.Time
 			rxCum, txCum int64
 		}
 		trafficErr error
@@ -140,7 +140,7 @@ func (s *server) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		trafficRows = make([]struct {
-			ts         time.Time
+			ts           time.Time
 			rxCum, txCum int64
 		}, len(rows))
 		for i, row := range rows {

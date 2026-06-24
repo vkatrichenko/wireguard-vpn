@@ -23,7 +23,7 @@ Both reuse the existing poller, SQLite store, htmx refresh, time-range selector,
 
 - **Reuse, don't add unbounded tables.** The poller already persists per-peer handshake/transfer samples. Connection history is **derived** from those samples at query time (or via a lightweight materialized view), not stored as a separate ever-growing event log.
 - If a dedicated handshake-event table is warranted for efficient timeline queries, it must inherit the **existing retention/expiry** (the ~8-day window from 003 §2.8 if present) — no new unbounded growth (functional spec §2.2).
-- **Session inference** (no schema needed beyond samples): order a peer's handshakes by time; a gap > `sessionGapThreshold` (proposed 10 min, `[NEEDS CLARIFICATION]`) closes the prior session and opens a new one. "Connected time" = sum of session spans within the selected range; "online now" = latest handshake within `onlineThreshold` (3 min, matching 003).
+- **Session inference** (no schema needed beyond samples): order a peer's handshakes by time; a gap > `sessionGapThreshold` (**10 min**) closes the prior session and opens a new one. "Connected time" = sum of session spans within the selected range; "online now" = latest handshake within `onlineThreshold` (3 min, matching 003).
 
 ### API Contracts
 
@@ -45,7 +45,7 @@ Both reuse the existing poller, SQLite store, htmx refresh, time-range selector,
 ### Logic / Algorithm — offline map
 
 - **Why not Leaflet/Mapbox:** they require online tiles or a CDN, which violates the tunnel-only, zero-outbound constraint and the existing vendored-asset model. An embedded SVG outline + computed marker positions is fully offline and adds no heavyweight dependency.
-- **Online vs. offline encoding** via marker color/opacity; **co-located peers** get a count badge (proposed) rather than a clustering library (`[NEEDS CLARIFICATION]`).
+- **Online vs. offline encoding** via marker color/opacity; **co-located peers** get a count badge rather than a clustering library. The map renders as a **card on the Clients tab**.
 - The projection math is trivial and lives in a small static JS module alongside the existing theme/chart scripts; chart/marker colors honor the dark-mode theme (003 §2.9).
 
 ---

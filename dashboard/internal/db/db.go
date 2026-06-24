@@ -526,6 +526,43 @@ func (d *DB) QueryHandshakeEvents(ctx context.Context, from, to time.Time, limit
 	return out, nil
 }
 
+// QueryHandshakeEventsByKey returns handshake_events for a single peer with
+// ts in [from, to] inclusive, ordered ASC by ts. The query reuses
+// idx_handshake_events_ts to narrow the ts range, then filters on
+// public_key — same push-filter pattern as QueryClientTraffic. Empty result
+// (no events in range) is not an error; callers receive a nil slice and nil
+// error, matching the other zero-row query helpers.
+func (d *DB) QueryHandshakeEventsByKey(ctx context.Context, publicKey string, from, to time.Time) ([]HandshakeEvent, error) {
+	const q = `SELECT ts, public_key, name FROM handshake_events WHERE public_key = ? AND ts BETWEEN ? AND ? ORDER BY ts ASC`
+
+	rows, err := d.sql.QueryContext(ctx, q, publicKey, from.Unix(), to.Unix())
+	if err != nil {
+		return nil, fmt.Errorf("query handshake_events by key: %w", err)
+	}
+	defer rows.Close()
+
+	var out []HandshakeEvent
+	for rows.Next() {
+		var (
+			ts     int64
+			pubKey string
+			name   string
+		)
+		if err := rows.Scan(&ts, &pubKey, &name); err != nil {
+			return nil, fmt.Errorf("scan handshake_events by key: %w", err)
+		}
+		out = append(out, HandshakeEvent{
+			TS:        time.Unix(ts, 0).UTC(),
+			PublicKey: pubKey,
+			Name:      name,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate handshake_events by key: %w", err)
+	}
+	return out, nil
+}
+
 // PruneBefore deletes rows with ts < cutoff across all time-series
 // tables and returns the total number of rows deleted. The DELETEs run
 // inside a single transaction so retention sweeps are atomic — the

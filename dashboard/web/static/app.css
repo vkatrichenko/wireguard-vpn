@@ -492,6 +492,32 @@ body {
   background-color: var(--btn-hover-bg);
 }
 
+/* Config download links (Clients tab CONFIG column — spec 004). The browser
+   default link color is too low-contrast, especially on the expanded/active
+   row; use the themed accent + bold + spacing so Full / Split read clearly in
+   both light and dark themes. */
+.config-actions {
+  white-space: nowrap;
+}
+
+.config-actions a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.config-actions a + a {
+  margin-left: 0.5rem;
+}
+
+.config-actions a:hover,
+.config-actions a:focus-visible {
+  color: var(--accent-fg);
+  background-color: var(--accent);
+  border-radius: 4px;
+  text-decoration: none;
+}
+
 .detail-row.hidden {
   display: none;
 }
@@ -510,6 +536,13 @@ body {
   width: 100%;
   height: 240px;
   display: block;
+}
+
+/* The connection timeline is a single online-band lane — much shorter than
+   the throughput line chart above it. Overrides the 240px default. */
+.client-detail canvas.client-timeline {
+  height: 90px;
+  margin-top: 0.75rem;
 }
 
 .client-p95 {
@@ -879,3 +912,136 @@ body {
   border-radius: 4px;
   font: inherit;
 }
+
+/* 12. Geo map card (spec 006 Slice 4) -------------------------------------- */
+
+/* The base map is the embedded /static/world.svg loaded as an <img>, so page
+   CSS cannot reach its inner paths (the SVG carries its own light-mode fill in
+   an internal <style>). Dark mode is therefore handled with a CSS filter on
+   the whole image — a hue-preserving lighten that mutes the land against the
+   dark card without re-coloring the markers, which sit in a sibling overlay
+   and are unaffected. Chosen over inlining the SVG: keeps the 26 KB outline a
+   cacheable static asset and avoids bloating every Clients-tab fragment. */
+.geo-map-frame {
+  position: relative;
+  width: 100%;
+  /* 2:1 matches the SVG viewBox so the percent-positioned markers line up
+     with the projection exactly at any width. */
+  aspect-ratio: 2 / 1;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.geo-basemap {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+:root[data-theme="dark"] .geo-basemap {
+  filter: invert(0.88) hue-rotate(180deg) brightness(0.95) saturate(0.7);
+}
+
+/* Marker overlay spans the frame; markers are positioned in percent (left/top)
+   by world-map.js so they track the base map on resize. */
+.geo-markers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.geo-marker {
+  position: absolute;
+  /* Center the dot on its projected point. */
+  transform: translate(-50%, -50%);
+  width: 14px;
+  height: 14px;
+  /* ≥44px touch target via a transparent padding box, while the visible dot
+     stays 14px (per 003 §2.10 touch-target rule). */
+  padding: 15px;
+  background-clip: content-box;
+  border: 2px solid var(--card-bg);
+  border-radius: 50%;
+  box-sizing: content-box;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.geo-marker:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.geo-marker-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 8px;
+  font-size: 0.7rem;
+  line-height: 16px;
+  text-align: center;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.geo-popover {
+  position: absolute;
+  transform: translate(-50%, 8px);
+  z-index: 5;
+  max-width: 16rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.geo-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+
+.geo-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  margin-top: var(--gap);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.geo-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.geo-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.geo-swatch.online { background: var(--success); }
+.geo-swatch.offline { background: var(--text-muted); opacity: 0.55; }
+
+.geo-caption { margin-left: auto; }

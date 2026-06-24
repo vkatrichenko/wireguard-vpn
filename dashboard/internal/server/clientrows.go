@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"wireguard-dashboard/internal/clientsfile"
+	"wireguard-dashboard/internal/geoip"
 	"wireguard-dashboard/internal/wg"
 )
 
@@ -33,10 +34,16 @@ type Geo struct {
 }
 
 // GeoResolver looks up an IP. *geoip.Service satisfies this; tests can pass
-// a fake. Returning ("", "") is a valid no-op response, not an error — the
-// resolver is purely advisory.
+// a fake. Returning ("", "") (or a not-OK GeoPoint) is a valid no-op response,
+// not an error — the resolver is purely advisory.
+//
+// Lookup returns country/city only (the Clients-tab geo cell, spec 003);
+// LookupGeo additionally returns coordinates and an OK flag for callers that
+// plot map markers (the /api/geo endpoint, spec 006). Both live on one
+// interface so there's a single seam tests fake.
 type GeoResolver interface {
 	Lookup(ip net.IP) (country, city string)
+	LookupGeo(ip net.IP) geoip.GeoPoint
 }
 
 // ClientRow is the joined view-model that GET /api/clients returns and that
