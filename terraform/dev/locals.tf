@@ -11,8 +11,6 @@ locals {
   # AMI). Bumping the tag re-renders user-data, rolls a new launch-template
   # version, and replaces the instance. The binary is pulled at boot from the
   # public GitHub Release and SHA256-verified; requires the repo to be public.
-  dashboard_release_tag  = "v0.0.1"
-  dashboard_release_repo = "vkatrichenko/wireguard-vpn"
 
   default_tags = {
     "Managed"     = "by-terraform"
