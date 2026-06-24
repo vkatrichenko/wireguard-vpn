@@ -4,6 +4,7 @@
   {{ if .Error }}
   <p class="error">Failed to load clients: {{ .Error }}</p>
   {{ else if .Rows }}
+  <p class="hint">Download a client's config, then replace <code>PrivateKey</code> with that client's private key before use — the server never holds it.</p>
   <table class="client-table">
     <thead>
       <tr>
@@ -15,6 +16,7 @@
         <th>Tx</th>
         <th>Endpoint</th>
         <th>Geo</th>
+        <th>Config</th>
       </tr>
     </thead>
     <tbody>
@@ -28,6 +30,12 @@
         <td>{{ humanBytes .TransferTx }}</td>
         <td>{{ if .Endpoint }}{{ .Endpoint }}{{ else }}—{{ end }}</td>
         <td>{{ with .Geo }}{{ if .Country }}{{ if .City }}{{ .City }}, {{ .Country }}{{ else }}{{ .Country }}{{ end }}{{ else }}—{{ end }}{{ end }}</td>
+        <td class="config-actions">
+          {{ if .Name }}
+          <a href="/api/clients/{{ .Name | urlquery }}/config?mode=full" download onclick="event.stopPropagation()">Full</a>
+          <a href="/api/clients/{{ .Name | urlquery }}/config?mode=split" download onclick="event.stopPropagation()">Split</a>
+          {{ else }}—{{ end }}
+        </td>
       </tr>
       <tr id="detail-{{ .PublicKey }}" class="detail-row hidden"></tr>
       {{ end }}

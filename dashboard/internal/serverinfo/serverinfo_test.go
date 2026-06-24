@@ -28,6 +28,7 @@ type fakeIMDS struct {
 	instanceType string
 	az           string
 	amiID        string
+	vpcCIDR      string
 	err          error
 	delay        time.Duration
 }
@@ -74,6 +75,17 @@ func (f fakeIMDS) AMIID(ctx context.Context) (string, error) {
 		}
 	}
 	return f.amiID, f.err
+}
+
+func (f fakeIMDS) VPCIPv4CIDR(ctx context.Context) (string, error) {
+	if f.delay > 0 {
+		select {
+		case <-time.After(f.delay):
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	return f.vpcCIDR, f.err
 }
 
 // fakeRunner returns a runFunc closure that produces canned bytes / err. The
@@ -430,5 +442,26 @@ func TestService_IMDSExtended(t *testing.T) {
 	}
 	if gotAMI != "ami-0abcdef1234567890" {
 		t.Errorf("AMIID = %q, want %q", gotAMI, "ami-0abcdef1234567890")
+	}
+}
+
+// TestServiceVPCCIDR proves the VPCCIDR method surfaces the IMDS seam's VPC
+// CIDR value (and its error). The config-download handler relies on this to
+// derive the client DNS resolver.
+func TestServiceVPCCIDR(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{IMDS: fakeIMDS{vpcCIDR: "10.23.0.0/16"}}
+	got, err := svc.VPCCIDR(context.Background())
+	if err != nil {
+		t.Fatalf("VPCCIDR returned unexpected error: %v", err)
+	}
+	if got != "10.23.0.0/16" {
+		t.Errorf("VPCCIDR = %q, want %q", got, "10.23.0.0/16")
+	}
+
+	errSvc := &Service{IMDS: fakeIMDS{err: errors.New("imds down")}}
+	if _, err := errSvc.VPCCIDR(context.Background()); err == nil {
+		t.Fatal("VPCCIDR returned nil error, want non-nil on IMDS failure")
 	}
 }
