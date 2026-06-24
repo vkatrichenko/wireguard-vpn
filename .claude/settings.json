@@ -1,4 +1,10 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Write"
+    ]
+  },
   "extraKnownMarketplaces": {
     "awos-marketplace": {
       "source": {

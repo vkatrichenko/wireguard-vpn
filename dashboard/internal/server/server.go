@@ -173,6 +173,8 @@ func New(
 	mux.HandleFunc("GET /api/service", s.handleGetService)
 	mux.HandleFunc("GET /api/clients", s.handleGetClients)
 	mux.HandleFunc("GET /api/clients/{name}/config", s.handleGetClientConfig)
+	mux.HandleFunc("GET /api/clients/{name}/history", s.handleGetClientHistory)
+	mux.HandleFunc("GET /api/geo", s.handleGetGeo)
 	mux.HandleFunc("GET /api/snapshot", s.handleGetSnapshot)
 	mux.HandleFunc("GET /api/metrics", s.handleGetMetrics)
 	mux.HandleFunc("GET /api/metrics/system", s.handleGetMetricsSystem)

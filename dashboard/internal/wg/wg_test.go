@@ -30,7 +30,7 @@ func runShim(stdout, stderr string, exitCode int) ([]byte, error) {
 }
 
 // shellSingleQuote wraps s in POSIX-shell single quotes, escaping any embedded
-// single quotes via the standard `'\''` close-reopen idiom. Result is safe to
+// single quotes via the standard `'\”` close-reopen idiom. Result is safe to
 // splice into an `sh -c` command line as a literal argument.
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"

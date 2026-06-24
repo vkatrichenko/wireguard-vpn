@@ -49,9 +49,9 @@ func realisticFixtures(cpuLine string, memTotalKB, memAvailableKB int64, uptimeS
 		memTotalKB, memAvailableKB,
 	)
 	return map[string][]byte{
-		"/proc/stat":                          []byte(cpuLine + "\nintr 0 0 0\nctxt 0\n"),
-		"/proc/meminfo":                       []byte(meminfo),
-		"/proc/uptime":                        []byte(uptimeSecs + " 9000.00\n"),
+		"/proc/stat":                             []byte(cpuLine + "\nintr 0 0 0\nctxt 0\n"),
+		"/proc/meminfo":                          []byte(meminfo),
+		"/proc/uptime":                           []byte(uptimeSecs + " 9000.00\n"),
 		"/sys/class/net/wg0/statistics/rx_bytes": []byte(fmt.Sprintf("%d\n", rxBytes)),
 		"/sys/class/net/wg0/statistics/tx_bytes": []byte(fmt.Sprintf("%d\n", txBytes)),
 	}

@@ -286,11 +286,11 @@ func TestQueryRange_InclusiveBothEnds(t *testing.T) {
 	to := t0.Add(time.Hour)
 
 	tsList := []time.Time{
-		from.Add(-time.Second), // outside (before)
-		from,                   // inside, at lower bound
+		from.Add(-time.Second),     // outside (before)
+		from,                       // inside, at lower bound
 		from.Add(30 * time.Minute), // inside, middle
-		to,                     // inside, at upper bound
-		to.Add(time.Second),    // outside (after)
+		to,                         // inside, at upper bound
+		to.Add(time.Second),        // outside (after)
 	}
 	for i, ts := range tsList {
 		if err := d.InsertSystemMetric(ctx, SystemMetric{TS: ts, CPUPct: float64(i), MemPct: float64(i)}); err != nil {

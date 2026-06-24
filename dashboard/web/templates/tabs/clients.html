@@ -45,4 +45,26 @@
   <p class="empty">No clients configured. Add via <code>terraform/dev/main.tf</code>.</p>
   {{ end }}
 </section>
+
+{{/* Geo map card (spec 006 Slice 4). The shell renders server-side once; the
+     base map is the embedded /static/world.svg outline, and world-map.js fills
+     the marker overlay + the "N not mappable" caption + the empty state from
+     GET /api/geo on the 10s tick. Rendering the shell server-side (not the
+     marker data) keeps this consistent with the rest of the JS-driven cards
+     and avoids re-deriving the mappable set in the template. The card always
+     renders — even with no clients configured — so the empty state ("No
+     mappable peers.") is the cold-load default until JS hydrates. */}}
+<section class="card" id="geo-map">
+  <h2>Peer locations</h2>
+  <div class="geo-map-frame">
+    <img class="geo-basemap" src="/static/world.svg" alt="World map" />
+    <div class="geo-markers" aria-live="polite"></div>
+    <p class="geo-empty empty">No mappable peers.</p>
+  </div>
+  <div class="geo-legend">
+    <span class="geo-legend-item"><span class="geo-swatch online"></span>Online</span>
+    <span class="geo-legend-item"><span class="geo-swatch offline"></span>Offline</span>
+    <span class="geo-caption" id="geo-not-mappable" hidden></span>
+  </div>
+</section>
 {{ end }}

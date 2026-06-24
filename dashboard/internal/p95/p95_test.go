@@ -28,7 +28,7 @@ func TestNearest(t *testing.T) {
 		},
 		{
 			name: "twenty values 1..20 returns 19 (ceil(0.95*20)=19)",
-			in:   func() []float64 {
+			in: func() []float64 {
 				out := make([]float64, 20)
 				for i := range out {
 					out[i] = float64(i + 1)
@@ -39,7 +39,7 @@ func TestNearest(t *testing.T) {
 		},
 		{
 			name: "one hundred values 1..100 returns 95",
-			in:   func() []float64 {
+			in: func() []float64 {
 				out := make([]float64, 100)
 				for i := range out {
 					out[i] = float64(i + 1)

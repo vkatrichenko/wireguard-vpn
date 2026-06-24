@@ -17,3 +17,24 @@ htmx.min.js
   version: 2.0.6
   source:  https://cdn.jsdelivr.net/npm/htmx.org@2.0.6/dist/htmx.min.js
   sha256:  b6768eed4f3af85b73a75054701bd60e17cac718aef2b7f6b254e5e0e2045616
+
+world.svg
+  version: Natural Earth 110m Admin-0 countries (nvkelso/natural-earth-vector, master @ 2026-06-24)
+  source:  https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson
+  license: Public Domain — Natural Earth (https://www.naturalearthdata.com/about/terms-of-use/).
+           "All versions of Natural Earth raster + vector map data ... are in the public domain."
+           No attribution required. Confirmed from upstream LICENSE.md (master branch). NOT CC-BY/CC-BY-SA.
+  sha256:  bb925a3ff6c05aa23e80a43bb593735b87aec3d31ce4ed4d17fe58b2ac3c8358
+  derivation: |
+    Vendored the upstream GeoJSON, then converted to a full-globe equirectangular
+    (plate carrée / WGS84 CRS84) SVG with mapshaper:
+      mapshaper ne_110m.json frame.json combine-files -merge-layers force \
+        -simplify 8% keep-shapes -o format=svg width=2000 margin=0 precision=0.1
+    A synthetic frame Polygon spanning [-180,-90]..[180,90] forces mapshaper's
+    bbox to the full globe so the output viewBox is a clean 2:1 "0 0 2000 1000"
+    (mapshaper otherwise crops to data bounds: ~-85.6..83.6 lat). Post-processing
+    drops that frame path and all per-country id= attributes (markers are a
+    separate JS overlay, not these paths). The CRS84 input means SVG x maps
+    linearly to lon and y to lat, so the projection x=(lon+180)/360*2000,
+    y=(90-lat)/180*1000 lines up. Calibrated: London (-0.13,51.5), NYC
+    (-74,40.7), Sydney (151.2,-33.9) all project inside their country outlines.
