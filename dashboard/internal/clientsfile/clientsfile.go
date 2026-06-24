@@ -107,3 +107,16 @@ func ByPublicKey(clients []Client) map[string]Client {
 	}
 	return index
 }
+
+// ByName indexes the slice by the client's human-readable name for O(1)
+// lookup during the config-download path (GET /api/clients/{name}/config).
+// Names are the operator-assigned labels from var.clients_config and are
+// expected unique; a duplicate (an operator bug) collapses to last-write-wins
+// rather than panicking, mirroring ByPublicKey's contract.
+func ByName(clients []Client) map[string]Client {
+	index := make(map[string]Client, len(clients))
+	for _, c := range clients {
+		index[c.Name] = c
+	}
+	return index
+}

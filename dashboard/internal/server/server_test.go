@@ -116,11 +116,11 @@ func (s staticGeoResolver) Lookup(_ net.IP) (string, string) { return s.country,
 // will request.
 func fakeProcSvc() *proc.Service {
 	files := map[string][]byte{
-		"/proc/stat":                              []byte("cpu  100 0 50 800 10 0 0 0 0 0\n"),
-		"/proc/meminfo":                           []byte("MemTotal:    8000000 kB\nMemAvailable:  4000000 kB\n"),
-		"/proc/uptime":                            []byte("12345.67 9876.54\n"),
-		"/sys/class/net/wg0/statistics/rx_bytes":  []byte("1024\n"),
-		"/sys/class/net/wg0/statistics/tx_bytes":  []byte("2048\n"),
+		"/proc/stat":                             []byte("cpu  100 0 50 800 10 0 0 0 0 0\n"),
+		"/proc/meminfo":                          []byte("MemTotal:    8000000 kB\nMemAvailable:  4000000 kB\n"),
+		"/proc/uptime":                           []byte("12345.67 9876.54\n"),
+		"/sys/class/net/wg0/statistics/rx_bytes": []byte("1024\n"),
+		"/sys/class/net/wg0/statistics/tx_bytes": []byte("2048\n"),
 	}
 	return &proc.Service{
 		Reader: func(path string) ([]byte, error) {
@@ -274,6 +274,7 @@ type fakeIMDS struct {
 	instanceType string
 	az           string
 	amiID        string
+	vpcCIDR      string
 	err          error
 }
 
@@ -291,6 +292,10 @@ func (f fakeIMDS) AvailabilityZone(_ context.Context) (string, error) {
 
 func (f fakeIMDS) AMIID(_ context.Context) (string, error) {
 	return f.amiID, f.err
+}
+
+func (f fakeIMDS) VPCIPv4CIDR(_ context.Context) (string, error) {
+	return f.vpcCIDR, f.err
 }
 
 // TestHandleIndex_Success proves the dashboard.html template renders the
@@ -1853,8 +1858,8 @@ func TestHandleGetPartialOverview_ConsolidatedView(t *testing.T) {
 		`id="server-info"`,
 		`id="service-status"`,
 		`id="client-count"`,
-		`id="system"`,        // CPU/Memory large-numerics card
-		`id="network-rate"`,  // rx/tx rate card
+		`id="system"`,       // CPU/Memory large-numerics card
+		`id="network-rate"`, // rx/tx rate card
 		"1 online",
 		"1 total",
 	} {

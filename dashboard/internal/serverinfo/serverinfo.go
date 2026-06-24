@@ -45,10 +45,16 @@ const (
 	// these and shares the token-fetch + GET helper below; keeping the URLs
 	// alongside the helper avoids drift between the call-sites and the
 	// error-wrapping path.
-	imdsPublicIPURL        = imdsBaseURL + "/meta-data/public-ipv4"
-	imdsInstanceTypeURL    = imdsBaseURL + "/meta-data/instance-type"
-	imdsAvailabilityZone   = imdsBaseURL + "/meta-data/placement/availability-zone"
-	imdsAMIIDURL           = imdsBaseURL + "/meta-data/ami-id"
+	imdsPublicIPURL      = imdsBaseURL + "/meta-data/public-ipv4"
+	imdsInstanceTypeURL  = imdsBaseURL + "/meta-data/instance-type"
+	imdsAvailabilityZone = imdsBaseURL + "/meta-data/placement/availability-zone"
+	imdsAMIIDURL         = imdsBaseURL + "/meta-data/ami-id"
+	// imdsMACURL returns the instance's primary network interface MAC, which
+	// is the path segment needed to read that interface's VPC CIDR. The VPC
+	// CIDR has no direct top-level metadata path — it is only exposed under
+	// /network/interfaces/macs/<mac>/vpc-ipv4-cidr-block, so VPCIPv4CIDR does
+	// a two-step MAC-then-CIDR read.
+	imdsMACURL = imdsBaseURL + "/meta-data/mac"
 	// imdsTokenTTL is the IMDSv2 token lifetime requested via the
 	// X-aws-ec2-metadata-token-ttl-seconds header. Spec allows 1–21600;
 	// we use the lower-end "fresh per request" 60 seconds since each Get()
@@ -109,6 +115,10 @@ type imdsClient interface {
 	InstanceType(ctx context.Context) (string, error)
 	AvailabilityZone(ctx context.Context) (string, error)
 	AMIID(ctx context.Context) (string, error)
+	// VPCIPv4CIDR returns the primary VPC IPv4 CIDR (e.g. "10.23.0.0/16").
+	// Used to derive the VPC DNS resolver and the split-tunnel route when
+	// generating client configs.
+	VPCIPv4CIDR(ctx context.Context) (string, error)
 }
 
 // runFunc executes an external command and returns its stdout. Mirrors the
@@ -206,6 +216,15 @@ func (s *Service) Get(ctx context.Context) (ServerInfo, error) {
 		Port:            Port,
 		ServerPublicKey: publicKey,
 	}, nil
+}
+
+// VPCCIDR returns the instance's primary VPC IPv4 CIDR (e.g. "10.23.0.0/16")
+// via IMDSv2. It is a separate call from Get (rather than a ServerInfo field)
+// because only the config-download path needs it: folding it into Get would
+// add a metadata round-trip — and a new failure mode — to every server-info
+// card render that doesn't care about the VPC CIDR.
+func (s *Service) VPCCIDR(ctx context.Context) (string, error) {
+	return s.IMDS.VPCIPv4CIDR(ctx)
 }
 
 // Kernel reports the running kernel triple via unix.Uname. The C strings
@@ -341,6 +360,20 @@ func (h *httpIMDS) AvailabilityZone(ctx context.Context) (string, error) {
 
 func (h *httpIMDS) AMIID(ctx context.Context) (string, error) {
 	return h.metadata(ctx, imdsAMIIDURL)
+}
+
+// VPCIPv4CIDR reads the primary VPC IPv4 CIDR in two steps: first the primary
+// interface MAC, then that interface's vpc-ipv4-cidr-block. The MAC has no
+// trailing slash from /meta-data/mac, so it slots straight into the per-
+// interface path. A failure in either leg is wrapped by the shared metadata
+// helper with the offending URL.
+func (h *httpIMDS) VPCIPv4CIDR(ctx context.Context) (string, error) {
+	mac, err := h.metadata(ctx, imdsMACURL)
+	if err != nil {
+		return "", err
+	}
+	url := imdsBaseURL + "/meta-data/network/interfaces/macs/" + mac + "/vpc-ipv4-cidr-block"
+	return h.metadata(ctx, url)
 }
 
 // metadata performs one IMDSv2 token-fetch + GET against the given absolute
