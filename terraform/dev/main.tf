@@ -46,43 +46,15 @@ module "wireguard" {
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]
 
-  dashboard_artifact_bucket_arn  = module.dashboard.bucket_arn
-  dashboard_artifact_bucket_name = module.dashboard.bucket_name
+  dashboard_release_tag  = local.dashboard_release_tag
+  dashboard_release_repo = local.dashboard_release_repo
 
   tags = local.default_tags
 }
 
-module "dashboard" {
-  source = "../modules/dashboard"
-
-  project_name        = local.project_name
-  env                 = local.environment
-  target_instance_arn = module.wireguard.instance_arn
-  tags                = local.default_tags
-}
-
-module "github_oidc" {
-  source = "../modules/github-oidc"
-
-  use_existing = true
-
-  roles = {
-    "dashboard-ci-build" = {
-      name_suffix = "dashboard-ci-build"
-      subject     = "repo:vkatrichenko/wireguard-vpn:ref:refs/heads/main"
-      s3_put_object = [
-        {
-          bucket_arn = module.dashboard.bucket_arn
-          prefixes   = ["latest/*", "main-*/*"]
-        },
-      ]
-    }
-    "dashboard-ci-deploy" = {
-      name_suffix        = "dashboard-ci-deploy"
-      subject            = "repo:vkatrichenko/wireguard-vpn:ref:refs/heads/main"
-      inline_policy_json = module.dashboard.deploy_policy_json
-    }
-  }
-
-  tags = local.default_tags
-}
+# The dashboard binary is now distributed as a public GitHub Release (spec 005):
+# the instance pulls a pinned tag at boot over HTTPS with SHA256 verification.
+# The old private path — the S3 artifact bucket (`modules/dashboard`), the SSM
+# deploy document, and the GitHub-OIDC CI build/deploy roles (`modules/github-oidc`
+# wiring) — is intentionally gone. The release workflow authenticates only with
+# GITHUB_TOKEN, so no AWS-facing CI role remains to wire here.

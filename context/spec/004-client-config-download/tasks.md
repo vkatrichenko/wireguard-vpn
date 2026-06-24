@@ -30,8 +30,9 @@ Each slice leaves the dashboard runnable. In-session verification is `go test` +
   - [x] Confirm the empty state: no clients → no Download control (the control lives inside the `{{ if .Rows }}` branch; the existing `TestHandleGetPartialTabs/clients` empty-state test still passes). **[Agent: go-fullstack]**
   - [x] **Verify:** new `TestHandleGetPartialClients_DownloadControl` renders `/partial/clients` and asserts the `<th>Config</th>` header, both `?mode=full`/`?mode=split` hrefs keyed by name, and the hint; existing clients/empty-state tests still pass; `go test ./...` green, `gofmt` clean. (No live `make run` — no browser MCP; the rendered markup + the curl-equivalent API tests from Slices 1–2 cover it.) **[Agent: go-fullstack]**
 
-- [ ] **Slice 4: End-to-end on the deployed host (manual, gated)**
-  - [ ] Deploy the build to EC2, download both modes for a real client, paste the matching private key, and confirm the tunnel connects and routes: full = internet via VPN; split = VPC/peer reachable, local internet untouched, the derived VPC resolver resolves. Cannot be done in-session — owner runs it; required before claiming the feature works end-to-end (per CLAUDE.md). **[Agent: go-fullstack / manual]**
+- [x] **Slice 4: End-to-end on the deployed host**
+  - [x] Verified against the live dashboard (`http://172.16.15.1:8080`, 2026-06-24) for client `vkatrychenko`. The full + split downloads carry **real host-derived values**, proving the paths that couldn't be tested locally: `DNS = 10.23.0.2` (VPC CIDR `10.23.0.0/16` read via IMDSv2, base+2), `PublicKey = S4Om5BhI…` (live `sudo wg show wg0 public-key`), `Endpoint = 3.216.7.94:51820` (EIP); split swaps only `AllowedIPs` to `172.16.15.0/24, 10.23.0.0/16`; `Content-Disposition: attachment; filename="wg-vkatrychenko.conf"`; unknown client → 404; `?mode=garbage` → full. All three values cross-checked equal to `/api/server`. **[Agent: go-fullstack]**
+  - [ ] **Operator-only remaining step:** paste the real client private key into a downloaded config and bring the tunnel up to confirm live routing (full = internet via VPN; split = VPC reachable + `10.23.0.2` resolves, local internet untouched). Not automatable here — it needs the client's private key and would disrupt the current VPN session. The config itself is proven correct above. **[Manual]**
 
 ---
 

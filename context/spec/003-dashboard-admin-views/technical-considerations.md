@@ -1,7 +1,7 @@
 # Technical Specification: Web Dashboard v2 — admin views, tabs, longer time range
 
 - **Functional Specification:** [`functional-spec.md`](./functional-spec.md)
-- **Status:** Draft
+- **Status:** Completed
 - **Author(s):** Vladyslav Katrychenko
 
 ---

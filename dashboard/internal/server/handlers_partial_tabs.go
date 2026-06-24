@@ -360,13 +360,15 @@ type aboutEC2CardData struct {
 }
 
 // aboutBinaryCardData is the view-model for cards/about-binary.html. All
-// three fields are sourced from serverinfoSvc.Build (the BuildInfo struct
-// populated in cmd/main.go from the -ldflags -X package vars). No error
-// path — the package vars always have at least the sentinel "unknown".
+// fields are sourced from serverinfoSvc.Build (the BuildInfo struct populated
+// in cmd/main.go from the -ldflags -X package vars). No error path — the
+// package vars always have at least their sentinel ("dev" for the release
+// tag, "unknown" for the rest).
 type aboutBinaryCardData struct {
-	BuildSHA  string
-	BuildTime string
-	GoVersion string
+	ReleaseTag string
+	BuildSHA   string
+	BuildTime  string
+	GoVersion  string
 }
 
 // aboutOSCardData is the view-model for cards/about-os.html. Kernel and
@@ -399,19 +401,20 @@ func (s *server) handleGetPartialAbout(w http.ResponseWriter, r *http.Request) {
 
 	data := aboutTabData{
 		Binary: aboutBinaryCardData{
-			BuildSHA:  s.serverinfoSvc.Build.SHA,
-			BuildTime: s.serverinfoSvc.Build.Time,
-			GoVersion: s.serverinfoSvc.Build.GoVersion,
+			ReleaseTag: s.serverinfoSvc.Build.ReleaseTag,
+			BuildSHA:   s.serverinfoSvc.Build.SHA,
+			BuildTime:  s.serverinfoSvc.Build.Time,
+			GoVersion:  s.serverinfoSvc.Build.GoVersion,
 		},
 	}
 
 	var (
 		wg sync.WaitGroup
 
-		ip, instanceType, az, ami           string
-		ipErr, typeErr, azErr, amiErr       error
-		info                                serverinfo.ServerInfo
-		infoErr                             error
+		ip, instanceType, az, ami     string
+		ipErr, typeErr, azErr, amiErr error
+		info                          serverinfo.ServerInfo
+		infoErr                       error
 	)
 
 	wg.Add(5)

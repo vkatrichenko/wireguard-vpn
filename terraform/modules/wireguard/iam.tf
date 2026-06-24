@@ -25,36 +25,9 @@ data "aws_iam_policy_document" "wireguard_policy_doc" {
     resources = ["${aws_s3_bucket.health_check.arn}/*"]
   }
 
-  # Dashboard artifact read access. Only emitted when the caller wires in
-  # `dashboard_artifact_bucket_arn`; null keeps the instance policy unchanged.
-  dynamic "statement" {
-    for_each = var.dashboard_artifact_bucket_arn != null ? [1] : []
-
-    content {
-      sid     = "S3GetObjectDashboardBinary"
-      actions = ["s3:GetObject"]
-      resources = [
-        "${var.dashboard_artifact_bucket_arn}/latest/*",
-        "${var.dashboard_artifact_bucket_arn}/main-*/*",
-      ]
-    }
-  }
-
-  dynamic "statement" {
-    for_each = var.dashboard_artifact_bucket_arn != null ? [1] : []
-
-    content {
-      sid       = "S3ListBucketDashboardArtifacts"
-      actions   = ["s3:ListBucket"]
-      resources = [var.dashboard_artifact_bucket_arn]
-
-      condition {
-        test     = "StringLike"
-        variable = "s3:prefix"
-        values   = ["latest/*", "main-*/*"]
-      }
-    }
-  }
+  # No dashboard-artifact S3 read statements: the dashboard binary is fetched at
+  # boot from a public GitHub Release over HTTPS (spec 005), so the instance role
+  # no longer needs s3:GetObject/s3:ListBucket on a private artifact bucket.
 }
 
 resource "aws_iam_policy" "wireguard_policy" {
@@ -78,13 +51,12 @@ resource "aws_iam_role_policy_attachment" "wireguard_roleattach" {
   count      = (var.use_eip ? 1 : 0) # only used for EIP mode
 }
 
-# SSM-managed-node membership for the dashboard CI deploy path.
-# Without this attachment the instance's SSM agent cannot call
-# UpdateInstanceInformation, so SendCommand returns
-# "InvalidInstanceId: Instances not in a valid state for account".
-# AmazonSSMManagedInstanceCore is the AWS-recommended baseline and covers
-# ssmmessages/ec2messages plus the minimal S3/KMS perms the agent needs
-# to fetch SSM documents.
+# SSM-managed-node membership. Originally added for the (now-removed, spec 005)
+# CI deploy path; retained for break-glass operator access — Session Manager
+# (`aws ssm start-session`) gives a shell without opening SSH or relying on the
+# WireGuard tunnel being up. AmazonSSMManagedInstanceCore is the AWS-recommended
+# baseline (ssmmessages/ec2messages + the minimal perms the agent needs to
+# register via UpdateInstanceInformation).
 resource "aws_iam_role_policy_attachment" "wireguard_ssm_core" {
   role       = aws_iam_role.wireguard_role[0].name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"

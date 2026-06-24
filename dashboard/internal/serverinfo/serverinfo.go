@@ -145,9 +145,10 @@ type readFileFunc func(path string) ([]byte, error)
 // Defaults are the sentinel "unknown" the main vars carry, so a `go run`
 // invocation (no ldflags) still renders the About card with a stable shape.
 type BuildInfo struct {
-	SHA       string `json:"sha"`
-	Time      string `json:"time"`
-	GoVersion string `json:"go_version"`
+	ReleaseTag string `json:"release_tag"`
+	SHA        string `json:"sha"`
+	Time       string `json:"time"`
+	GoVersion  string `json:"go_version"`
 }
 
 // Service composes every side-effecting dependency the package needs. Fields
