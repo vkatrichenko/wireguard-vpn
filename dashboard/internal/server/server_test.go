@@ -654,6 +654,7 @@ func TestHandleGetPartialClients_RendersGeoMapCard(t *testing.T) {
 	body := rec.Body.String()
 
 	wantFragment := []string{
+		`id="clients"`,            // full-row-span anchor for the wide client table (Slice 6)
 		`id="geo-map"`,            // JS hook + render-test anchor
 		`src="/static/world.svg"`, // embedded base map, no external tiles
 		`class="geo-markers"`,     // marker overlay container

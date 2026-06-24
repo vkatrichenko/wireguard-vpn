@@ -478,8 +478,21 @@ body {
 #tab-body > #processes,
 #tab-body > #network-rate,
 #tab-body > #wg-iface-stats,
-#tab-body > #aggregate-traffic {
+#tab-body > #aggregate-traffic,
+#tab-body > #clients,
+#tab-body > #geo-map {
   grid-column: 1 / -1;
+}
+
+/* The 9-column client table can exceed the card width at desktop sizes; scroll
+   it inside its (now full-row-span) card so it is never clipped and never
+   forces page-level horizontal scroll. Same pattern as #disk / #processes. */
+#clients {
+  overflow-x: auto;
+}
+
+.client-table {
+  min-width: 720px;
 }
 
 /* 15. Client-detail expand ------------------------------------------------ */
@@ -925,6 +938,11 @@ body {
 .geo-map-frame {
   position: relative;
   width: 100%;
+  /* Cap the map's footprint on a full-row-span card (it would otherwise render
+     ~700px tall at ~1400px wide). Centered; the 2:1 aspect ratio is preserved
+     so the percent-positioned markers stay aligned with the projection. */
+  max-width: 760px;
+  margin-inline: auto;
   /* 2:1 matches the SVG viewBox so the percent-positioned markers line up
      with the projection exactly at any width. */
   aspect-ratio: 2 / 1;
