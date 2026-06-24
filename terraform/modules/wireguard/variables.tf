@@ -94,24 +94,24 @@ variable "tags" {
   type        = map(string)
 }
 
-variable "dashboard_artifact_bucket_arn" {
-  description = "ARN of the S3 bucket that holds the web-dashboard binary artifacts. When non-null, the EC2 instance role gains scoped read access to objects under `latest/*` and `main-*/*`. When null (default), no dashboard read statements are added to the instance policy. Wired in by `dev/main.tf` once the dashboard module is composed in."
+variable "dashboard_release_tag" {
+  description = "Pinned GitHub Release tag (e.g. \"v1.2.3\") of the wireguard-dashboard binary to fetch at first boot. When non-empty, user-data downloads the asset from the public release over HTTPS and verifies it against the release's SHA256SUMS before installing it (no S3, no IAM data-plane grant). Empty string (default) disables dashboard provisioning. This is the single source of truth for the running version — bumping it re-renders user-data, rolls a new launch-template version, and replaces the instance."
   type        = string
-  default     = null
+  default     = ""
 
   validation {
-    condition     = var.dashboard_artifact_bucket_arn == null || can(regex("^arn:aws:s3:::", var.dashboard_artifact_bucket_arn))
-    error_message = "dashboard_artifact_bucket_arn must be null or a valid S3 bucket ARN starting with 'arn:aws:s3:::'."
+    condition     = var.dashboard_release_tag == "" || can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$", var.dashboard_release_tag))
+    error_message = "dashboard_release_tag must be empty or a SemVer tag like 'v1.2.3' (optionally with a pre-release suffix, e.g. 'v1.2.3-rc1')."
   }
 }
 
-variable "dashboard_artifact_bucket_name" {
-  description = "Name of the S3 bucket that hosts the web-dashboard binary artifacts. When non-null, first-boot user-data downloads `s3://<bucket>/latest/wireguard-dashboard`, installs it under `/opt/wireguard-dashboard/bin/`, and starts a `wireguard-dashboard.service` systemd unit bound to the WireGuard tunnel IP. When null (default), the dashboard is not provisioned and user-data behaves as before. Paired with `dashboard_artifact_bucket_arn` (which gates the IAM read permissions); both are wired in by `dev/main.tf` once the dashboard module is composed in."
+variable "dashboard_release_repo" {
+  description = "GitHub repository slug (owner/name) the dashboard release is fetched from. Combined with dashboard_release_tag into the public asset base URL https://github.com/<repo>/releases/download/<tag>/. Anonymous download requires the repo to be public."
   type        = string
-  default     = null
+  default     = "vkatrichenko/wireguard-vpn"
 
   validation {
-    condition     = var.dashboard_artifact_bucket_name == null || can(regex("^[a-z0-9.\\-]{3,63}$", var.dashboard_artifact_bucket_name))
-    error_message = "dashboard_artifact_bucket_name must be null or a valid S3 bucket name (3-63 chars, lowercase letters, digits, hyphens, dots)."
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.dashboard_release_repo))
+    error_message = "dashboard_release_repo must be a GitHub 'owner/name' slug."
   }
 }

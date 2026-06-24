@@ -1,0 +1,105 @@
+# dashboard-release
+#
+# Builds, tests, and publishes the wireguard-dashboard binary as a public,
+# versioned GitHub Release. This REPLACES the old build → S3 → SSM-deploy
+# pipeline (dashboard-build.yml + dashboard-deploy.yml): the instance now pulls
+# a pinned release tag at boot over plain HTTPS (terraform/dev/locals.tf →
+# user-data), so CI's only job is to cut the release.
+#
+# Trigger semantics:
+#   - SemVer tag pushes only (`v*.*.*`). Pushes to `main` publish/deploy
+#     nothing — releases are a deliberate, human-readable, pinned choice
+#     (same philosophy as the pinned AMI).
+#   - No workflow_dispatch: a manual run has no tag ref, so GITHUB_REF_NAME
+#     would be a branch and the binary would self-report a non-release version.
+#     Keeping it tags-only guarantees every release maps to exactly one tag.
+#
+# Auth: GITHUB_TOKEN with `contents: write` to create the release. NO AWS —
+# no OIDC, no configure-aws-credentials, no S3. The release build neither reads
+# nor writes any AWS resource (functional spec §2.2).
+#
+# Published assets (per tag, immutable):
+#   wireguard-dashboard   linux/amd64 static binary, version-stamped via ldflags
+#   SHA256SUMS            sha256 of the binary, for boot-time + manual verification
+
+name: dashboard-release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write   # required for `gh release create` to publish the release
+
+concurrency:
+  # One in-flight run per tag; never cancel a release mid-publish.
+  group: dashboard-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, test, and publish dashboard release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - name: Set up Go
+        uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32  # v5.0.0
+        with:
+          go-version-file: dashboard/go.mod
+          cache: true
+          cache-dependency-path: dashboard/go.sum
+
+      - name: go vet
+        working-directory: dashboard
+        run: go vet ./...
+
+      - name: go test
+        working-directory: dashboard
+        run: go test -race ./...
+
+      - name: Cross-compile linux/amd64 binary
+        working-directory: dashboard
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        # Inject build-time metadata into main.ReleaseTag / BuildSHA / BuildTime
+        # / GoVersion via `-ldflags -X` so the About tab renders the exact
+        # release tag and commit. ReleaseTag is GITHUB_REF_NAME (the pushed tag,
+        # e.g. v1.2.3); BuildSHA is the 7-char prefix of GITHUB_SHA for parity
+        # with the Makefile's `git rev-parse --short HEAD`.
+        run: |
+          BUILD_SHA="${GITHUB_SHA:0:7}"
+          BUILD_TIME="$(date -u +%FT%TZ)"
+          GO_VERSION="$(go env GOVERSION)"
+          go build -ldflags "-s -w \
+              -X main.ReleaseTag=${GITHUB_REF_NAME} \
+              -X main.BuildSHA=${BUILD_SHA} \
+              -X main.BuildTime=${BUILD_TIME} \
+              -X main.GoVersion=${GO_VERSION}" \
+            -o wireguard-dashboard ./cmd/wireguard-dashboard
+
+      - name: Generate SHA256SUMS
+        working-directory: dashboard
+        # Bare filename (not a path) so the sum verifies after `curl -o
+        # wireguard-dashboard` on the instance, where the binary sits in cwd.
+        run: sha256sum wireguard-dashboard > SHA256SUMS
+
+      - name: Publish GitHub Release
+        working-directory: dashboard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # `gh` is preinstalled on ubuntu-latest; no third-party action to pin.
+        # --generate-notes gives an auto changelog from commits since the last
+        # tag. Asset URLs become:
+        #   https://github.com/<owner>/<repo>/releases/download/<tag>/wireguard-dashboard
+        #   https://github.com/<owner>/<repo>/releases/download/<tag>/SHA256SUMS
+        # which is exactly what user-data curls in Slice 3.
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            wireguard-dashboard SHA256SUMS

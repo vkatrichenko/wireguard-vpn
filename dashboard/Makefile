@@ -20,11 +20,17 @@
 
 .PHONY: build run test
 
+# RELEASE_TAG is the published version (vX.Y.Z) the CI release workflow injects
+# from GITHUB_REF_NAME. Locally it defaults to "dev" — an untagged working tree
+# isn't a release, so "dev" is the honest label (override with `make build
+# RELEASE_TAG=v1.2.3` to mimic a release build).
+RELEASE_TAG ?= dev
 BUILD_SHA   := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_TIME  := $(shell date -u +%FT%TZ)
 GO_VERSION  := $(shell go env GOVERSION)
 
 LDFLAGS := -s -w \
+	-X main.ReleaseTag=$(RELEASE_TAG) \
 	-X main.BuildSHA=$(BUILD_SHA) \
 	-X main.BuildTime=$(BUILD_TIME) \
 	-X main.GoVersion=$(GO_VERSION)

@@ -60,15 +60,15 @@ TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-meta
 INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/instance-id)
 echo $INSTANCE_ID > /tmp/instance-id
 
-%{ if dashboard_artifact_bucket_name != "" ~}
-# --- WireGuard dashboard (Slice 1 + Slice 3) -----------------------------
-# Provisioned only when the caller wires in a non-empty
-# `dashboard_artifact_bucket_name`. The IAM role's `s3:GetObject` is already
-# scoped to `latest/*` (sub-task 3). AWS CLI was installed earlier in this
-# script. The IMDSv2 token block is also already present above; not duplicated.
-# Slice 2 will add SSM-sourced BASIC_AUTH_* env vars; Slice 4 adds sudoers —
-# neither belongs here. Slice 3 step 3 below renders
-# /etc/wireguard-dashboard/clients.json from the typed `clients_config` shape.
+%{ if dashboard_release_tag != "" ~}
+# --- WireGuard dashboard --------------------------------------------------
+# Provisioned only when the caller pins a non-empty `dashboard_release_tag`.
+# The binary is fetched from the public GitHub Release over HTTPS and verified
+# against its published SHA256SUMS (step 5) before install (step 6) — no S3,
+# no IAM data-plane grant. AWS CLI (installed earlier) is retained only for the
+# S3 `.ready` health signal at the end of this script. The IMDSv2 token block
+# above is reused. Step 4 renders /etc/wireguard-dashboard/clients.json from
+# the typed `clients_config` shape.
 
 # 1. Create the dedicated system user (idempotent).
 id -u wireguard-dashboard >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin wireguard-dashboard
@@ -108,13 +108,35 @@ CLIENTS_EOF
 chown root:wireguard-dashboard /etc/wireguard-dashboard/clients.json
 chmod 0640 /etc/wireguard-dashboard/clients.json
 
-# 5. Download the binary from the artifacts bucket. Instance role grants
-#    s3:GetObject on `latest/*` only. Bucket name is substituted at template
-#    render time so the IAM-scoped bucket and the URL stay in lockstep.
-aws s3 cp s3://${dashboard_artifact_bucket_name}/latest/wireguard-dashboard /opt/wireguard-dashboard/bin/wireguard-dashboard
+# 5. Download the pinned release binary + its checksum over HTTPS and verify
+#    before installing. There is no global `set -e` in this script (the WG
+#    health-check loop below relies on non-zero exits being non-fatal), so each
+#    step fails hard explicitly: a curl HTTP error (missing asset / private-repo
+#    404) or a SHA256 mismatch aborts provisioning with a non-zero exit, so the
+#    `.ready` signal is never written and the operator sees the failure in
+#    /var/log/cloud-init-output.log rather than a wrong/partial binary going live.
+RELEASE_URL="https://github.com/${dashboard_release_repo}/releases/download/${dashboard_release_tag}"
+DL_DIR="$(mktemp -d)"
+if ! curl -fsSL "$RELEASE_URL/wireguard-dashboard" -o "$DL_DIR/wireguard-dashboard"; then
+  echo "FATAL: failed to download dashboard binary from $RELEASE_URL" >&2
+  exit 1
+fi
+if ! curl -fsSL "$RELEASE_URL/SHA256SUMS" -o "$DL_DIR/SHA256SUMS"; then
+  echo "FATAL: failed to download SHA256SUMS from $RELEASE_URL" >&2
+  exit 1
+fi
+# SHA256SUMS lists the bare filename `wireguard-dashboard`, so verify from
+# within DL_DIR. --ignore-missing keeps this correct if SHA256SUMS ever covers
+# additional assets we didn't download.
+if ! ( cd "$DL_DIR" && sha256sum -c --ignore-missing SHA256SUMS ); then
+  echo "FATAL: dashboard binary failed SHA256 verification" >&2
+  exit 1
+fi
 
-# 6. Make it executable.
-chmod +x /opt/wireguard-dashboard/bin/wireguard-dashboard
+# 6. Install the verified binary atomically with the executable bit set, then
+#    drop the temp dir.
+install -o root -g root -m 0755 "$DL_DIR/wireguard-dashboard" /opt/wireguard-dashboard/bin/wireguard-dashboard
+rm -rf "$DL_DIR"
 
 # 7. Drop the systemd unit. Bound to the WG tunnel IP via LISTEN_ADDR;
 #    Requires/After wg-quick@wg0 ensures 172.16.15.1 is bindable before start

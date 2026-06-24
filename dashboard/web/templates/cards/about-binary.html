@@ -5,6 +5,8 @@
        -ldflags. The fallback "unknown" defaults render when -ldflags is
        absent (go run / go test), so this card always has something to show. */}}
   <dl>
+    <dt>Release</dt>
+    <dd><code>{{ .ReleaseTag }}</code></dd>
     <dt>Build SHA</dt>
     <dd><code>{{ .BuildSHA }}</code></dd>
     <dt>Build time</dt>

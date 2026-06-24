@@ -52,18 +52,21 @@ const (
 	shutdownTimeout = 5 * time.Second
 )
 
-// Build-time metadata. Populated via -ldflags "-X main.BuildSHA=…
-// -X main.BuildTime=… -X main.GoVersion=…" from the Makefile and the
-// dashboard-build.yml CI workflow. All three carry sentinel "unknown"
-// defaults so a `go run`/`go test` invocation (which doesn't pass ldflags)
-// still produces a renderable About card rather than empty strings that
-// would surprise a future template branch. They MUST be `var` not `const`:
-// the `-X` linker flag overwrites variable initializers and silently
-// no-ops on constants.
+// Build-time metadata. Populated via -ldflags "-X main.ReleaseTag=…
+// -X main.BuildSHA=… -X main.BuildTime=… -X main.GoVersion=…" from the
+// Makefile and the release CI workflow. They carry sentinel defaults so a
+// `go run`/`go test` invocation (which doesn't pass ldflags) still produces
+// a renderable About card rather than empty strings that would surprise a
+// future template branch. ReleaseTag defaults to "dev" rather than "unknown":
+// an untagged local build genuinely is not a release, so "dev" is the honest
+// label (the CI release workflow injects the real vX.Y.Z from GITHUB_REF_NAME).
+// They MUST be `var` not `const`: the `-X` linker flag overwrites variable
+// initializers and silently no-ops on constants.
 var (
-	BuildSHA  = "unknown"
-	BuildTime = "unknown"
-	GoVersion = "unknown"
+	ReleaseTag = "dev"
+	BuildSHA   = "unknown"
+	BuildTime  = "unknown"
+	GoVersion  = "unknown"
 )
 
 func main() {
@@ -79,9 +82,10 @@ func main() {
 	// are the sentinel "unknown" values declared above, so a `go run` (no
 	// ldflags) still produces a stable card shape.
 	serverinfoSvc.Build = serverinfo.BuildInfo{
-		SHA:       BuildSHA,
-		Time:      BuildTime,
-		GoVersion: GoVersion,
+		ReleaseTag: ReleaseTag,
+		SHA:        BuildSHA,
+		Time:       BuildTime,
+		GoVersion:  GoVersion,
 	}
 
 	// systemd.New() targets `wg-quick@wg0.service` via sudo systemctl. Like

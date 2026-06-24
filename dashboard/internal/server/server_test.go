@@ -1744,9 +1744,10 @@ func TestHandleGetPartialAbout_RendersAllCards(t *testing.T) {
 			return []byte("NAME=\"Amazon Linux\"\nVERSION=\"2023\"\nID=amzn\nPRETTY_NAME=\"Amazon Linux 2023\"\n"), nil
 		},
 		Build: serverinfo.BuildInfo{
-			SHA:       "d4e05cb",
-			Time:      "2026-05-14T12:35:08Z",
-			GoVersion: "go1.25.5",
+			ReleaseTag: "v1.2.3",
+			SHA:        "d4e05cb",
+			Time:       "2026-05-14T12:35:08Z",
+			GoVersion:  "go1.25.5",
 		},
 	}
 	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
@@ -1780,6 +1781,7 @@ func TestHandleGetPartialAbout_RendersAllCards(t *testing.T) {
 		`id="server-info"`,
 		// Spec-mandated sentinels: "Instance type" + "Build".
 		"Instance type",
+		"Release",
 		"Build SHA",
 		"Build time",
 		// EC2 card body cells.
@@ -1788,6 +1790,7 @@ func TestHandleGetPartialAbout_RendersAllCards(t *testing.T) {
 		"us-east-1a",
 		"ami-0abcdef1234567890",
 		// Binary card body cells.
+		"v1.2.3",
 		"d4e05cb",
 		"2026-05-14T12:35:08Z",
 		"go1.25.5",
