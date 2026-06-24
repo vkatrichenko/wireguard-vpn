@@ -35,7 +35,7 @@ This spec lets the operator **download a ready-to-use client config** from the C
 - **As the operator, I want** every server-derived field pre-filled correctly, **so that I** never have to look up the endpoint, server key, or address by hand.
   - **Acceptance Criteria:**
     - [ ] `[Interface] Address` equals the client's assigned tunnel address from `clients.json` (e.g. `172.16.15.6/32`).
-    - [ ] `[Interface] DNS` equals the VPC resolver `10.23.0.2` (gives private DNS resolution in both routing modes).
+    - [ ] `[Interface] DNS` equals the **VPC DNS resolver, derived at runtime** from the VPC's primary CIDR (network base + 2) read via IMDSv2 — currently `10.23.0.2` for the `10.23.0.0/16` VPC. The resolver is **not hardcoded**, so it stays correct if the VPC CIDR changes.
     - [ ] `[Interface] PrivateKey` is a **clearly-marked placeholder**, not a real key — exact text: `PrivateKey = <paste your client private key here>`.
     - [ ] `[Peer] PublicKey` equals the live server public key (from `wg show wg0 public-key`), so the file is correct even after a server-key rotation.
     - [ ] `[Peer] Endpoint` equals the server's public endpoint (Elastic IP from instance metadata) and UDP port `51820`, in `host:port` form.
@@ -47,7 +47,7 @@ This spec lets the operator **download a ready-to-use client config** from the C
 - **As the operator, I want to** pick exit-node vs. private-resources routing at download time, **so that** the same dashboard serves both VPN use cases.
   - **Acceptance Criteria:**
     - [ ] **Full tunnel** sets `AllowedIPs = 0.0.0.0/0, ::/0` — all client traffic (and DNS) routes through the VPN, using the server's confirmed NAT/masquerade path.
-    - [ ] **Split tunnel** sets `AllowedIPs = 172.16.15.0/24, 10.23.0.0/16` — only WireGuard peers and the AWS VPC are routed; the client's local internet is untouched. The VPC CIDR being in scope is what lets `DNS = 10.23.0.2` resolve in this mode.
+    - [ ] **Split tunnel** sets `AllowedIPs` to the WireGuard subnet plus the **VPC's primary CIDR read at runtime** — currently `172.16.15.0/24, 10.23.0.0/16`. Only WireGuard peers and the AWS VPC are routed; the client's local internet is untouched. The VPC CIDR being in scope is what lets the derived DNS resolver resolve in this mode.
     - [ ] Switching the routing-mode choice changes **only** the `AllowedIPs` line between the two downloads; every other field is identical.
 
 ### 2.4 Operator guidance
@@ -91,6 +91,6 @@ This spec lets the operator **download a ready-to-use client config** from the C
 - **In-browser QR code / key-paste assembly** — considered and deliberately deferred; the download ships with a placeholder the operator fills in by hand.
 - **Adding / removing / editing clients from the UI** — the client roster is still owned by `terraform/dev/main.tf` → `clients.json`. No write path, no `wg set`, no `terraform apply` from the dashboard (unchanged from 002/003).
 - **Server-key rotation** — out of band; this feature only *reads* whatever key is live.
-- **Configurable DNS / per-environment DNS override** — hard-coded to the VPC resolver `10.23.0.2` for now.
+- **Custom / external DNS override (e.g. a public resolver)** — the DNS line is always the VPC resolver derived from the VPC CIDR; no operator-chosen alternate resolver in v1.
 - **In-band authentication or HTTPS** — still VPN-gated `http://172.16.15.1:8080`.
 - **Binary distribution changes** (GitHub Releases) and **alerts / connection-history / geo-map** — separate specifications.
