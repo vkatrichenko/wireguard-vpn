@@ -1,7 +1,7 @@
 # Functional Specification: Geo Map Zoom & Legibility
 
 - **Roadmap Item:** Not yet on the roadmap (legibility/interaction follow-on to 006-connection-history-geo-map)
-- **Status:** Draft
+- **Status:** Completed
 - **Author:** Vladyslav Katrychenko
 
 ---
@@ -25,28 +25,28 @@ This spec makes the map actually legible: fix the two defects, and add **zoom an
 
 - **As the operator, I want** markers to sit precisely on their location, **so that I can** trust where a peer is.
   - **Acceptance Criteria:**
-    - [ ] A marker's **visible dot** is small enough to pin a location (≈ its intended ~14px), not a large blob filling its touch-target box; the **≥44px touch/click target is preserved** (003 §2.10) via transparent hit-area, not a bigger visible dot.
-    - [ ] The **"No mappable peers." empty state is shown only when there are no markers**; it is never visible at the same time as a rendered marker (including across failed-fetch / stale-data ticks).
-    - [ ] Online/offline color + opacity, the count badge for co-located peers, and the hover/tap tooltip (name, city/country, online/last-seen) continue to work.
+    - [x] A marker's **visible dot** is small enough to pin a location (≈ its intended ~14px), not a large blob filling its touch-target box; the **≥44px touch/click target is preserved** (003 §2.10) via transparent hit-area, not a bigger visible dot.
+    - [x] The **"No mappable peers." empty state is shown only when there are no markers**; it is never visible at the same time as a rendered marker (including across failed-fetch / stale-data ticks).
+    - [x] Online/offline color + opacity, the count badge for co-located peers, and the hover/tap tooltip (name, city/country, online/last-seen) continue to work.
 
 ### 2.2 Zoom & pan
 
 - **As the operator, I want** to zoom into and pan around the map, **so that I can** see a peer's country/region clearly.
   - **Acceptance Criteria:**
-    - [ ] The operator can **zoom in and out** via on-screen **`+` / `−` controls** and via **scroll-wheel (desktop) and pinch (touch)**; zoom is **bounded** (a sensible min = fit-to-frame, and a max that comfortably resolves country level — proposed ~6–8×).
-    - [ ] The operator can **pan** by dragging (mouse) or one-finger drag (touch) while zoomed in; panning is **bounded** so the map can't be lost off-screen.
-    - [ ] A **reset / fit control** returns the map to the default full-globe view.
-    - [ ] **Markers stay correctly positioned** on their geographic location at every zoom level and pan offset (they scale/move with the map, not drift); the dot's visual size stays readable when zoomed (it should not balloon with the zoom factor).
-    - [ ] Zoom/pan state is **transient** (view-only) — it does not need to persist across reloads or the 10s data refresh, and a data refresh must **not reset** an in-progress zoom/pan.
+    - [x] The operator can **zoom in and out** via on-screen **`+` / `−` controls** and via **scroll-wheel (desktop) and pinch (touch)**; zoom is **bounded** (a sensible min = fit-to-frame, and a max that comfortably resolves country level — proposed ~6–8×).
+    - [x] The operator can **pan** by dragging (mouse) or one-finger drag (touch) while zoomed in; panning is **bounded** so the map can't be lost off-screen.
+    - [x] A **reset / fit control** returns the map to the default full-globe view.
+    - [x] **Markers stay correctly positioned** on their geographic location at every zoom level and pan offset (they scale/move with the map, not drift); the dot's visual size stays readable when zoomed (it should not balloon with the zoom factor).
+    - [x] Zoom/pan state is **transient** (view-only) — it does not need to persist across reloads or the 10s data refresh, and a data refresh must **not reset** an in-progress zoom/pan.
 
 ### 2.3 Offline & constraints preserved
 
 - **As the maintainer, I want** zoom to keep every 006 guarantee, **so that** nothing about the map's offline/security posture changes.
   - **Acceptance Criteria:**
-    - [ ] Zoom/pan is implemented purely as a **transform of the embedded SVG** (viewBox or CSS transform scale+translate) — **no online map tiles, no Leaflet/Mapbox, no external request** of any kind.
-    - [ ] The map remains **dark-mode aware** and adopts the dashboard design system styling (the zoom controls match the 009 token system).
-    - [ ] **Mobile:** pinch-zoom + drag-pan work on a handset; controls are ≥44px touch targets; no horizontal **page** scroll is introduced (map interactions stay within the card).
-    - [ ] Zoom transitions respect **`prefers-reduced-motion`**; the 10s tick, clustering, and tooltips keep working while zoomed.
+    - [x] Zoom/pan is implemented purely as a **transform of the embedded SVG** (viewBox or CSS transform scale+translate) — **no online map tiles, no Leaflet/Mapbox, no external request** of any kind.
+    - [x] The map remains **dark-mode aware** and adopts the dashboard design system styling (the zoom controls match the 009 token system).
+    - [x] **Mobile:** pinch-zoom + drag-pan work on a handset; controls are ≥44px touch targets; no horizontal **page** scroll is introduced (map interactions stay within the card).
+    - [x] Zoom transitions respect **`prefers-reduced-motion`**; the 10s tick, clustering, and tooltips keep working while zoomed.
 
 ---
 
