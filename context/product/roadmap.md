@@ -65,7 +65,7 @@ _Observability and proactive operations for the running VPN — a VPN-only web d
 _Dashboard design & legibility._
 
 - [x] **Dashboard Design System & Responsive Refresh (spec 009):** A cohesive token-driven design system (embedded IBM Plex fonts, amber-on-graphite "precision instrument" palette), fluid responsiveness from phone to ultrawide, restyled components + subtle motion, and WCAG-AA accessibility — applied across all 6 tabs. _(Deployed & operator-verified 2026-06-25.)_
-- [ ] **Geo Map Zoom & Legibility (spec 010):** Fix the oversized marker + empty-state defects and add bounded zoom/pan to the offline peer map so a peer's country is readable. _(Specified.)_
+- [x] **Geo Map Zoom & Legibility (spec 010):** Fix the oversized marker + empty-state defects and add bounded zoom/pan (buttons + wheel/pinch/drag) to the offline peer map so a peer's country is readable. _(Deployed & operator-verified 2026-06-25.)_
 
 ---
 
