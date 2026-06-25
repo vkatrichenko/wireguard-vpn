@@ -60,9 +60,17 @@ _Observability and proactive operations for the running VPN — a VPN-only web d
 
 ---
 
+### Phase 5
+
+_Dashboard design & legibility._
+
+- [x] **Dashboard Design System & Responsive Refresh (spec 009):** A cohesive token-driven design system (embedded IBM Plex fonts, amber-on-graphite "precision instrument" palette), fluid responsiveness from phone to ultrawide, restyled components + subtle motion, and WCAG-AA accessibility — applied across all 6 tabs. _(Deployed & operator-verified 2026-06-25.)_
+- [ ] **Geo Map Zoom & Legibility (spec 010):** Fix the oversized marker + empty-state defects and add bounded zoom/pan to the offline peer map so a peer's country is readable. _(Specified.)_
+
+---
+
 ### Future / Under Consideration
 
 _Not yet specified; captured so the direction isn't lost._
 
-- **All-tabs UI/UX polish pass** — a coherent visual/layout review across every dashboard tab.
 - **Repository open-sourcing** — finalize licensing, scope down committed permissions, and purge any historical secrets/large blobs before the repo goes public.

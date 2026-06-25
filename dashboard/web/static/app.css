@@ -138,7 +138,12 @@
     --text-faint: #8694a0;
 
     /* ====== Accent (amber) + signal (teal) ====== */
-    --accent: #c77f12; /* amber — interactive text/link on light */
+    /* Slice 6 (009 §2.7): darkened from #c77f12 so amber link/config text clears
+       WCAG-AA 4.5:1 as NORMAL text on both --bg (4.62) and --card-bg (5.00); the
+       old value sat at 2.86/3.10. Hue preserved — lightness only. The brighter
+       --accent-strong fill is a SEPARATE token (it pairs with dark --accent-fg
+       and already passes), so it stays put. */
+    --accent: #986007; /* amber — interactive text/link on light */
     --accent-strong: #e8a33d; /* amber fill */
     --accent-fg: #1c1305; /* text on amber fill */
     --accent-soft: rgba(200, 127, 18, 0.12);
@@ -148,7 +153,11 @@
 
     /* ====== Solid semantic colors (progress fills, swatches) ====== */
     --success: #1a9d5e;
-    --warning: #e8a33d;
+    /* Slice 6 (009 §2.7): darkened from #e8a33d so the amber progress-bar fill /
+       severity rail clears the 3:1 graphic-boundary threshold on light surfaces
+       (3.65 on --card-bg, 3.37 on --bg); the old value sat at ~2.0. Distinct from
+       --accent-strong (the button fill) so the primary-button pairing is untouched. */
+    --warning: #b07712;
     --danger: #c0392b;
 
     /* ====== State / status pills (existing names, mapped to new palette) ====== */
@@ -163,7 +172,9 @@
     --state-info-bg: #d6ecf0;
     --state-info-fg: #145a66;
     --state-unknown-bg: #e1e6ea;
-    --state-unknown-fg: #5a6b78;
+    /* Slice 6 (009 §2.7): darkened from #5a6b78 (4.39:1, just under AA) to clear
+       4.5:1 (5.08) for the unknown pill's text on its grey bg. */
+    --state-unknown-fg: #52616d;
     --state-unknown-border: #e8a33d;
 
     --error-bg: #fbe0e0; /* mockup --danger-bg */
@@ -1098,12 +1109,22 @@
   margin-left: 0.5rem;
 }
 
+/* Hover/focus fills the link with the bright amber FILL token (not --accent,
+   which is now the darker AA-on-surface text amber). --accent-fg on
+   --accent-strong is the primary-button pairing — AA in both themes (8.5:1). */
 .config-actions a:hover,
 .config-actions a:focus-visible {
   color: var(--accent-fg);
-  background-color: var(--accent);
+  background-color: var(--accent-strong);
   border-radius: var(--radius-sm);
   text-decoration: none;
+}
+
+/* Standardize the link focus ring on --signal (matches buttons/tabs) so a
+   keyboard focus reads distinctly from the hover fill, not just as a hover echo. */
+.config-actions a:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
 }
 
 .detail-row.hidden {
@@ -1666,6 +1687,42 @@
   overflow: hidden;
 }
 
+/* spec 010 Slice 2: the viewport clips the transformable canvas; zoom controls
+   and the empty state overlay the viewport WITHOUT scaling with the canvas. */
+.geo-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* spec 010 Slice 3: at fit (z=1) allow vertical touch-drag to scroll the page
+     (pan-y), so the map doesn't trap the gesture. .is-zoomed (toggled by
+     world-map.js applyView when z>1) switches to touch-action:none so the
+     viewport captures pinch + drag-pan instead. */
+  touch-action: pan-y;
+}
+
+.geo-viewport.is-zoomed {
+  touch-action: none;
+  cursor: grab;
+}
+
+/* Active drag (a pointer is captured) reads as grabbing. The pointer is captured
+   only while panning, so :active here is a close-enough proxy without JS. */
+.geo-viewport.is-zoomed:active {
+  cursor: grabbing;
+}
+
+/* The canvas carries the translate()+scale() transform (set by world-map.js).
+   transform-origin 0 0 keeps the pan math (clampPan) in viewport pixel space.
+   A short transition smooths +/-/reset; disabled under reduced motion via the
+   global rule in §18. */
+.geo-canvas {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+  transition: transform var(--dur-2) var(--ease-out);
+}
+
 .geo-basemap {
   display: block;
   width: 100%;
@@ -1678,8 +1735,9 @@
   filter: invert(0.88) hue-rotate(180deg) brightness(0.95) saturate(0.7);
 }
 
-/* Marker overlay spans the frame; markers are positioned in percent (left/top)
-   by world-map.js so they track the base map on resize. */
+/* Marker overlay spans the canvas; markers are positioned in percent (left/top)
+   by world-map.js so they track the base map on resize and ride the canvas
+   transform on zoom/pan. */
 .geo-markers {
   position: absolute;
   inset: 0;
@@ -1688,8 +1746,12 @@
 
 .geo-marker {
   position: absolute;
-  /* Center the dot on its projected point. */
-  transform: translate(-50%, -50%);
+  /* Center the dot on its projected point AND counter-scale by 1/z so the dot
+     stays a constant on-screen size as the parent canvas scales up. --geo-z is
+     set on .geo-canvas by world-map.js's applyView(); markers re-rendered on
+     the 10s tick inherit the current value automatically. */
+  transform: translate(-50%, -50%) scale(calc(1 / var(--geo-z, 1)));
+  transform-origin: center;
   width: 14px;
   height: 14px;
   /* ≥44px touch target via a transparent padding box, while the visible dot
@@ -1777,5 +1839,63 @@
 .geo-swatch.offline { background: var(--text-muted); opacity: 0.55; }
 
 .geo-caption { margin-left: auto; }
+
+/* Zoom control group (spec 010 Slice 2) — a compact vertical stack of three
+   square buttons overlaid on the viewport's top-right. Styled with 009 tokens
+   so it reads as a native part of the card chrome: a raised --card-bg-2 well,
+   --elev-2 to float it above the map, --signal focus ring. The dot lives ABOVE
+   the canvas (sibling of .geo-canvas) so it never scales with zoom. */
+.geo-zoom {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px;
+  background: var(--card-border);
+  border-radius: var(--radius);
+  box-shadow: var(--elev-2);
+  overflow: hidden;
+}
+
+.geo-zoom-btn {
+  /* ≥44px hit target per the touch-target rule, while reading as a tidy 36px
+     visual square via the surrounding group padding. */
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: var(--card-bg-2);
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-std),
+    color var(--dur-1) var(--ease-std);
+}
+
+.geo-zoom-btn:first-child { border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0; }
+.geo-zoom-btn:last-child { border-radius: 0 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px); }
+
+.geo-zoom-btn:hover:not(:disabled) {
+  background: var(--card-bg);
+  color: var(--text-strong);
+}
+
+.geo-zoom-btn:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: -2px;
+  z-index: 1; /* keep the ring above the adjacent button seam */
+}
+
+.geo-zoom-btn:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
 }
 /* end @layer components */
