@@ -1,0 +1,36 @@
+{{ define "webhook-card" }}
+{{/* The fragment MUST keep id="webhook-card": every control swaps itself via
+     hx-target="#webhook-card" hx-swap="outerHTML", so the replacement markup
+     has to re-expose the same id for the next swap to re-target. The set
+     <input> is intentionally EMPTY — the configured URL is a secret and is
+     only ever shown MASKED (scheme+host) in the status line below. */}}
+<section id="webhook-card" class="card">
+  <h2>Alert webhook</h2>
+
+  {{ if .Status.Enabled }}
+    <p class="meta">
+      Sending to <code>{{ .Status.CurrentMasked }}</code>
+      {{ if .Status.OverrideActive }}
+        <span class="webhook-badge" title="A runtime override is shadowing the deploy value.">runtime override — resets to the deploy value on restart</span>
+      {{ end }}
+    </p>
+  {{ else }}
+    <p class="meta">Not configured — alerts are visible here but not sent.</p>
+  {{ end }}
+
+  <form class="webhook-form" hx-post="/api/webhook" hx-target="#webhook-card" hx-swap="outerHTML">
+    <label for="webhook-url">Webhook URL</label>
+    <input id="webhook-url" name="url" type="url" autocomplete="off"
+           placeholder="https://hooks.slack.com/services/…">
+    <div class="webhook-actions">
+      <button type="submit">Set</button>
+      <button type="button" hx-post="/api/webhook/test" hx-target="#webhook-card" hx-swap="outerHTML">Test</button>
+      <button type="button" hx-post="/api/webhook/revert" hx-target="#webhook-card" hx-swap="outerHTML">Revert</button>
+    </div>
+  </form>
+
+  {{ if .Message }}
+    <p class="webhook-message webhook-message-{{ if .MessageKind }}{{ .MessageKind }}{{ else }}info{{ end }}">{{ .Message }}</p>
+  {{ end }}
+</section>
+{{ end }}

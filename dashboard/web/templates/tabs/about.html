@@ -12,4 +12,8 @@
 {{ else }}
 {{ template "server-info" .ServerInfo }}
 {{ end }}
+{{/* Runtime webhook-management card (spec 008, Slice 4). Driven by the
+     /api/webhook set/test/revert endpoints via htmx; on the About tab tick it
+     renders the bare masked status + controls (empty Message). */}}
+{{ template "webhook-card" .Webhook }}
 {{ end }}

@@ -19,6 +19,11 @@ locals {
       public_key = c.public_key
     }
   ])
+
+  # Resolved alert webhook URL (secret). Empty when no SSM param name is wired,
+  # which suppresses the DASHBOARD_WEBHOOK_URL line in alerts.env. The count-gated
+  # data source means we only touch SSM when the operator opts in.
+  dashboard_webhook_url = var.dashboard_webhook_url_param != "" ? data.aws_ssm_parameter.dashboard_webhook_url[0].value : ""
 }
 
 locals {
@@ -33,6 +38,15 @@ locals {
     dashboard_release_tag  = var.dashboard_release_tag
     dashboard_release_repo = var.dashboard_release_repo
     clients_json           = local.clients_json
+
+    # Alert seed (spec 007/008 slice 5). Webhook is the secret; the rest are knobs.
+    dashboard_webhook_url          = local.dashboard_webhook_url
+    dashboard_host_label           = var.dashboard_alerts.host_label
+    dashboard_alert_disk_pct       = var.dashboard_alerts.disk_pct
+    dashboard_alert_cpu_pct        = var.dashboard_alerts.cpu_pct
+    dashboard_alert_cpu_sustain    = var.dashboard_alerts.cpu_sustain
+    dashboard_alert_peer_stale     = var.dashboard_alerts.peer_stale
+    dashboard_alert_transfer_bytes = var.dashboard_alerts.transfer_bytes
   })
 }
 

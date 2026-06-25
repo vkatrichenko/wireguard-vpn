@@ -17,10 +17,12 @@ import (
 	"net/http"
 	"time"
 
+	"wireguard-dashboard/internal/alerts"
 	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/disk"
 	"wireguard-dashboard/internal/netdev"
+	"wireguard-dashboard/internal/notify"
 	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/processes"
 	"wireguard-dashboard/internal/serverinfo"
@@ -45,6 +47,53 @@ type server struct {
 	diskSvc        *disk.Service
 	processesSvc   *processes.Service
 	netdevSvc      *netdev.Service
+	// alertStatus is the read seam to the in-UI active-alerts view (spec 007,
+	// Slice 5). The poller writes it each tick; handlers read a deep copy via
+	// Snapshot. It is OPTIONAL: nil renders the disabled/empty view (Snapshot is
+	// only ever called when non-nil), so server.New tolerates a nil holder in
+	// tests without the handlers panicking.
+	alertStatus *alerts.StatusHolder
+	// webhookCfg is the runtime-mutable alert webhook holder (spec 008, Slice 2).
+	// The /api/webhook status/set/revert endpoints read and mutate it, and
+	// alertSnapshot reads Enabled() so the in-UI active-alerts view tracks the
+	// LIVE webhook state rather than a boot snapshot. It is OPTIONAL: nil means
+	// webhook treated as disabled — the write endpoints respond 503 and the
+	// status endpoint reports disabled, never a panic.
+	webhookCfg *notify.WebhookConfig
+	// webhookNotifier is the server-owned holder-backed sender used ONLY by
+	// POST /api/webhook/test (spec 008, Slice 3). It is constructed in New from
+	// the SAME webhookCfg the write endpoints mutate, so a test send always
+	// targets the currently-effective URL (override or seed). It is nil exactly
+	// when webhookCfg is nil — the test endpoint nil-guards on either and
+	// responds 503 rather than panicking. It is deliberately a distinct
+	// notifier from the poller's: both read the one holder, so re-pointing the
+	// URL is observed by delivery and by test sends alike, with no shared sender
+	// state to coordinate.
+	webhookNotifier notify.Notifier
+}
+
+// alertSnapshot returns the current alert view from the holder, or a zeroed
+// (disabled, empty) Status when no holder is wired. Centralising the nil check
+// here keeps every alert render path — index, Overview partial, /api/alerts —
+// from repeating it and guarantees a nil holder never panics.
+func (s *server) alertSnapshot() alerts.Status {
+	if s.alertStatus == nil {
+		st := alerts.Status{Active: []alerts.ActiveAlert{}, Recent: []alerts.LogEntry{}}
+		if s.webhookCfg != nil {
+			st.Enabled = s.webhookCfg.Enabled()
+		}
+		return st
+	}
+	st := s.alertStatus.Snapshot()
+	// Override the boot-time enabled flag with the LIVE webhook state (spec 008,
+	// Slice 2): an operator can enable/disable delivery at runtime via /api/webhook,
+	// and the in-UI active-alerts view must reflect that, not the value captured
+	// when the holder was wired. When no webhook holder is threaded (tests), the
+	// holder's own enabled flag stands.
+	if s.webhookCfg != nil {
+		st.Enabled = s.webhookCfg.Enabled()
+	}
+	return st
 }
 
 // pageData is the view-model for the dashboard index template. The *Error
@@ -83,6 +132,12 @@ type pageData struct {
 	// proc.Service.Sample call returned an error.
 	Stats      *proc.Stats
 	StatsError string
+	// Alerts backs the active-alerts strip atop the Overview tab (spec 007,
+	// Slice 5). It is a deep copy from the status holder, so it is safe to render
+	// from the request goroutine. .Enabled drives the "alerting not configured"
+	// hint; .Active drives the firing list / empty state. Recent is unused on
+	// Overview (the Events tab renders it) but carried for free in the snapshot.
+	Alerts alerts.Status
 }
 
 // New returns an http.Handler with the wired routes. The caller passes in
@@ -115,6 +170,8 @@ func New(
 	diskSvc *disk.Service,
 	processesSvc *processes.Service,
 	netdevSvc *netdev.Service,
+	alertStatus *alerts.StatusHolder,
+	webhookCfg *notify.WebhookConfig,
 ) (http.Handler, error) {
 	// Two globs because templates/*.html does not recurse into cards/. The
 	// cards/ directory holds named-template fragments ({{ define "..." }})
@@ -151,6 +208,16 @@ func New(
 		diskSvc:        diskSvc,
 		processesSvc:   processesSvc,
 		netdevSvc:      netdevSvc,
+		alertStatus:    alertStatus,
+		webhookCfg:     webhookCfg,
+	}
+
+	// Build the server-owned test-send notifier from the same holder the write
+	// endpoints mutate (spec 008, Slice 3). Guarded on webhookCfg being non-nil
+	// because NewNotifier requires a non-nil holder; a nil holder leaves
+	// webhookNotifier nil and the /api/webhook/test handler responds 503.
+	if webhookCfg != nil {
+		s.webhookNotifier = notify.NewNotifier(webhookCfg)
 	}
 
 	// Static-file route — serves the embedded `web/static/` subtree (Chart.js
@@ -175,6 +242,11 @@ func New(
 	mux.HandleFunc("GET /api/clients/{name}/config", s.handleGetClientConfig)
 	mux.HandleFunc("GET /api/clients/{name}/history", s.handleGetClientHistory)
 	mux.HandleFunc("GET /api/geo", s.handleGetGeo)
+	mux.HandleFunc("GET /api/alerts", s.handleGetAlerts)
+	mux.HandleFunc("GET /api/webhook", s.handleGetWebhook)
+	mux.HandleFunc("POST /api/webhook", s.handleSetWebhook)
+	mux.HandleFunc("POST /api/webhook/test", s.handleTestWebhook)
+	mux.HandleFunc("POST /api/webhook/revert", s.handleRevertWebhook)
 	mux.HandleFunc("GET /api/snapshot", s.handleGetSnapshot)
 	mux.HandleFunc("GET /api/metrics", s.handleGetMetrics)
 	mux.HandleFunc("GET /api/metrics/system", s.handleGetMetricsSystem)
@@ -293,6 +365,11 @@ func (s *server) buildPageData(ctx context.Context) pageData {
 	} else {
 		data.Stats = &stats
 	}
+
+	// Active-alerts strip (Slice 5). Read the poller-written snapshot — no fetch,
+	// no I/O, no error path: alertSnapshot returns a zeroed disabled view when no
+	// holder is wired (tests) so the strip always renders.
+	data.Alerts = s.alertSnapshot()
 
 	return data
 }

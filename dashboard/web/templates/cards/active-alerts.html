@@ -1,0 +1,30 @@
+{{ define "active-alerts" }}
+{{/* Active-alerts strip atop the Overview tab (spec 007, Slice 5). Data is an
+     alerts.Status deep copy from the poller-written holder, so this fragment is
+     pure render — no fetch, no error path. Three states:
+       - alerting NOT configured (.Enabled false) → neutral hint, no webhook;
+       - configured but nothing firing → calm "No active alerts." empty state;
+       - one or more firing → a list of condition + detail + "firing since".
+     It rides the existing 10s tab tick (tabs.js swaps /partial/overview into
+     #tab-body) so it refreshes without its own poller. No external resources. */}}
+<section id="active-alerts" class="card active-alerts{{ if .Active }} active-alerts-firing{{ end }}">
+  <h2>Alerts</h2>
+  {{ if .Active }}
+  <ul class="alert-list">
+    {{ range .Active }}
+    <li class="alert-item alert-firing">
+      <span class="alert-badge">FIRING</span>
+      <span class="alert-condition">{{ .Condition }}</span>
+      {{ if .Detail }}<span class="alert-detail">{{ .Detail }}</span>{{ end }}
+      <time class="alert-since" datetime="{{ .Since.Format "2006-01-02T15:04:05Z" }}">firing since {{ humanAgo .Since }}</time>
+    </li>
+    {{ end }}
+  </ul>
+  {{ else }}
+  <p class="empty">No active alerts.</p>
+  {{ end }}
+  {{ if not .Enabled }}
+  <p class="alert-config-hint">Alerting is not configured — set DASHBOARD_WEBHOOK_URL to deliver notifications.</p>
+  {{ end }}
+</section>
+{{ end }}

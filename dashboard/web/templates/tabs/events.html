@@ -1,1 +1,1 @@
-{{ define "events-tab" }}{{ template "events" . }}{{ end }}
+{{ define "events-tab" }}{{ template "alert-events" .Alerts }}{{ template "events" .Handshakes }}{{ end }}

@@ -1,3 +1,27 @@
+{{ define "alert-events" }}
+{{/* Recent alert fire/recovery transitions (spec 007, Slice 5). Data is the
+     status holder's in-memory ring (newest-first), NOT a DB query — alert state
+     is intentionally not persisted (spec 007 §3). Each line shows the kind
+     (FIRING/RECOVERED), the condition, its detail, and the transition time. */}}
+<section id="alert-events" class="card">
+  <h2>Recent alerts</h2>
+  {{ if . }}
+  <ul class="event-list">
+    {{ range . }}
+    <li class="event-item alert-event alert-event-{{ if eq (printf "%s" .Kind) "RECOVERED" }}recovered{{ else }}firing{{ end }}">
+      <span class="alert-badge">{{ .Kind }}</span>
+      <span class="event-name">{{ .Condition }}</span>
+      {{ if .Detail }}<span class="alert-detail">{{ .Detail }}</span>{{ end }}
+      <time class="event-time" datetime="{{ .At.Format "2006-01-02T15:04:05Z" }}">{{ humanAgo .At }}</time>
+    </li>
+    {{ end }}
+  </ul>
+  {{ else }}
+  <p class="empty">No recent alerts.</p>
+  {{ end }}
+</section>
+{{ end }}
+
 {{ define "events" }}
 <section id="events" class="card">
   <h2>Recent handshakes</h2>

@@ -15,15 +15,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	dashboard "wireguard-dashboard"
+	"wireguard-dashboard/internal/alerts"
 	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/disk"
 	"wireguard-dashboard/internal/geoip"
 	"wireguard-dashboard/internal/netdev"
+	"wireguard-dashboard/internal/notify"
 	"wireguard-dashboard/internal/poller"
 	"wireguard-dashboard/internal/proc"
 	"wireguard-dashboard/internal/processes"
@@ -174,6 +178,59 @@ func main() {
 		}
 	}()
 
+	// Alert delivery (spec 007 transport; spec 008 runtime config). The webhook
+	// URL now lives in a runtime-mutable holder seeded from DASHBOARD_WEBHOOK_URL
+	// at boot. An operator can re-point or disable delivery at runtime (Slice 2's
+	// HTTP endpoint) without a restart; the notifier resolves the holder's
+	// current URL on every send and no-ops (no outbound HTTP) when it is empty,
+	// so an unset seed runs exactly as today. The override is in-memory only — a
+	// restart returns to the seed. Config is env-var-seeded by owner decision
+	// (multi-cloud portability) — no SSM/Terraform. The URL is a secret: it is
+	// never logged in full (notify redacts to scheme+host), so we only note here
+	// whether alerting is enabled at boot. The holder is threaded into server.New
+	// (Slice 2) so the /api/webhook status/set/revert endpoints can re-point or
+	// disable delivery at runtime.
+	webhookCfg := notify.NewWebhookConfig(os.Getenv("DASHBOARD_WEBHOOK_URL"))
+	var notifier notify.Notifier = notify.NewNotifier(webhookCfg)
+	if webhookCfg.Enabled() {
+		slog.Info("notify: webhook alerting enabled")
+	} else {
+		slog.Info("notify: DASHBOARD_WEBHOOK_URL unset; alerting disabled (no-op)")
+	}
+
+	// Alert evaluator (spec 007, Slices 2-3). It runs UNCONDITIONALLY — even
+	// with a NoOp notifier — so the in-UI active-alerts view (Slice 5) always has
+	// live state; only delivery is gated on the webhook URL. The host label
+	// stamped into messages is a PORTABLE identifier (os.Hostname, overridable
+	// via DASHBOARD_HOST_LABEL) — deliberately NOT the AWS IMDSv2 instance id,
+	// so the dashboard stays cloud-agnostic. The evaluator + systemd reader +
+	// disk reader + notifier are threaded into the poller, which evaluates
+	// conditions each tick and dispatches fire/recovery events OFF the poll
+	// critical path.
+	//
+	// Slice 3 thresholds are plain (non-secret) env knobs with documented
+	// defaults; an unparseable or out-of-range value is logged and ignored,
+	// falling back to the alerts package default so a typo never disables a
+	// condition silently.
+	alertEvaluator := alerts.New(alerts.Config{
+		Host:               hostLabel(),
+		DiskThresholdPct:   envPct("DASHBOARD_ALERT_DISK_PCT", alerts.DefaultDiskThresholdPct),
+		CPUThresholdPct:    envPct("DASHBOARD_ALERT_CPU_PCT", alerts.DefaultCPUThresholdPct),
+		CPUSustain:         envDuration("DASHBOARD_ALERT_CPU_SUSTAIN", alerts.DefaultCPUSustain),
+		PeerStaleThreshold: envDuration("DASHBOARD_ALERT_PEER_STALE", alerts.DefaultPeerStaleThreshold),
+		TransferCapBytes:   envBytes("DASHBOARD_ALERT_TRANSFER_BYTES", alerts.DefaultTransferCapBytes),
+	})
+
+	// Shared status holder for the in-UI active-alerts view (spec 007, Slice 5).
+	// It is the ONLY safe channel between the poller goroutine (which drives the
+	// non-concurrency-safe evaluator and writes the holder each tick) and the HTTP
+	// goroutines (which read a deep copy via Snapshot for the Overview strip,
+	// Events entries, and GET /api/alerts). The "enabled" flag (whether outbound
+	// webhook delivery is configured) is NO LONGER snapshotted here: as of spec
+	// 008 Slice 2 it is derived LIVE from webhookCfg by the server's alertSnapshot,
+	// so the view tracks runtime enable/disable via /api/webhook without a restart.
+	alertStatus := alerts.NewStatusHolder()
+
 	// Wire signal handling early so the poller below can use the same ctx
 	// for cancellation, and a Ctrl-C during the (admittedly tiny) startup
 	// window still triggers graceful shutdown of every long-lived goroutine.
@@ -204,10 +261,10 @@ func main() {
 	// time `<-ctx.Done()` fires below and we head into Shutdown, the
 	// poller is also winding down in parallel. The deferred metricsDB.Close
 	// runs after both the HTTP server and the poller have stopped writing.
-	pollerSvc := poller.New(metricsDB, procSvc, wgSvc, clientsfileSvc)
+	pollerSvc := poller.New(metricsDB, procSvc, wgSvc, clientsfileSvc, systemdSvc, diskSvc, alertEvaluator, notifier, alertStatus)
 	go pollerSvc.Run(ctx)
 
-	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc)
+	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc, alertStatus, webhookCfg)
 	if err != nil {
 		log.Fatalf("server init failed: %v", err)
 	}
@@ -244,4 +301,127 @@ func getenv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envPct parses a percentage threshold from the named env var, falling back to
+// def. An unset var, an unparseable value, or one outside (0,100] is logged and
+// def is returned — a misconfigured knob must never silently disable a
+// condition. The lower bound is exclusive of 0 because <= 0 would make the
+// alerts package fall back to its own default anyway, and a 0% threshold would
+// fire constantly.
+func envPct(key string, def float64) float64 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v <= 0 || v > 100 {
+		slog.Warn("alerts: ignoring invalid threshold env; using default", "key", key, "value", raw, "default", def)
+		return def
+	}
+	return v
+}
+
+// envDuration parses a Go duration string (e.g. "5m") from the named env var,
+// falling back to def. An unset var, an unparseable value, or a non-positive
+// duration is logged and def is returned.
+func envDuration(key string, def time.Duration) time.Duration {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		slog.Warn("alerts: ignoring invalid duration env; using default", "key", key, "value", raw, "default", def.String())
+		return def
+	}
+	return d
+}
+
+// envBytes parses an operator-friendly byte-size from the named env var, falling
+// back to def. An unset, unparseable, or non-positive value is logged and def is
+// returned — a typo must never silently disable the transfer-cap condition.
+//
+// Grammar: a number (integer or decimal) optionally followed by a unit suffix,
+// case-insensitive, with optional surrounding whitespace. A bare number is
+// plain bytes. Decimal suffixes (KB/MB/GB/TB) are powers of 1000; binary
+// suffixes (KiB/MiB/GiB/TiB) are powers of 1024; a single-letter K/M/G/T is
+// treated as binary (the conventional VPN-operator reading of "50G"). Examples:
+// "53687091200", "50GiB", "50G", "53.5 GB".
+func envBytes(key string, def int64) int64 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def
+	}
+	v, err := parseByteSize(raw)
+	if err != nil || v <= 0 {
+		slog.Warn("alerts: ignoring invalid byte-size env; using default", "key", key, "value", raw, "default", def)
+		return def
+	}
+	return v
+}
+
+// parseByteSize parses the envBytes grammar. Kept std-lib only (no go-humanize)
+// per the no-new-deps constraint.
+func parseByteSize(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, strconv.ErrSyntax
+	}
+	// Split the trailing unit (letters) from the leading number.
+	i := len(s)
+	for i > 0 {
+		c := s[i-1]
+		if (c >= '0' && c <= '9') || c == '.' {
+			break
+		}
+		i--
+	}
+	numPart := strings.TrimSpace(s[:i])
+	unit := strings.ToLower(strings.TrimSpace(s[i:]))
+
+	num, err := strconv.ParseFloat(numPart, 64)
+	if err != nil {
+		return 0, err
+	}
+
+	var mult float64
+	switch unit {
+	case "", "b":
+		mult = 1
+	case "kb":
+		mult = 1e3
+	case "mb":
+		mult = 1e6
+	case "gb":
+		mult = 1e9
+	case "tb":
+		mult = 1e12
+	case "k", "kib":
+		mult = 1 << 10
+	case "m", "mib":
+		mult = 1 << 20
+	case "g", "gib":
+		mult = 1 << 30
+	case "t", "tib":
+		mult = 1 << 40
+	default:
+		return 0, strconv.ErrSyntax
+	}
+	return int64(num * mult), nil
+}
+
+// hostLabel returns the identifier stamped into alert messages. It prefers an
+// explicit DASHBOARD_HOST_LABEL override, then os.Hostname(), then a fixed
+// fallback if the hostname lookup fails. This is a PORTABLE choice (works on any
+// cloud/VPS), deliberately NOT the AWS IMDSv2 instance id, per the owner's
+// multi-cloud-portability decision for spec 007.
+func hostLabel() string {
+	if v := os.Getenv("DASHBOARD_HOST_LABEL"); v != "" {
+		return v
+	}
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h
+	}
+	return "wireguard-dashboard"
 }

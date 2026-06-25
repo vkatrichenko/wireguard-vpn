@@ -1,7 +1,7 @@
 # Product Definition: wireguard-vpn
 
-- **Version:** 1.0
-- **Status:** Proposed
+- **Version:** 1.1
+- **Status:** Active
 
 ---
 
@@ -9,7 +9,7 @@
 
 ### 1.1. Project Vision & Purpose
 
-Offer a fully codified, version-controlled WireGuard VPN infrastructure that can be audited, reproduced, and extended by the community. One repo, one `terraform apply`, and you have a private VPN server — no manual networking steps, no opaque third-party services.
+Offer a fully codified, version-controlled WireGuard VPN infrastructure that can be audited, reproduced, and extended by the community. One repo, one `terraform apply`, and you have a private VPN server — no manual networking steps, no opaque third-party services. A bundled, VPN-only web dashboard then lets the operator **see** the server's health and **be told** when something breaks — without SSH.
 
 ### 1.2. Target Audience
 
@@ -25,12 +25,13 @@ Offer a fully codified, version-controlled WireGuard VPN infrastructure that can
 
 - **Persona 2: "Jordan the Privacy-First Developer"**
   - **Role:** Freelance backend developer who works from cafes and co-working spaces.
-  - **Goal:** Wants a self-hosted VPN to route personal traffic through — full control, no logs, no trust issues.
-  - **Frustration:** Commercial VPN services are opaque — can't audit the infrastructure, verify logging policies, or customize the setup. Doesn't want to spend a weekend wiring up iptables rules by hand.
+  - **Goal:** Wants a self-hosted VPN to route personal traffic through — full control, no logs, no trust issues. Also wants a quick, glanceable view of who's connected and to be pinged in chat if the tunnel drops.
+  - **Frustration:** Commercial VPN services are opaque — can't audit the infrastructure, verify logging policies, or customize the setup. Doesn't want to spend a weekend wiring up iptables rules by hand, or discover hours later that the server was down.
 
 ### 1.4. Success Metrics
 
 - **Operational reliability:** The deployed VPN maintains stable connectivity with minimal manual intervention — no unplanned downtime from infrastructure drift or misconfiguration.
+- **Operational visibility:** The operator can answer "is it up, who's connected, where from, and is anything wrong?" from the dashboard alone, and is proactively notified (in chat) of failures within a poll interval — without SSH.
 
 ---
 
@@ -40,14 +41,18 @@ Offer a fully codified, version-controlled WireGuard VPN infrastructure that can
 
 - **One-command VPN deploy** — Fully codified Terraform modules that provision VPC, subnets, EC2, security groups, IAM, and WireGuard configuration in a single `terraform apply`.
 - **Multi-client support** — Support multiple WireGuard clients via a configurable client list in `main.tf`, each with unique public keys and IP assignments.
+- **VPN-only observability dashboard** — A self-contained Go web dashboard (reachable only over the tunnel) showing server health, per-client online/offline status, throughput, connection history, and an offline world map of peer locations. Clients can download their own ready-to-use configs (full / split tunnel) from it.
+- **Proactive alerting** — The dashboard watches for the failures that matter (service down, high disk, sustained high CPU, a dropped peer, a peer over a transfer cap) and pushes notifications to a Slack-compatible webhook, with edge-triggering, cooldown, and recovery messages. The webhook can be managed (set / test / revert) at runtime from the dashboard.
+- **Offline & self-contained** — The dashboard makes no outbound requests for its own operation (embedded map + geolocation, no CDNs); it holds no client private keys; the only egress it adds is the opt-in alert webhook.
 
 ### 2.2. User Journey
 
 1. **Clone** the repository and set `AWS_PROFILE` to their configured AWS credentials.
-2. **Configure** — edit `terraform/dev/locals.tf` to set region, project name, CIDR ranges, and instance AMI. Add client public keys to the `clients_config` list in `main.tf`.
+2. **Configure** — edit `terraform/dev/locals.tf` to set region, project name, CIDR ranges, and instance AMI. Add client public keys to the `clients_config` list in `main.tf`. Pin the dashboard release via `dashboard_release_tag`.
 3. **Bootstrap** — run `terraform init && terraform plan -out=tfplan && terraform apply tfplan` in `terraform/dev/backend/` to create the S3 state bucket (one-time step).
-4. **Deploy** — run `terraform init && terraform plan -out=tfplan && terraform apply tfplan` in `terraform/dev/` to provision the full VPN infrastructure.
+4. **Deploy** — run `terraform init && terraform plan -out=tfplan && terraform apply tfplan` in `terraform/dev/` to provision the full VPN infrastructure (and, when pinned, the dashboard).
 5. **Connect** — configure the local WireGuard client with the server's public IP and the corresponding private key, then `wg-quick up`.
+6. **Monitor & be alerted** — over the tunnel, open the dashboard at `http://172.16.15.1:8080` to watch status/throughput/history and the peer map; optionally point alerting at a Slack-compatible webhook so failures arrive in chat.
 
 ---
 
@@ -58,11 +63,16 @@ Offer a fully codified, version-controlled WireGuard VPN infrastructure that can
 - Terraform modules for VPC, subnets, routing, and default security group.
 - Terraform module for EC2 instance with WireGuard installed and configured via cloud-init user-data.
 - IAM role with SSM access for retrieving the server's WireGuard private key at boot.
-- Security group rules for WireGuard (UDP 51820) and SSH access.
+- Security group rules for WireGuard (UDP 51820) and SSM-based instance access (no SSH port).
 - Multi-client configuration via a Terraform variable list.
 - Pre-commit hooks for code quality (fmt, tflint, trivy, docs).
 - S3 remote state with native locking (no DynamoDB).
+- A VPN-only, single-binary web dashboard: server/peer status, throughput, connection history, offline geo map, and per-client config download (specs 002–006).
+- Proactive alerting to a Slack-compatible webhook with runtime webhook management (specs 007–008).
 
 ### 3.2. What's Out-of-Scope (Non-Goals)
 
-- **CI/CD pipeline** — all plan/apply operations are manual and local. No automated apply workflows.
+- **CI/CD pipeline for infrastructure** — all plan/apply operations are manual and local. No automated apply workflows.
+- **Dashboard authentication** — access is gated solely by the WireGuard tunnel; there is no login/session layer (revisit only if it becomes multi-user).
+- **Multi-channel / non-webhook alerting** — a single Slack-compatible webhook only (no email/SMS/PagerDuty routing).
+- **Persisting runtime dashboard config** — runtime webhook overrides are in-memory and reset to the deploy-time (SSM/env) value on restart.

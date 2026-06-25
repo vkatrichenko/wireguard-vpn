@@ -108,6 +108,30 @@ CLIENTS_EOF
 chown root:wireguard-dashboard /etc/wireguard-dashboard/clients.json
 chmod 0640 /etc/wireguard-dashboard/clients.json
 
+# 4b. Render the alert environment file consumed by the dashboard's systemd unit
+#     (EnvironmentFile=-/etc/wireguard-dashboard/alerts.env). The quoted heredoc
+#     stops bash from re-expanding the Terraform-substituted values (the webhook
+#     URL in particular is a secret and may contain shell-special characters).
+#     Non-secret knobs are always written. DASHBOARD_HOST_LABEL is omitted when
+#     empty so the Go side falls back to os.Hostname(); DASHBOARD_WEBHOOK_URL is
+#     written only when a webhook is wired. Mode 0640 + group wireguard-dashboard:
+#     only the dashboard user can read the secret (same as clients.json).
+cat > /etc/wireguard-dashboard/alerts.env <<'ALERTS_EOF'
+%{ if dashboard_host_label != "" ~}
+DASHBOARD_HOST_LABEL=${dashboard_host_label}
+%{ endif ~}
+DASHBOARD_ALERT_DISK_PCT=${dashboard_alert_disk_pct}
+DASHBOARD_ALERT_CPU_PCT=${dashboard_alert_cpu_pct}
+DASHBOARD_ALERT_CPU_SUSTAIN=${dashboard_alert_cpu_sustain}
+DASHBOARD_ALERT_PEER_STALE=${dashboard_alert_peer_stale}
+DASHBOARD_ALERT_TRANSFER_BYTES=${dashboard_alert_transfer_bytes}
+%{ if dashboard_webhook_url != "" ~}
+DASHBOARD_WEBHOOK_URL=${dashboard_webhook_url}
+%{ endif ~}
+ALERTS_EOF
+chown root:wireguard-dashboard /etc/wireguard-dashboard/alerts.env
+chmod 0640 /etc/wireguard-dashboard/alerts.env
+
 # 5. Download the pinned release binary + its checksum over HTTPS and verify
 #    before installing. There is no global `set -e` in this script (the WG
 #    health-check loop below relies on non-zero exits being non-fatal), so each
@@ -154,6 +178,9 @@ User=wireguard-dashboard
 Group=wireguard-dashboard
 ExecStart=/opt/wireguard-dashboard/bin/wireguard-dashboard
 Environment=LISTEN_ADDR=172.16.15.1:8080
+# Leading '-' makes the file optional: the unit starts even if alerts.env is
+# absent, so alerting is strictly opt-in via the seeded knobs/webhook above.
+EnvironmentFile=-/etc/wireguard-dashboard/alerts.env
 Restart=on-failure
 RestartSec=5s
 

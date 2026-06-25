@@ -9,6 +9,10 @@
      The wrapping .overview-grid gives explicit column control so cards land
      in a clean 2-col pattern instead of the auto-fit raggedness that the
      default #tab-body grid produced. */}}
+{{/* Active-alerts strip — full-width, ABOVE the KPI grid so a firing condition
+     is the first thing the operator sees. Rendered with .Alerts (an
+     alerts.Status snapshot from the poller-written holder). */}}
+{{ template "active-alerts" .Alerts }}
 <div class="overview-grid">
   {{ if .ServiceStatusError }}
   <section class="card error">{{ .ServiceStatusError }}</section>
