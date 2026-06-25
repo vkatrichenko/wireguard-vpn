@@ -1,18 +1,26 @@
 {{ define "overview" }}
 {{/* Overview layout — two-tier ops dashboard pattern (AWS Console / Linode /
      Grafana stat-panel style):
+       Banner row: active-alerts strip + server-endpoint reference, side by side
        Row 1: status KPI tiles (service status, clients online/total)
        Row 2: detail cards (system metrics, network throughput)
-       Row 3: full-width reference (server endpoint + pubkey copy)
      The standalone Uptime card was dropped — "Active since" lives inside
-     service-status, and the host kernel uptime stays inside the System card.
-     The wrapping .overview-grid gives explicit column control so cards land
-     in a clean 2-col pattern instead of the auto-fit raggedness that the
-     default #tab-body grid produced. */}}
-{{/* Active-alerts strip — full-width, ABOVE the KPI grid so a firing condition
-     is the first thing the operator sees. Rendered with .Alerts (an
-     alerts.Status snapshot from the poller-written holder). */}}
-{{ template "active-alerts" .Alerts }}
+     service-status, and the host kernel uptime stays inside the System card. */}}
+{{/* Banner row (.overview-banner): the active-alerts strip and the server-
+     endpoint card share one row — side by side on wide screens, stacking on
+     narrow. Alerts gets the larger track (2fr) so a firing condition stays
+     readable; the short pubkey card no longer wastes a full-width row. Both
+     cards' content/behavior are unchanged — this is layout only. The alerts
+     strip stays first so a firing condition is still the first thing seen. */}}
+<div class="overview-banner">
+  {{ template "active-alerts" .Alerts }}
+
+  {{ if .ServerInfoError }}
+  <section class="card error">{{ .ServerInfoError }}</section>
+  {{ else }}
+  {{ template "server-info" .ServerInfo }}
+  {{ end }}
+</div>
 <div class="overview-grid">
   {{ if .ServiceStatusError }}
   <section class="card error">{{ .ServiceStatusError }}</section>
@@ -31,12 +39,6 @@
   {{ else if .Stats }}
   {{ template "system" .Stats }}
   {{ template "network-rate" .Stats }}
-  {{ end }}
-
-  {{ if .ServerInfoError }}
-  <section class="card error">{{ .ServerInfoError }}</section>
-  {{ else }}
-  {{ template "server-info" .ServerInfo }}
   {{ end }}
 </div>
 {{ end }}

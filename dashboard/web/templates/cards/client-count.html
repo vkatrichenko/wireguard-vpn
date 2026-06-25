@@ -1,11 +1,21 @@
 {{ define "client-count" }}
 <section id="client-count" class="card">
   <h2>Clients</h2>
-  {{/* "N online / M total" — the online count uses the existing
-       .status-online color token (green) so the at-a-glance summary
-       matches the per-row status pills on the Clients tab. */}}
-  <p class="client-count">
-    <strong class="status-online">{{ .Online }} online</strong> / {{ .Total }} total
-  </p>
+  {{/* KPI/stat tile (mockup .stat pattern). The large mono number is the
+       online/total figure; "online" / "total" are small fitted labels under
+       each value. Splitting number from label means --fs-stat applies ONLY to
+       the digits, so the tile never clips at narrow card widths (the prior
+       single .client-count string did). The online count keeps the success
+       color via .stat-online. */}}
+  <div class="stat-grid stat-grid-2">
+    <div class="stat">
+      <span class="stat-num stat-online">{{ .Online }}</span>
+      <span class="stat-label">online</span>
+    </div>
+    <div class="stat">
+      <span class="stat-num">{{ .Total }}</span>
+      <span class="stat-label">total</span>
+    </div>
+  </div>
 </section>
 {{ end }}
