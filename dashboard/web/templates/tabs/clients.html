@@ -56,10 +56,25 @@
      mappable peers.") is the cold-load default until JS hydrates. */}}
 <section class="card" id="geo-map">
   <h2>Peer locations</h2>
+  {{/* spec 010 Slice 2: the basemap + markers live inside a transformable
+       .geo-canvas, clipped by .geo-viewport (overflow:hidden). world-map.js
+       sets `transform: translate() scale()` on the canvas for zoom/pan; the
+       markers counter-scale via the --geo-z custom property so dots stay a
+       constant on-screen size. The empty state + zoom controls are siblings of
+       the canvas inside the viewport, so they do NOT scale with it. */}}
   <div class="geo-map-frame">
-    <img class="geo-basemap" src="/static/world.svg" alt="World map" />
-    <div class="geo-markers" aria-live="polite"></div>
-    <p class="geo-empty empty">No mappable peers.</p>
+    <div class="geo-viewport">
+      <div class="geo-canvas">
+        <img class="geo-basemap" src="/static/world.svg" alt="World map" />
+        <div class="geo-markers" aria-live="polite"></div>
+      </div>
+      <p class="geo-empty empty">No mappable peers.</p>
+      <div class="geo-zoom" role="group" aria-label="Map zoom">
+        <button type="button" class="geo-zoom-btn" data-geo-zoom="in" aria-label="Zoom in">+</button>
+        <button type="button" class="geo-zoom-btn" data-geo-zoom="reset" aria-label="Reset zoom to fit" disabled>⤢</button>
+        <button type="button" class="geo-zoom-btn" data-geo-zoom="out" aria-label="Zoom out" disabled>−</button>
+      </div>
+    </div>
   </div>
   <div class="geo-legend">
     <span class="geo-legend-item"><span class="geo-swatch online"></span>Online</span>

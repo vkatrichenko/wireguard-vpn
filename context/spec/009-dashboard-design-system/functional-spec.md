@@ -1,7 +1,7 @@
 # Functional Specification: Dashboard Design System & Responsive Refresh
 
 - **Roadmap Item:** Not yet on the roadmap (UX follow-on to the 002–008 dashboard work)
-- **Status:** Draft
+- **Status:** Completed
 - **Author:** Vladyslav Katrychenko
 
 ---
@@ -24,69 +24,69 @@ Every hard constraint from 002/003 stays: **fully offline** (no external fonts, 
 
 - **As the operator, I want** every tab and card to share one visual language, **so that** the dashboard feels designed, not assembled.
   - **Acceptance Criteria:**
-    - [ ] A single source of truth defines the design tokens — color, typography scale, spacing, radii, elevation/shadows, borders, and motion — consumed by **all** surfaces (the 6 tabs and every card fragment).
-    - [ ] No card or tab uses one-off colors, spacing, or font sizes outside the token system; visual treatment of equivalent elements (cards, headings, pills, tables, buttons, form controls) is consistent everywhere.
-    - [ ] Both **light and dark** themes are first-class: every token has a defined value in each theme, and the theme toggle continues to work with no unstyled/low-contrast elements in either.
+    - [x] A single source of truth defines the design tokens — color, typography scale, spacing, radii, elevation/shadows, borders, and motion — consumed by **all** surfaces (the 6 tabs and every card fragment).
+    - [x] No card or tab uses one-off colors, spacing, or font sizes outside the token system; visual treatment of equivalent elements (cards, headings, pills, tables, buttons, form controls) is consistent everywhere.
+    - [x] Both **light and dark** themes are first-class: every token has a defined value in each theme, and the theme toggle continues to work with no unstyled/low-contrast elements in either.
 
 ### 2.2 Distinctive, embedded typography
 
 - **As the operator, I want** the dashboard to read as intentionally typeset, **so that** it escapes the generic default-font look.
   - **Acceptance Criteria:**
-    - [ ] The dashboard uses **self-hosted, embedded** fonts (vendored via `go:embed`, served from `/static/`) — at least one distinctive display/heading face and a complementary body face, with a **monospace** face for technical/numeric data (keys, IPs, byte counts, timestamps).
-    - [ ] **No external font request** is made (no Google Fonts / CDN); the offline guarantee is preserved and provable (no outbound requests on load).
-    - [ ] A deliberate **type scale** (sizes, weights, line-heights, letter-spacing) is applied consistently; headings, body, labels, and monospace data are visually distinct and hierarchical.
-    - [ ] Embedded font files are subset/`woff2`-compressed to keep the binary size increase reasonable, and their licenses permit redistribution (recorded in `VENDORED.txt`). `[NEEDS CLARIFICATION: exact font families to be proposed and chosen during the design/technical phase (open-licensed, OFL/permissive); record the final pick + license here.]`
+    - [x] The dashboard uses **self-hosted, embedded** fonts (vendored via `go:embed`, served from `/static/`) — at least one distinctive display/heading face and a complementary body face, with a **monospace** face for technical/numeric data (keys, IPs, byte counts, timestamps).
+    - [x] **No external font request** is made (no Google Fonts / CDN); the offline guarantee is preserved and provable (no outbound requests on load).
+    - [x] A deliberate **type scale** (sizes, weights, line-heights, letter-spacing) is applied consistently; headings, body, labels, and monospace data are visually distinct and hierarchical.
+    - [x] Embedded font files are subset/`woff2`-compressed to keep the binary size increase reasonable, and their licenses permit redistribution (recorded in `VENDORED.txt`). **Resolved:** **IBM Plex Sans (400/500/600) + IBM Plex Mono (400/500)**, SIL OFL 1.1, subset to ~84.6 KiB woff2 (~+92 KiB stripped binary), provenance in `VENDORED.txt` + `fonts/OFL.txt`.
 
 ### 2.3 Refined visual identity (color & atmosphere)
 
 - **As the operator, I want** a distinctive, calm palette with depth, **so that** the dashboard is pleasant to watch and not a flat default.
   - **Acceptance Criteria:**
-    - [ ] The palette moves off the generic textbook blue to a **cohesive, intentional** scheme (a considered dominant tone with sharp, sparing accents), distinct in light and dark.
-    - [ ] Surfaces have **atmosphere/depth** rather than flat solid fills (e.g. subtle layering, considered borders/shadows, gentle texture/gradient where appropriate) — applied with restraint suited to an ops tool.
-    - [ ] **Semantic status colors** (online/offline, active/inactive, success/warning/danger/info, firing/recovered) remain clearly distinguishable and accessible in both themes, and are mapped through the token system (no ad-hoc status colors).
+    - [x] The palette moves off the generic textbook blue to a **cohesive, intentional** scheme (a considered dominant tone with sharp, sparing accents), distinct in light and dark.
+    - [x] Surfaces have **atmosphere/depth** rather than flat solid fills (e.g. subtle layering, considered borders/shadows, gentle texture/gradient where appropriate) — applied with restraint suited to an ops tool.
+    - [x] **Semantic status colors** (online/offline, active/inactive, success/warning/danger/info, firing/recovered) remain clearly distinguishable and accessible in both themes, and are mapped through the token system (no ad-hoc status colors).
 
 ### 2.4 Fluid responsiveness across all sizes
 
 - **As the operator, I want** the dashboard to scale smoothly on any device, **so that** it's equally usable on a phone and an ultrawide monitor.
   - **Acceptance Criteria:**
-    - [ ] Layout, type, and spacing scale **fluidly** (e.g. `clamp()`-based and container-aware) from **~360px phone → tablet → laptop → ultrawide**, not via a couple of fixed breakpoints.
-    - [ ] At **no width** is content clipped, nor is there horizontal **page** scroll ≥360px; wide tables/maps degrade gracefully (scroll within their card or reflow), and full-width surfaces don't leave large dead space on very wide screens (sensible max content width / multi-column use).
-    - [ ] Touch targets are **≥44px** and interactive controls remain comfortably usable on a handset (per 003 §2.10).
-    - [ ] The existing tab/card structure and the geo map's projection alignment continue to work at every size (no regressions to the 006 timeline/map).
+    - [x] Layout, type, and spacing scale **fluidly** (e.g. `clamp()`-based and container-aware) from **~360px phone → tablet → laptop → ultrawide**, not via a couple of fixed breakpoints.
+    - [x] At **no width** is content clipped, nor is there horizontal **page** scroll ≥360px; wide tables/maps degrade gracefully (scroll within their card or reflow), and full-width surfaces don't leave large dead space on very wide screens (sensible max content width / multi-column use).
+    - [x] Touch targets are **≥44px** and interactive controls remain comfortably usable on a handset (per 003 §2.10).
+    - [x] The existing tab/card structure and the geo map's projection alignment continue to work at every size (no regressions to the 006 timeline/map).
 
 ### 2.5 UX refinements (clarity & feedback)
 
 - **As the operator, I want** clearer navigation and state feedback, **so that** I can read status and act with confidence.
   - **Acceptance Criteria:**
-    - [ ] Tab navigation has a clear **active/current** indication and obvious focus/hover affordances; the active tab is unambiguous.
-    - [ ] **Loading, empty, error, and stale-data** states are visually consistent and clearly communicated across cards (the existing "Stale data" indicator and empty states are restyled into the system, not removed).
-    - [ ] Interactive actions (e.g. the webhook Set/Test/Revert, config downloads, range selector) give clear visual **feedback** (hover/active/disabled/result states) within the system.
-    - [ ] Information **density** is tuned for an ops tool — scannable, with clear hierarchy — and primary status (is it up? who's connected? anything firing?) is immediately legible on the Overview.
+    - [x] Tab navigation has a clear **active/current** indication and obvious focus/hover affordances; the active tab is unambiguous.
+    - [x] **Loading, empty, error, and stale-data** states are visually consistent and clearly communicated across cards (the existing "Stale data" indicator and empty states are restyled into the system, not removed).
+    - [x] Interactive actions (e.g. the webhook Set/Test/Revert, config downloads, range selector) give clear visual **feedback** (hover/active/disabled/result states) within the system.
+    - [x] Information **density** is tuned for an ops tool — scannable, with clear hierarchy — and primary status (is it up? who's connected? anything firing?) is immediately legible on the Overview.
 
 ### 2.6 Motion (subtle and purposeful)
 
 - **As the operator, I want** tasteful motion, **so that** the interface feels responsive without being distracting.
   - **Acceptance Criteria:**
-    - [ ] Motion is **CSS-only**, subtle, and purposeful — e.g. a brief tab-swap/page-load reveal and smooth state/hover transitions — concentrated on high-impact moments rather than scattered everywhere.
-    - [ ] All motion respects **`prefers-reduced-motion`** (animations reduce/disable when the user requests it).
-    - [ ] Motion never delays or obscures live data (the 10s refresh and chart updates stay snappy).
+    - [x] Motion is **CSS-only**, subtle, and purposeful — e.g. a brief tab-swap/page-load reveal and smooth state/hover transitions — concentrated on high-impact moments rather than scattered everywhere.
+    - [x] All motion respects **`prefers-reduced-motion`** (animations reduce/disable when the user requests it).
+    - [x] Motion never delays or obscures live data (the 10s refresh and chart updates stay snappy).
 
 ### 2.7 Accessibility
 
 - **As any user, I want** the dashboard to meet baseline accessibility, **so that** it's usable and legible for everyone.
   - **Acceptance Criteria:**
-    - [ ] Text and essential UI meet **WCAG AA** contrast in both themes.
-    - [ ] All interactive elements have visible **focus** states and remain keyboard-operable; semantic structure (headings, landmarks, table semantics) is preserved or improved.
-    - [ ] Color is **not the sole** carrier of meaning for status (pair with text/icon/shape).
+    - [x] Text and essential UI meet **WCAG AA** contrast in both themes.
+    - [x] All interactive elements have visible **focus** states and remain keyboard-operable; semantic structure (headings, landmarks, table semantics) is preserved or improved.
+    - [x] Color is **not the sole** carrier of meaning for status (pair with text/icon/shape).
 
 ### 2.8 Constraints preserved (no regressions)
 
 - **As the maintainer, I want** the redesign to keep every existing guarantee, **so that** nothing about how the dashboard works changes.
   - **Acceptance Criteria:**
-    - [ ] **Fully offline:** no external fonts, CDNs, tiles, or scripts are introduced; all new assets are `go:embed`-vendored and served from `/static/`.
-    - [ ] **No SPA / no build step:** still server-rendered `html/template` + htmx partials + Chart.js; no front-end framework or bundler is added.
-    - [ ] **Functional parity:** every tab, card, route, the 10s htmx tick, dark-mode toggle, geo map, charts, and alerting/webhook UI behave exactly as before — only their appearance/layout changes. No data, API, or behavior change.
-    - [ ] VPN-only / no-auth posture is unchanged.
+    - [x] **Fully offline:** no external fonts, CDNs, tiles, or scripts are introduced; all new assets are `go:embed`-vendored and served from `/static/`.
+    - [x] **No SPA / no build step:** still server-rendered `html/template` + htmx partials + Chart.js; no front-end framework or bundler is added.
+    - [x] **Functional parity:** every tab, card, route, the 10s htmx tick, dark-mode toggle, geo map, charts, and alerting/webhook UI behave exactly as before — only their appearance/layout changes. No data, API, or behavior change.
+    - [x] VPN-only / no-auth posture is unchanged.
 
 ---
 

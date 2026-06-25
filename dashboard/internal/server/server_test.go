@@ -661,7 +661,12 @@ func TestHandleGetPartialClients_RendersGeoMapCard(t *testing.T) {
 		`id="clients"`,            // full-row-span anchor for the wide client table (Slice 6)
 		`id="geo-map"`,            // JS hook + render-test anchor
 		`src="/static/world.svg"`, // embedded base map, no external tiles
+		`class="geo-viewport"`,    // spec 010 Slice 2: clipping viewport
+		`class="geo-canvas"`,      // spec 010 Slice 2: transformable canvas
 		`class="geo-markers"`,     // marker overlay container
+		`data-geo-zoom="in"`,      // spec 010 Slice 2: zoom-in control
+		`data-geo-zoom="out"`,     // spec 010 Slice 2: zoom-out control
+		`data-geo-zoom="reset"`,   // spec 010 Slice 2: reset/fit control
 		`class="geo-legend"`,      // legend
 		`geo-swatch online`,       // online legend swatch
 		`geo-swatch offline`,      // offline legend swatch
