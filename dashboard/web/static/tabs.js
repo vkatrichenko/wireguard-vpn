@@ -46,6 +46,32 @@
     row.click();
   }
 
+  // One-shot staggered entrance on a USER tab change. Scoped to route() — which
+  // only fires on hashchange / DOMContentLoaded — so it never runs on the
+  // per-component 10s refreshes (those re-render cards in place and don't call
+  // route()). The class is stripped on the first child's animationend (and
+  // defensively before each run) so a re-trigger restarts cleanly; CSS gates
+  // the keyframes behind prefers-reduced-motion. Motion is presentation-only:
+  // the swap has already populated the DOM before this runs.
+  function playTabEnter() {
+    var body = document.getElementById('tab-body');
+    if (!body) return;
+    body.classList.remove('tab-enter');
+    void body.offsetWidth; // reflow so the animation restarts on rapid switches
+    body.classList.add('tab-enter');
+    // Strip the class once the LAST child's rise finishes so the full stagger
+    // plays out; each child holds its natural (visible) end state afterwards
+    // because the keyframe fill isn't `forwards`. animationend bubbles from the
+    // direct children of #tab-body.
+    body.addEventListener('animationend', function onEnd(e) {
+      if (e.target.parentNode !== body) return;
+      if (e.target === body.lastElementChild) {
+        body.classList.remove('tab-enter');
+        body.removeEventListener('animationend', onEnd);
+      }
+    });
+  }
+
   function route() {
     var parsed = parseHash();
     markActive(parsed.tab);
@@ -53,8 +79,11 @@
     var expand = parsed.params.get('expand');
     var url = '/partial/' + parsed.tab + (range ? '?range=' + encodeURIComponent(range) : '');
     var swap = htmx.ajax('GET', url, { target: '#tab-body', swap: 'innerHTML' });
-    if (parsed.tab === 'clients' && expand && swap && typeof swap.then === 'function') {
-      swap.then(function () { triggerExpand(expand); });
+    if (swap && typeof swap.then === 'function') {
+      swap.then(function () {
+        playTabEnter();
+        if (parsed.tab === 'clients' && expand) triggerExpand(expand);
+      });
     }
   }
 
