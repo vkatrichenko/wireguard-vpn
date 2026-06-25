@@ -173,6 +173,7 @@ These are available globally — CLAUDE.md pins the expectation that they're use
 - `devops-iac-engineer` — for architecture-shaped questions (subnet layout, NAT, security posture, tool choice).
 - `superpowers:verification-before-completion` — dovetails with the "Before claiming work is done" checklist; invoke before any "done" claim on infra changes.
 - `superpowers:systematic-debugging` — use when the VPN isn't functioning or a plan fails in a way that isn't obvious. Don't propose fixes before understanding the failure.
+- `frontend-design` — for any dashboard UI/UX work: building or restyling cards/tabs/templates, design decisions (typography, color, layout, motion), and reviewing/critiquing the look-and-feel of `dashboard/web/`. Use its aesthetics rubric (typography, color & theme, motion, spatial composition, backgrounds; avoid generic "AI slop") both when generating new UI and as a checklist when reviewing existing UI. Applies to the dashboard's server-rendered `html/template` + htmx + vanilla CSS stack (no SPA) — favor CSS-only solutions; keep the offline/zero-external-asset constraint (no external fonts/CDNs).
 
 **MCPs (required, not optional):**
 - `terraform` MCP — **before writing or updating any HCL**, call `get_latest_provider_version` / `get_provider_details` to confirm the provider version and resource schemas. Never guess provider arguments from training data.

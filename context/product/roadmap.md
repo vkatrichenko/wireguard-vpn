@@ -55,8 +55,8 @@ _Observability and proactive operations for the running VPN — a VPN-only web d
 - [x] **Client Config Download (spec 004):** Download ready-to-use client configurations (full and split-tunnel) for a peer directly from the dashboard.
 - [x] **Dashboard Distribution (spec 005):** Ship the dashboard as a verified public GitHub Release binary, pinned in Terraform and fetched + checksum-verified at first boot.
 - [x] **Connection History & Geo Map (spec 006):** Per-client connection timeline (online/offline, session count, connected time) and an offline world map of peer locations.
-- [~] **Alert Notifications (spec 007):** Push alerts to a Slack-compatible webhook when the service is down, disk/CPU is high sustained, a peer drops, or a peer crosses a transfer cap — edge-triggered with cooldown and recovery, opt-in, configurable thresholds. _(Code-complete; pending deploy config + manual end-to-end.)_
-- [ ] **Runtime Webhook Management (spec 008):** Manage the alert webhook from the dashboard at runtime (set / test / revert), seeded from SSM at boot and never persisted. Includes the Terraform SSM→EnvironmentFile wiring that supplies the boot seed. _(Specified.)_
+- [x] **Alert Notifications (spec 007):** Push alerts to a Slack-compatible webhook when the service is down, disk/CPU is high sustained, a peer drops, or a peer crosses a transfer cap — edge-triggered with cooldown and recovery, opt-in, configurable thresholds. _(Deployed; operator-verified delivery on 2026-06-25.)_
+- [x] **Runtime Webhook Management (spec 008):** Manage the alert webhook from the dashboard at runtime (set / test / revert), seeded from SSM at boot and never persisted. Includes the Terraform SSM→EnvironmentFile wiring that supplies the boot seed. _(Deployed; operator-verified Set/Test on 2026-06-25.)_
 
 ---
 
