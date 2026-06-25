@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"wireguard-dashboard/internal/alerts"
+	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/disk"
 	"wireguard-dashboard/internal/netdev"
 	"wireguard-dashboard/internal/proc"
@@ -310,8 +312,19 @@ const eventsWindow = 30 * 24 * time.Hour
 // is fixed above.
 const eventsLimit = 50
 
+// eventsTabData is the view-model for the Events tab. Handshakes is the existing
+// 50-newest handshake_events surface; Alerts is the in-memory ring of recent
+// alert fire/recovery transitions from the status holder (spec 007, Slice 5),
+// newest-first. Each surface branches on its own emptiness so one being empty
+// doesn't blank the other.
+type eventsTabData struct {
+	Handshakes []db.HandshakeEvent
+	Alerts     []alerts.LogEntry
+}
+
 // handleGetPartialEvents renders the Events tab body — the 50 newest
-// handshake_events rows over the retention horizon. A query failure renders
+// handshake_events rows over the retention horizon, plus the recent alert
+// fire/recovery transitions from the status holder. A query failure renders
 // the empty-state ("No recent handshakes.") rather than a 500: htmx would
 // otherwise leave the previous tab body in place, and an empty list is a
 // less-confusing fallback than the wrong tab content. The error is logged
@@ -324,8 +337,13 @@ func (s *server) handleGetPartialEvents(w http.ResponseWriter, r *http.Request) 
 		events = nil
 	}
 
+	data := eventsTabData{
+		Handshakes: events,
+		Alerts:     s.alertSnapshot().Recent,
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "events-tab", events); err != nil {
+	if err := s.tmpl.ExecuteTemplate(w, "events-tab", data); err != nil {
 		slog.Error("GET /partial/events: template render failed", "err", err)
 		http.Error(w, "template render failed", http.StatusInternalServerError)
 		return
@@ -344,6 +362,19 @@ type aboutTabData struct {
 	OS              aboutOSCardData
 	ServerInfo      serverinfo.ServerInfo
 	ServerInfoError string
+	Webhook         aboutWebhookCardData
+}
+
+// aboutWebhookCardData is the view-model for cards/webhook.html (spec 008,
+// Slice 4). Status is the masked-only holder view (a nil holder collapses to
+// the disabled state inside webhookStatus, so this is always safe to render).
+// Message/MessageKind carry the optional outcome line swapped in after a
+// set/test/revert; both are empty on the tab-tick render so the card shows the
+// bare status + controls. MessageKind ∈ "" | "success" | "error" | "info".
+type aboutWebhookCardData struct {
+	Status      webhookStatusResponse
+	Message     string
+	MessageKind string
 }
 
 // aboutEC2CardData mirrors the keys cards/about-ec2.html branches on. The
@@ -406,6 +437,8 @@ func (s *server) handleGetPartialAbout(w http.ResponseWriter, r *http.Request) {
 			BuildTime:  s.serverinfoSvc.Build.Time,
 			GoVersion:  s.serverinfoSvc.Build.GoVersion,
 		},
+		// Masked-only holder view; the tab tick carries no outcome message.
+		Webhook: aboutWebhookCardData{Status: s.webhookStatus()},
 	}
 
 	var (

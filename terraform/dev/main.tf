@@ -45,10 +45,15 @@ module "wireguard" {
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]
-  dashboard_release_tag  = "v0.0.2"
+  dashboard_release_tag  = "v0.0.3"
   dashboard_release_repo = "vkatrichenko/wireguard-vpn"
-  # dashboard_release_tag  = local.dashboard_release_tag
-  # dashboard_release_repo = local.dashboard_release_repo
+
+  # Alert seed (spec 008 slice 5), wired-but-disabled. To enable: create the SSM
+  # parameter out-of-band (e.g. `aws ssm put-parameter --type SecureString`) and
+  # set its NAME here — Terraform reads it at apply and seeds DASHBOARD_WEBHOOK_URL
+  # into /etc/wireguard-dashboard/alerts.env. Empty = no webhook line written.
+  dashboard_webhook_url_param = ""
+  # dashboard_alerts intentionally omitted — defaults apply (disk/cpu 90%, etc.).
 
   tags = local.default_tags
 }

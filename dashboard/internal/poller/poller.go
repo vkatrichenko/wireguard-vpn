@@ -41,9 +41,13 @@ import (
 	"sync"
 	"time"
 
+	"wireguard-dashboard/internal/alerts"
 	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
+	"wireguard-dashboard/internal/disk"
+	"wireguard-dashboard/internal/notify"
 	"wireguard-dashboard/internal/proc"
+	"wireguard-dashboard/internal/systemd"
 	"wireguard-dashboard/internal/wg"
 )
 
@@ -70,6 +74,33 @@ const (
 	DefaultRetention      = 8*24*time.Hour + time.Hour
 )
 
+// dispatchBufferSize bounds the queue of alert Events waiting to be delivered
+// by the dispatch worker. Alert events are RARE (a state transition or a
+// post-cooldown reminder — not one per tick), so a small buffer is generous.
+// If it ever fills (a wedged webhook taking longer than the dispatch backlog
+// drains), Evaluate-produced events are DROPPED with a log rather than blocking
+// the sample tick — losing an alert notification is strictly better than
+// stalling metric collection. The in-UI active-alerts view (Slice 5) reflects
+// state regardless of delivery, so a dropped webhook is not a lost alert state.
+const dispatchBufferSize = 64
+
+// ServiceReader is the seam the poller uses to read the wg-quick@wg0 systemd
+// status each tick for the service-down alert condition. *systemd.Service
+// satisfies it in production; tests inject a fake that returns canned statuses
+// without shelling out to systemctl. Kept to the single method the poller needs.
+type ServiceReader interface {
+	Get(ctx context.Context) (systemd.ServiceStatus, error)
+}
+
+// DiskReader is the seam the poller uses to sample filesystem usage each tick
+// for the high-disk alert condition. *disk.Service satisfies it in production;
+// tests inject a fake that returns canned mounts (or an error) without touching
+// /proc/mounts. disk.Sample is STATELESS — a fresh read each call holding no
+// prior-sample state — so unlike proc it is safe to call inside the alert path.
+type DiskReader interface {
+	Sample(ctx context.Context) ([]disk.Mount, error)
+}
+
 // Poller is the long-running background sampler. Construct with New for
 // production wiring, or as a struct literal in same-package tests with
 // fakes substituted into DB / Proc / WG / ClientsFile / Now.
@@ -85,26 +116,93 @@ type Poller struct {
 
 	Now func() time.Time // default time.Now — injectable for tests
 
+	// Alerting deps (spec 007, Slice 2). All three are OPTIONAL: when
+	// Evaluator is nil the poller behaves exactly as it did before alerting
+	// existed — no systemd read, no dispatch goroutine, no notifier call. New
+	// wires all three together for production; same-package tests set them on
+	// a Poller{} literal. Service is the systemd status reader (an interface
+	// so tests fake it); Notifier is the delivery seam (notify.NoOp when
+	// alerting is disabled but the evaluator still runs for the in-UI view).
+	Service   ServiceReader
+	Disk      DiskReader
+	Evaluator *alerts.Evaluator
+	Notifier  notify.Notifier
+
+	// StatusHolder is the optional seam to the in-UI active-alerts view (spec
+	// 007, Slice 5). When non-nil, evaluateAlerts writes the evaluator's current
+	// firing set + this tick's transition events into it once per tick, from THIS
+	// (poller) goroutine — the server then reads a deep copy via Snapshot from its
+	// own goroutines. nil holder → skip the write (back-compat: the poller behaves
+	// exactly as before the in-UI view existed). Written only from the sample
+	// loop; the holder owns its own mutex for the cross-goroutine read.
+	StatusHolder *alerts.StatusHolder
+
+	// dispatch carries Evaluator-produced events from the sample loop to the
+	// dispatch worker so webhook delivery happens OFF the poll critical path.
+	// nil until Run starts the worker (only when Evaluator != nil). Bounded by
+	// dispatchBufferSize; a full buffer drops the event with a log.
+	dispatch chan alerts.Event
+
 	// handshakeMu protects lastHandshake. The map is read/written only by
 	// the sample loop, but we use a mutex so external callers (tests) can
 	// observe the cache without races.
 	handshakeMu   sync.Mutex
 	lastHandshake map[string]int64 // public_key → unix-seconds of most recent handshake we've seen
+
+	// statsMu protects lastCPUPct / lastCPUValid. collect writes the CPU% it
+	// already computed from THIS tick's single proc.Sample; evaluateAlerts reads
+	// it. This threading is what lets the alert path reuse collect's reading
+	// instead of calling proc.Sample a second time — a double sample would split
+	// the per-tick CPU delta and corrupt BOTH the chart row and the alert
+	// reading. lastCPUValid is false until the first successful proc sample, so a
+	// proc failure feeds the evaluator no CPU reading rather than a stale/zero one.
+	statsMu      sync.Mutex
+	lastCPUPct   float64
+	lastCPUValid bool
+
+	// peersMu protects lastPeers. Same pattern as lastCPUPct: collect builds the
+	// per-peer alert snapshot from THIS tick's single p.WG.Show call (already
+	// fetched for client_traffic / handshake_events) and stashes it here;
+	// evaluateAlerts reads it into alerts.Input.Peers. This is what lets the
+	// alert path reuse collect's `wg show` instead of shelling out a SECOND
+	// `sudo wg show` — a double exec would both cost an extra sudo call and skew
+	// the byte/handshake values between the chart row and the alert reading.
+	// lastPeersValid is false until the first successful wg read, so a wg failure
+	// feeds the evaluator no peer input rather than a stale snapshot.
+	peersMu        sync.Mutex
+	lastPeers      []alerts.PeerSample
+	lastPeersValid bool
 }
 
 // New returns a Poller wired with the production cadence/retention
-// defaults. The four service deps are required (zero-value services
-// would not work) so they're positional; the cadence knobs are not
-// exposed because main.go has no opinion on them.
+// defaults. The four data-collection deps are required (zero-value
+// services would not work) so they're positional; the cadence knobs are
+// not exposed because main.go has no opinion on them.
+//
+// The alerting deps (svc / diskReader / evaluator / notifier) are passed too
+// but are OPTIONAL: pass evaluator == nil to disable alerting entirely (the
+// poller then behaves exactly as before — no systemd read, no disk read, no
+// dispatch goroutine). When evaluator is non-nil, notifier should be set (a
+// notify.NoOp keeps the evaluator running with delivery disabled); a nil
+// notifier with a non-nil evaluator is tolerated and treated as a NoOp. A nil
+// diskReader simply omits the high-disk condition's input each tick. The holder
+// is the optional in-UI active-alerts seam (Slice 5): when non-nil it is fed the
+// evaluator's firing set + transition events each tick; nil disables the in-UI
+// view without affecting evaluation or delivery.
 //
 // Tests in this package construct a Poller{} literal directly; New is
 // exclusively for cmd/wireguard-dashboard.
-func New(database *db.DB, p *proc.Service, w *wg.Service, c *clientsfile.Service) *Poller {
+func New(database *db.DB, p *proc.Service, w *wg.Service, c *clientsfile.Service, svc ServiceReader, diskReader DiskReader, evaluator *alerts.Evaluator, notifier notify.Notifier, holder *alerts.StatusHolder) *Poller {
 	return &Poller{
 		DB:             database,
 		Proc:           p,
 		WG:             w,
 		ClientsFile:    c,
+		Service:        svc,
+		Disk:           diskReader,
+		Evaluator:      evaluator,
+		Notifier:       notifier,
+		StatusHolder:   holder,
 		SampleEvery:    DefaultSampleEvery,
 		RetentionEvery: DefaultRetentionEvery,
 		Retention:      DefaultRetention,
@@ -119,6 +217,21 @@ func New(database *db.DB, p *proc.Service, w *wg.Service, c *clientsfile.Service
 // in-flight writes by then.
 func (p *Poller) Run(ctx context.Context) {
 	var wg sync.WaitGroup
+
+	// Alert dispatch worker — started only when alerting is enabled
+	// (Evaluator wired). It owns the off-critical-path webhook delivery: the
+	// sample loop only ever does a non-blocking send onto p.dispatch, so a
+	// slow/failing notifier can never stall a tick. The channel is created
+	// here (not in New) so a Poller that never Runs has no goroutine to leak.
+	if p.Evaluator != nil {
+		p.dispatch = make(chan alerts.Event, dispatchBufferSize)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p.runDispatchLoop(ctx)
+		}()
+	}
+
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
@@ -150,6 +263,11 @@ func (p *Poller) runSampleLoop(ctx context.Context) {
 				slog.Warn("poller: sample collect failed", "err", err)
 			}
 		}
+		// Alert evaluation runs after collect, on the same tick. It is a
+		// no-op when alerting is disabled (Evaluator nil) and is itself
+		// best-effort: a systemd read error is logged, never fatal, and
+		// dispatch is non-blocking — so this can never slow a tick.
+		p.evaluateAlerts(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -236,6 +354,21 @@ func (p *Poller) collect(ctx context.Context) error {
 	setErr(peersErr)
 	setErr(clientsErr)
 
+	// Stash THIS tick's CPU% for the alert path to reuse. proc.Sample holds the
+	// prior /proc/stat to compute the CPU delta, so it must be sampled exactly
+	// once per tick — evaluateAlerts reads this cached value instead of calling
+	// Sample again (a second call would split the delta across two reads and
+	// corrupt both this row and the alert reading). lastCPUValid stays false on a
+	// proc failure so the evaluator gets no fabricated CPU reading that tick.
+	p.statsMu.Lock()
+	if statsErr == nil {
+		p.lastCPUPct = stats.CPUPercent
+		p.lastCPUValid = true
+	} else {
+		p.lastCPUValid = false
+	}
+	p.statsMu.Unlock()
+
 	// system_metrics — needs stats only. Skip the write if the proc
 	// sample failed (e.g. running on macOS where /proc doesn't exist):
 	// inserting a zero-valued row would lie on the chart.
@@ -297,6 +430,37 @@ func (p *Poller) collect(ctx context.Context) error {
 		}
 	}
 
+	// Stash THIS tick's per-peer alert snapshot for evaluateAlerts to reuse,
+	// built from the SAME peers slice + manifest we already have — never a second
+	// p.WG.Show (extra sudo exec + value skew). Manifest-skip: a peer with no
+	// client name is a wg-only peer (e.g. a manual `wg set` add), not a "client",
+	// so it carries no per-client alert. We require BOTH reads to have succeeded;
+	// without the manifest we couldn't resolve names, and a partial snapshot would
+	// silently drop peers from alerting. On failure lastPeersValid stays false so
+	// the evaluator gets no fabricated peer input.
+	p.peersMu.Lock()
+	if peersErr == nil && clientsErr == nil {
+		index := clientsfile.ByPublicKey(clients)
+		samples := make([]alerts.PeerSample, 0, len(peers))
+		for _, peer := range peers {
+			c, ok := index[peer.PublicKey]
+			if !ok {
+				continue // wg-only peer, not a manifest client — skip
+			}
+			samples = append(samples, alerts.PeerSample{
+				Name:          c.Name,
+				LastHandshake: peer.LatestHandshake,
+				RxBytes:       peer.TransferRx,
+				TxBytes:       peer.TransferTx,
+			})
+		}
+		p.lastPeers = samples
+		p.lastPeersValid = true
+	} else {
+		p.lastPeersValid = false
+	}
+	p.peersMu.Unlock()
+
 	// handshake_events — needs peers only. Names are resolved against the
 	// manifest if it loaded; otherwise we fall back to public-key-as-name
 	// for every peer (same convention as client_traffic above). The cache
@@ -345,4 +509,128 @@ func (p *Poller) collect(ctx context.Context) error {
 	}
 
 	return firstErr
+}
+
+// evaluateAlerts reads the inputs each watched condition needs, runs the
+// Evaluator for this tick, and hands any resulting events to the dispatch
+// worker WITHOUT blocking. It is a no-op when alerting is disabled.
+//
+// Best-effort, matching collect: the systemd and disk reads are the only I/O
+// here. A systemd failure skips the tick entirely (a fabricated status could
+// trip a false service-down transition). A disk failure is softer — it just
+// omits the high-disk input for this tick and the OTHER conditions still
+// evaluate, so a transient statfs error never blanks CPU/service alerting. CPU%
+// is NOT sampled here: it is reused from collect's single proc.Sample (see
+// lastCPUPct) to avoid splitting the per-tick CPU delta. The dispatch send is
+// non-blocking: a full buffer drops the event with a log so a wedged webhook can
+// never back-pressure the sample loop.
+func (p *Poller) evaluateAlerts(ctx context.Context) {
+	if p.Evaluator == nil {
+		return
+	}
+
+	in := alerts.Input{}
+	if p.Service != nil {
+		status, err := p.Service.Get(ctx)
+		if err != nil {
+			// Skip this tick's evaluation rather than risk a false transition
+			// off a zero-value status. The next tick retries.
+			if !errors.Is(err, context.Canceled) {
+				slog.Warn("poller: systemd status read failed; skipping alert evaluation this tick", "err", err)
+			}
+			return
+		}
+		in.ServiceActive = status.Active
+	}
+
+	// Reuse the CPU% collect already computed from this tick's single
+	// proc.Sample. When proc hasn't produced a valid sample yet (or failed this
+	// tick) we leave CPUPercent at its zero value, which is below threshold and
+	// keeps the sustained-CPU run reset.
+	p.statsMu.Lock()
+	if p.lastCPUValid {
+		in.CPUPercent = p.lastCPUPct
+	}
+	p.statsMu.Unlock()
+
+	// Reuse the per-peer snapshot collect built from this tick's single
+	// p.WG.Show. We do NOT call p.WG.Show again here — that would mean a second
+	// `sudo wg show` exec and byte/handshake skew versus the chart row. When the
+	// wg read failed this tick lastPeersValid is false and we leave Peers nil, so
+	// the per-peer conditions simply observe nothing (holding their state).
+	p.peersMu.Lock()
+	if p.lastPeersValid {
+		in.Peers = p.lastPeers
+	}
+	p.peersMu.Unlock()
+
+	// Disk is sampled inline (it is stateless, unlike proc). A read error is
+	// logged and the disk field omitted for this tick — never fatal, consistent
+	// with collect's best-effort posture.
+	if p.Disk != nil {
+		mounts, err := p.Disk.Sample(ctx)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				slog.Warn("poller: disk sample failed; omitting high-disk input this tick", "err", err)
+			}
+		} else {
+			in.DiskUsage = make([]alerts.FilesystemUsage, 0, len(mounts))
+			for _, m := range mounts {
+				in.DiskUsage = append(in.DiskUsage, alerts.FilesystemUsage{Mount: m.Path, PctFull: m.PctFull})
+			}
+		}
+	}
+
+	events := p.Evaluator.Evaluate(p.Now(), in)
+
+	// Feed the in-UI active-alerts view (Slice 5) from THIS goroutine: read the
+	// evaluator's current firing set and hand it plus this tick's transitions to
+	// the holder, which the server reads via Snapshot from its own goroutines.
+	// Done BEFORE dispatch so the view reflects state even if delivery is dropped
+	// — a wedged webhook never desyncs the UI from the evaluator. Nil holder skips
+	// (back-compat). Both Active() and Update run on the poller goroutine, so the
+	// evaluator's maps are never touched concurrently.
+	if p.StatusHolder != nil {
+		p.StatusHolder.Update(p.Evaluator.Active(), events)
+	}
+
+	for _, ev := range events {
+		select {
+		case p.dispatch <- ev:
+		default:
+			// Buffer full: drop rather than block the sample tick. Rare —
+			// alert events are state transitions, not per-tick traffic.
+			slog.Warn("poller: alert dispatch buffer full; dropping event",
+				"condition", ev.Condition, "kind", ev.Kind.String())
+		}
+	}
+}
+
+// runDispatchLoop is the off-critical-path alert deliverer. It drains the
+// dispatch channel and calls Notifier.Notify for each event, formatting the
+// message via alerts.FormatMessage. Delivery failures are logged (the notifier
+// already retries internally and redacts the URL) and never propagate back to
+// the sample loop. The loop exits on ctx cancellation; any events still queued
+// at shutdown are abandoned — losing an in-flight alert on a clean shutdown is
+// acceptable and avoids blocking Run's drain.
+func (p *Poller) runDispatchLoop(ctx context.Context) {
+	host := p.Evaluator.Host()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-p.dispatch:
+			notifier := p.Notifier
+			if notifier == nil {
+				notifier = notify.NoOp{}
+			}
+			msg := alerts.FormatMessage(ev, host)
+			if err := notifier.Notify(ctx, msg); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					slog.Warn("poller: alert delivery failed",
+						"condition", ev.Condition, "kind", ev.Kind.String(), "err", err)
+				}
+			}
+		}
+	}
 }

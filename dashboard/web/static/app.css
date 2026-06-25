@@ -385,6 +385,109 @@ body {
   outline-offset: 2px;
 }
 
+/* 9b. Webhook card (spec 008, Slice 4) ------------------------------------- */
+
+.webhook-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.webhook-form label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.webhook-form input[type="url"] {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--text);
+  font: inherit;
+  /* Without min-width:0 a flex/grid child with a long placeholder can force
+     horizontal page scroll below 360px. */
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.webhook-form input[type="url"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.webhook-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.webhook-actions button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.webhook-actions button[type="submit"] {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+.webhook-actions button:hover {
+  background: var(--btn-hover-bg);
+  border-color: var(--btn-hover-border);
+}
+
+.webhook-actions button[type="submit"]:hover {
+  filter: brightness(1.08);
+}
+
+.webhook-actions button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.webhook-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: var(--state-unknown-bg);
+  color: var(--state-unknown-fg);
+  border: 1px solid var(--state-unknown-border);
+}
+
+.webhook-message {
+  margin: 0.6rem 0 0;
+  font-size: 0.85rem;
+}
+
+.webhook-message-success {
+  color: var(--state-active-fg);
+}
+
+.webhook-message-error {
+  color: var(--error-fg);
+}
+
+.webhook-message-info {
+  color: var(--text-muted);
+}
+
 /* 10. Client table --------------------------------------------------------- */
 
 .client-table {

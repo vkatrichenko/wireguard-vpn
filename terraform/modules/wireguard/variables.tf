@@ -115,3 +115,32 @@ variable "dashboard_release_repo" {
     error_message = "dashboard_release_repo must be a GitHub 'owner/name' slug."
   }
 }
+
+variable "dashboard_webhook_url_param" {
+  description = "SSM parameter NAME holding the Slack-compatible alert webhook URL. Created out-of-band (like wg_server_private_key_param), not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_WEBHOOK_URL. The value is a secret and is never output. Empty string (default) disables the webhook seed — alerts.env is still written with the non-secret knobs, but no DASHBOARD_WEBHOOK_URL line, so the dashboard's alerting stays dormant until the operator creates the SSM param and sets this name."
+  type        = string
+  default     = ""
+}
+
+variable "dashboard_alerts" {
+  description = "Spec-007 alert thresholds seeded into /etc/wireguard-dashboard/alerts.env (mapped to DASHBOARD_HOST_LABEL / DASHBOARD_ALERT_DISK_PCT / _CPU_PCT / _CPU_SUSTAIN / _PEER_STALE / _TRANSFER_BYTES). host_label empty (default) omits DASHBOARD_HOST_LABEL so the Go side falls back to os.Hostname(). cpu_sustain/peer_stale are Go durations (e.g. \"5m\"); transfer_bytes is a humanized size (e.g. \"50GiB\")."
+  type = object({
+    host_label     = optional(string, "")
+    disk_pct       = optional(number, 90)
+    cpu_pct        = optional(number, 90)
+    cpu_sustain    = optional(string, "5m")
+    peer_stale     = optional(string, "10m")
+    transfer_bytes = optional(string, "50GiB")
+  })
+  default = {}
+
+  validation {
+    condition     = var.dashboard_alerts.disk_pct >= 1 && var.dashboard_alerts.disk_pct <= 100
+    error_message = "dashboard_alerts.disk_pct must be between 1 and 100."
+  }
+
+  validation {
+    condition     = var.dashboard_alerts.cpu_pct >= 1 && var.dashboard_alerts.cpu_pct <= 100
+    error_message = "dashboard_alerts.cpu_pct must be between 1 and 100."
+  }
+}
