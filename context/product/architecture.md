@@ -52,3 +52,26 @@
 - **Security Scanning:** Trivy (currently warn-only, `--exit-code=0`; HIGH/CRITICAL findings treated as real)
 - **Documentation:** terraform-docs (auto-generated module docs)
 - **Validation:** `terraform validate` in every affected root module before claiming done
+
+---
+
+## 6. Dashboard Application (Observability)
+
+- **Purpose:** Read-only, VPN-only ops dashboard — peer status, throughput, connection history, peer geo map. No auth, no write/control ops (specs 002 / 003 / 006).
+- **Language & HTTP:** Go std-lib `net/http` (no web framework); server-rendered HTML via `html/template`.
+- **Frontend:** htmx partial refreshes on a 10s tick + Chart.js for throughput/timeline charts. No SPA, no build step; all assets vendored, **zero external CDNs/fonts/scripts**.
+- **Packaging:** Single static binary (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64`); web assets + GeoIP DB bundled via `go:embed`. CGO-free SQLite keeps the build glibc-free.
+- **Metrics store:** `modernc.org/sqlite` (pure-Go) at `/var/lib/wireguard-dashboard`. Tables `system_metrics`, `traffic_metrics`, `client_traffic` (PK `ts,public_key`), `handshake_events` (`ts,public_key,name`); each `ts`-indexed.
+- **Poller:** background sampler + hourly retention sweep (`PruneBefore`, ~8d horizon to back the 7d chart range) — no unbounded growth.
+- **Geolocation:** embedded **DB-IP IP-to-City Lite** (GeoIP2/MMDB schema via `oschwald/geoip2-golang`) → country/city + lat/lon, fully offline. Migrated from GeoLite2 (006).
+- **Views:** Server / Clients / Events tabs. Per-client expand panel = throughput chart + connection timeline (online/offline bands) + history summary (online/last-seen, session count, connected time). Offline world-map card (embedded SVG + equirectangular-projected markers) on the Clients tab (006).
+- **Host data sources:** read-only `wg show wg0 dump`/`public-key` + `systemctl is-active/show wg-quick@wg0` via scoped NOPASSWD sudoers; client manifest `/etc/wireguard-dashboard/clients.json` (0640). **Never holds client private keys.**
+
+---
+
+## 7. Dashboard Build & Deployment
+
+- **Distribution (spec 005):** public GitHub Release artifact from `vkatrichenko/wireguard-vpn`, pinned via `dashboard_release_tag` in `terraform/dev/main.tf` (currently `v0.0.3`) — single reviewable source of truth, same explicit-pin philosophy as the AMI. Replaced the earlier private S3-artifact + ECR path.
+- **Install (cloud-init):** user-data downloads the binary + `SHA256SUMS` from the pinned release and verifies the checksum before install; provisioned only when `dashboard_release_tag` is non-empty.
+- **Service:** systemd `wireguard-dashboard.service`, `Requires`/`After=wg-quick@wg0`; runs as a dedicated `wireguard-dashboard` system user (nologin).
+- **Binding & access:** `LISTEN_ADDR=172.16.15.1:8080` — bound to the WireGuard tunnel IP, so reachable only over the VPN (no public listener; this is why no in-band auth is needed).

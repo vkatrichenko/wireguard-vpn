@@ -1,7 +1,7 @@
 # Functional Specification: Connection History & Geo Map
 
 - **Roadmap Item:** Not yet on the roadmap (observability follow-on to 003-dashboard-admin-views)
-- **Status:** Draft
+- **Status:** Completed
 - **Author:** Vladyslav Katrychenko
 
 ---
@@ -25,46 +25,46 @@ This spec adds two read-only views built entirely on data the dashboard already 
 
 - **As the operator, I want to** see a client's recent connection timeline, **so that I can** tell habitual peers from one-offs and spot a peer that dropped.
   - **Acceptance Criteria:**
-    - [ ] Each client has a connection history derived from handshake samples over the dashboard's existing retention window.
-    - [ ] A client is shown **online** when its latest handshake is within a freshness threshold (default: 3 minutes) and **offline** otherwise — consistent with the indicator already used in 003 §2.3.
-    - [ ] For offline clients, a human-readable **last-seen** is shown (e.g. "last seen 2 days ago", or "never" if no handshake was ever recorded).
-    - [ ] Expanding a client (reusing the 003 expand panel) shows a **connection timeline** over the selected time range: online/offline bands, plus a summary of total connected time and session count for the range.
-    - [ ] A "session" is **inferred** from consecutive handshakes (WireGuard has no explicit connect/disconnect): a gap larger than the session-gap threshold (**10 minutes**) starts a new session.
-    - [ ] When insufficient history exists (fresh host), the timeline shows whatever exists without error.
+    - [x] Each client has a connection history derived from handshake samples over the dashboard's existing retention window.
+    - [x] A client is shown **online** when its latest handshake is within a freshness threshold (default: 3 minutes) and **offline** otherwise — consistent with the indicator already used in 003 §2.3.
+    - [x] For offline clients, a human-readable **last-seen** is shown (e.g. "last seen 2 days ago", or "never" if no handshake was ever recorded).
+    - [x] Expanding a client (reusing the 003 expand panel) shows a **connection timeline** over the selected time range: online/offline bands, plus a summary of total connected time and session count for the range.
+    - [x] A "session" is **inferred** from consecutive handshakes (WireGuard has no explicit connect/disconnect): a gap larger than the session-gap threshold (**10 minutes**) starts a new session.
+    - [x] When insufficient history exists (fresh host), the timeline shows whatever exists without error.
 
 ### 2.2 Events / history retention
 
 - **As the operator, I want** enough history to see patterns, **so that** the timeline isn't limited to the last few minutes.
   - **Acceptance Criteria:**
-    - [ ] Connection history honors the dashboard's existing SQLite retention (the 7-day window introduced in 003 §2.8 if present; otherwise the current retention).
-    - [ ] The history view uses the **same time-range selector** (1h / 6h / 24h / 7d) where applicable, defaulting to 24h.
-    - [ ] No new unbounded growth: history derives from already-retained samples; it does not introduce a table that grows without an expiry.
+    - [x] Connection history honors the dashboard's existing SQLite retention (the 7-day window introduced in 003 §2.8 if present; otherwise the current retention).
+    - [x] The history view uses the **same time-range selector** (1h / 6h / 24h / 7d) where applicable, defaulting to 24h.
+    - [x] No new unbounded growth: history derives from already-retained samples; it does not introduce a table that grows without an expiry.
 
 ### 2.3 Geo map of peers
 
 - **As the operator, I want** a world map of where peers connect from, **so that I can** visually confirm expected geography at a glance.
   - **Acceptance Criteria:**
-    - [ ] A world map renders markers for peers with a resolvable public endpoint, positioned by GeoLite2 latitude/longitude.
-    - [ ] **Online** peers are visually distinct from peers seen recently but currently offline (e.g. color/opacity); the legend explains the encoding.
-    - [ ] Hovering/tapping a marker shows the client name, city/country, and online/last-seen status. Overlapping markers at the same location are **stacked into one marker with a count badge** (no clustering library); hover/tap lists the co-located peers.
-    - [ ] Peers with RFC1918 / unresolvable endpoints are **excluded** from the map (consistent with the "—" geolocation rule in 003 §2.3) and noted in a small "N not mappable" caption.
-    - [ ] The map is **fully offline**: the base map is an embedded/vendored asset; the dashboard makes **no** outbound request and loads no external tiles, fonts, or scripts.
-    - [ ] Empty state when no peers are mappable: a neutral map with "No mappable peers."
+    - [x] A world map renders markers for peers with a resolvable public endpoint, positioned by GeoLite2 latitude/longitude.
+    - [x] **Online** peers are visually distinct from peers seen recently but currently offline (e.g. color/opacity); the legend explains the encoding.
+    - [x] Hovering/tapping a marker shows the client name, city/country, and online/last-seen status. Overlapping markers at the same location are **stacked into one marker with a count badge** (no clustering library); hover/tap lists the co-located peers.
+    - [x] Peers with RFC1918 / unresolvable endpoints are **excluded** from the map (consistent with the "—" geolocation rule in 003 §2.3) and noted in a small "N not mappable" caption.
+    - [x] The map is **fully offline**: the base map is an embedded/vendored asset; the dashboard makes **no** outbound request and loads no external tiles, fonts, or scripts.
+    - [x] Empty state when no peers are mappable: a neutral map with "No mappable peers."
 
 ### 2.4 Placement & navigation
 
 - **As the operator, I want** these to fit the existing layout, **so that** the dashboard stays coherent.
   - **Acceptance Criteria:**
-    - [ ] The connection timeline lives in the **Clients** tab expand panel (extending 003 §2.3), not a new tab.
-    - [ ] The geo map lives as a **card on the Clients tab** (peer geography), keeping all peer/geography data together.
-    - [ ] Tab/range state continues to persist in the URL fragment as in 003 §2.1 / §2.8.
+    - [x] The connection timeline lives in the **Clients** tab expand panel (extending 003 §2.3), not a new tab.
+    - [x] The geo map lives as a **card on the Clients tab** (peer geography), keeping all peer/geography data together.
+    - [x] Tab/range state continues to persist in the URL fragment as in 003 §2.1 / §2.8.
 
 ### 2.5 Refresh & mobile
 
 - **As the operator, I want** the new views to behave like the rest, **so that** there are no surprises.
   - **Acceptance Criteria:**
-    - [ ] Both views refresh on the existing 10s htmx tick; a failed refresh keeps the last values and shows the existing global "Stale data" indicator (003 §2.11).
-    - [ ] The map and timeline are usable on mobile per 003 §2.10 (no horizontal page scroll ≥360px, touch targets ≥44px, the map scales to viewport width).
+    - [x] Both views refresh on the existing 10s htmx tick; a failed refresh keeps the last values and shows the existing global "Stale data" indicator (003 §2.11).
+    - [x] The map and timeline are usable on mobile per 003 §2.10 (no horizontal page scroll ≥360px, touch targets ≥44px, the map scales to viewport width).
 
 ---
 

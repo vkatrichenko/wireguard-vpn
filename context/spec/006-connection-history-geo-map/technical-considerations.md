@@ -1,7 +1,7 @@
 # Technical Specification: Connection History & Geo Map
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
-- **Status:** Draft
+- **Status:** Completed
 - **Author(s):** Vladyslav Katrychenko
 
 ---
