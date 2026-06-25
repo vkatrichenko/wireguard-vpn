@@ -45,7 +45,7 @@ module "wireguard" {
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]
-  dashboard_release_tag  = "v0.0.3"
+  dashboard_release_tag  = "v0.0.4"
   dashboard_release_repo = "vkatrichenko/wireguard-vpn"
 
   # Alert seed (spec 008 slice 5), wired-but-disabled. To enable: create the SSM
