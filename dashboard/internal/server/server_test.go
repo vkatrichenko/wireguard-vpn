@@ -367,10 +367,14 @@ func TestHandleIndex_Success(t *testing.T) {
 		`state-active`,
 		"Active since",
 		// client-count card — fakes return an empty manifest, so the
-		// count renders as "0 online / 0 total". The full client-list
+		// online figure renders as 0. Slice-5 redesigned this into a KPI
+		// stat tile (number + small "online"/"total" labels), so the count
+		// and its label are now separate elements. The full client-list
 		// card was retired in Slice 14 (it lives only on the Clients tab).
 		`id="client-count"`,
-		"0 online",
+		`class="stat-num stat-online">0<`,
+		`class="stat-label">online<`,
+		`class="stat-label">total<`,
 		// Overview-grid wrapper — Slice 12 layout: cards land in a 2-col
 		// grid via the wrapper div rather than #tab-body's auto-fit.
 		`class="overview-grid"`,
@@ -557,7 +561,7 @@ func TestHandleGetPartialTabs(t *testing.T) {
 		// from buildPageData with Online=0/Total=0 because fakeClientsfileSvc
 		// returns an empty manifest. Sibling test below asserts the negative
 		// (chart canvases NOT present).
-		{"overview", "/partial/overview", []string{`id="server-info"`, `id="client-count"`, "0 online"}},
+		{"overview", "/partial/overview", []string{`id="server-info"`, `id="client-count"`, `class="stat-num stat-online">0<`}},
 		// sub-task 7 expands this with a seeded-row assertion; for now the
 		// fake clientsfile + fake wg both return empty so the template renders
 		// the empty-state branch.
@@ -1943,8 +1947,11 @@ func TestHandleGetPartialOverview_ConsolidatedView(t *testing.T) {
 		`id="client-count"`,
 		`id="system"`,       // CPU/Memory large-numerics card
 		`id="network-rate"`, // rx/tx rate card
-		"1 online",
-		"1 total",
+		// Slice-5 KPI stat tile: online figure (1) carries .stat-online; the
+		// "online"/"total" labels are now separate small <span>s.
+		`class="stat-num stat-online">1<`,
+		`class="stat-label">online<`,
+		`class="stat-label">total<`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)

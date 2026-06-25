@@ -521,6 +521,19 @@
   word-break: break-word;
 }
 
+/* Numeric readouts (System CPU/Memory/uptime, Network rx/tx) read as
+   instrument values — tabular mono so digits align column-to-column across
+   the 10s refresh instead of jittering, and the strong text color lifts them
+   above their muted labels. Scoped to the stat-style dl cards so prose-y dls
+   (About, Server endpoint) keep their body font. */
+#system dd,
+#network-rate dd {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-strong);
+}
+
 /* server-info needs the public-key code + button to wrap nicely under the
    value column, not collide with the label column. */
 #server-info dd {
@@ -1348,48 +1361,103 @@
   overflow-wrap: anywhere;
 }
 
-/* 16f. Client count ------------------------------------------------------- */
+/* 16f. Stat / KPI tiles --------------------------------------------------- */
 
-.client-count {
+/* The mockup .stat pattern: a large mono number with a small fitted label
+   beneath it. Used by the Clients KPI tile (client-count). Splitting number
+   from label means --fs-stat governs ONLY the digits, so the figure can never
+   clip or overflow its card the way the old single "N online / M total" string
+   did — the label sits on its own line and the number shrinks fluidly. */
+.stat-grid {
+  display: grid;
+  gap: var(--space-4);
+  align-items: end;
   margin: 0;
+}
+
+.stat-grid-2 {
+  /* Two figures (online / total) side by side; collapses gracefully because
+     each track has a min(100%, …) floor and the number itself never wraps. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.stat-num {
   font-family: var(--font-mono);
   font-size: var(--fs-stat);
   font-weight: 500;
-  line-height: var(--lh-tight);
+  line-height: 1;
   color: var(--text-strong);
   font-variant-numeric: tabular-nums;
+  /* Long counts may exceed a narrow track — clamp at the card edge with an
+     ellipsis instead of pushing the layout out. */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The online figure carries the success/online color so the at-a-glance
+   summary matches the per-row status pills on the Clients tab. */
+.stat-num.stat-online {
+  color: var(--success);
+}
+
+.stat-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-overline);
+  font-weight: 500;
+  letter-spacing: var(--tracking-overline);
+  text-transform: uppercase;
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
 /* 16g. Overview grid ------------------------------------------------------ */
 
+/* Overview banner row — the active-alerts strip and the server-endpoint card
+   share one row. On wide screens alerts gets the larger track so a firing
+   condition stays readable; the short-pubkey server card no longer wastes a
+   full-width row. Below --bp-card (operator viewport narrow) the row collapses
+   to a single stacked column. Both children are full .card surfaces and stretch
+   to equal height. */
+.overview-banner {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--gap);
+  align-items: stretch;
+  margin-bottom: var(--gap);
+}
+
+/* The alerts strip keeps its own card styling; ensure it fills the taller of
+   the two so the row reads as a paired unit. */
+.overview-banner > #active-alerts,
+.overview-banner > #server-info {
+  margin: 0;
+}
+
 /* Overview is the compact "everything-OK?" view; the auto-fit grid on
-   #tab-body produced uneven heights and orphaned single cards on their
-   own rows (Server endpoint with its tall pubkey card next to the short
-   Uptime card was the worst offender). The two-tier ops-dashboard
-   pattern — KPI tiles on top, detail cards in the middle, full-width
-   reference at the bottom — fits the page far better.
+   #tab-body produced uneven heights and orphaned single cards on their own
+   rows. The two-tier ops-dashboard pattern — banner (alerts + endpoint) on
+   top, KPI tiles + detail cards below — fits the page far better.
    .overview-grid is a child of #tab-body (which is itself a grid); the
-   `grid-column: 1 / -1` rule below spans the full tab-body row, then
-   the wrapper applies its own 2-column grid internally. */
+   `grid-column: 1 / -1` rule below spans the full tab-body row, then the
+   wrapper applies its own auto-fit grid internally. */
 .overview-grid {
   grid-column: 1 / -1;
   display: grid;
   /* Fluid 2-up: auto-fit with a min(100%, …) floor collapses to a single
-     stacked column below ~32rem and pairs cards above it, replacing the old
-     fixed 1fr 1fr + the <600px `1fr` override. */
+     stacked column below ~20rem and pairs cards above it. */
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
   gap: var(--gap);
   align-items: stretch;
-}
-
-/* Service-status + client-count sit side-by-side in row 1 (small KPI
-   tiles), system + network-rate side-by-side in row 2 (taller detail
-   cards). server-info spans both columns at the bottom — the pubkey
-   copy widget needs the width, and "reference info" reads naturally
-   below the status row. */
-.overview-grid > #server-info {
-  grid-column: 1 / -1;
 }
 
 }
@@ -1493,7 +1561,20 @@
   }
 }
 
-/* 17c. Tab-bar spacing on phones ------------------------------------------ */
+/* 17c. Overview banner stacking ------------------------------------------- */
+
+/* The banner (alerts + server-endpoint) is a 2fr/1fr pair on wide screens.
+   Below ~46rem the 1fr server-endpoint track gets too cramped for the pubkey
+   copy widget, so stack the two cards into a single column. .overview-banner is
+   a #tab-body child (not a card), so this keys on the viewport, not @container —
+   the page width is the right signal for a top-level banner row. */
+@media (max-width: 46rem) {
+  .overview-banner {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 17d. Tab-bar spacing on phones ------------------------------------------ */
 
 /* The one surviving viewport breakpoint: the tab-bar is a page-level scroller
    (not card-internal), so it keys on the viewport, not a container. Only

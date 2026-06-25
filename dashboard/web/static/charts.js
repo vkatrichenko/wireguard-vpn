@@ -24,18 +24,33 @@
 // Theme-aware: gridline / tick / axis-border colors are read from the
 // `--gridline` and `--text-muted` CSS custom properties on :root at chart-init
 // time, and re-applied on the window `__themeChanged` event so a runtime
-// theme toggle re-colors live charts without a page reload. Per-series line
-// colors in PALETTE stay constant — they are semantic (CPU red, mem blue,
-// rx green, tx amber) and legible on both backgrounds.
+// theme toggle re-colors live charts without a page reload.
+//
+// Slice 5 (spec 009) wires the per-series line colors to the design-system
+// palette too: the charts now draw from `--signal` (teal) and `--accent`
+// (amber) — the two series accents the "precision instrument" reserves — read
+// from :root at the same time as the axis colors, so a theme toggle re-tints
+// the lines as well. The four series split signal/accent so the rx/tx pair
+// matches the mockup legend (rx teal, tx amber) and cpu/memory stay
+// distinguishable on the System tab. Axis/tick labels adopt the embedded
+// `--font-mono` family (with `--font-body` as the base) so chart text matches
+// the rest of the UI rather than Chart.js's default sans.
 (function () {
   "use strict";
 
-  const PALETTE = {
-    cpu: "#e25b5b",
-    memory: "#5b8de2",
-    rx: "#5be29c",
-    tx: "#e2b15b",
-  };
+  // seriesColors reads the two design-system series accents from :root. The
+  // rx/tx assignment mirrors the mockup chart legend (rx = teal --signal,
+  // tx = amber --accent); cpu/memory live on separate single-series charts so
+  // pairing cpu→signal, memory→accent keeps each legible without colliding.
+  // Fallbacks match the light-mode token values in app.css.
+  function seriesColors() {
+    const root = getComputedStyle(document.documentElement);
+    const signal = root.getPropertyValue("--signal").trim() || "#1d8d9c";
+    const accent = root.getPropertyValue("--accent").trim() || "#c77f12";
+    return { cpu: signal, memory: accent, rx: signal, tx: accent };
+  }
+
+  let PALETTE = seriesColors();
 
   const LABELS = {
     cpu: "CPU %",
@@ -65,11 +80,20 @@
 
   // themeColors reads the active theme tokens from :root. Fallbacks match
   // the light-mode defaults in app.css so a missing token still renders.
+  // `tickFont` carries the embedded mono family for axis/tick labels so chart
+  // text matches the rest of the UI; the comma list lets Chart.js fall back to
+  // the body family then a system mono if a face hasn't loaded yet.
   function themeColors() {
     const root = getComputedStyle(document.documentElement);
+    const mono = root.getPropertyValue("--font-mono").trim();
+    const body = root.getPropertyValue("--font-body").trim();
+    const tickFont =
+      [mono, body].filter(Boolean).join(", ") ||
+      'ui-monospace, "SFMono-Regular", Menlo, monospace';
     return {
       grid: root.getPropertyValue("--gridline").trim() || "rgba(0, 0, 0, 0.08)",
       text: root.getPropertyValue("--text-muted").trim() || "#6b7280",
+      tickFont: tickFont,
     };
   }
 
@@ -185,13 +209,13 @@
             type: "time",
             time: timeScaleConfig(canvas.dataset.range || "24h"),
             grid: { color: colors.grid },
-            ticks: { color: colors.text },
+            ticks: { color: colors.text, font: { family: colors.tickFont } },
             border: { color: colors.grid },
           },
           y: {
             beginAtZero: true,
             grid: { color: colors.grid },
-            ticks: { color: colors.text },
+            ticks: { color: colors.text, font: { family: colors.tickFont } },
             border: { color: colors.grid },
           },
         },
@@ -209,6 +233,7 @@
   // after assembling its synthetic payload from the per-endpoint fetches.
   function renderCharts(payload) {
     lastPayload = payload;
+    PALETTE = seriesColors();
     destroyCharts();
 
     const canvases = document.querySelectorAll("canvas[data-chart]");
@@ -321,6 +346,7 @@
         traffic: firstTrafRange ? trafficPayloads.get(firstTrafRange) || null : null,
       };
 
+      PALETTE = seriesColors();
       const colors = themeColors();
       canvases.forEach((canvas) => {
         const series = canvas.dataset.chart;
@@ -364,6 +390,10 @@
   // animation pass, which is what we want for a color swap.
   function applyThemeToCharts() {
     if (charts.length === 0 && clientCharts.size === 0) return;
+    // Re-read the series accents so the line colors track a theme toggle too,
+    // not just the axis/grid colors (the amber/teal tokens shift between
+    // light and dark in app.css).
+    PALETTE = seriesColors();
     const colors = themeColors();
     const all = [...charts, ...clientCharts.values()];
     try {
@@ -374,8 +404,20 @@
         sy.grid.color = colors.grid;
         sx.ticks.color = colors.text;
         sy.ticks.color = colors.text;
+        if (!sx.ticks.font) sx.ticks.font = {};
+        if (!sy.ticks.font) sy.ticks.font = {};
+        sx.ticks.font.family = colors.tickFont;
+        sy.ticks.font.family = colors.tickFont;
         sx.border.color = colors.grid;
         sy.border.color = colors.grid;
+        // Re-tint each dataset line from the refreshed palette, matched by the
+        // dataset's label (set from LABELS at build time) → series key. Works
+        // uniformly for the single-series global charts and the two-series
+        // ([Rx, Tx]) per-client charts.
+        chart.data.datasets.forEach((ds) => {
+          const key = Object.keys(LABELS).find((k) => LABELS[k] === ds.label);
+          if (key) ds.borderColor = PALETTE[key];
+        });
         chart.update("none");
       });
     } catch (err) {
@@ -414,6 +456,7 @@
           insertNotice(canvas, "empty", "No data yet — collecting…");
           return;
         }
+        PALETTE = seriesColors();
         const colors = themeColors();
         const rxData = payload.ts.map((t, i) => ({ x: t, y: payload.rx_rate_bps[i] }));
         const txData = payload.ts.map((t, i) => ({ x: t, y: payload.tx_rate_bps[i] }));
@@ -443,13 +486,13 @@
                 type: "time",
                 time: timeScaleConfig(range),
                 grid: { color: colors.grid },
-                ticks: { color: colors.text },
+                ticks: { color: colors.text, font: { family: colors.tickFont } },
                 border: { color: colors.grid },
               },
               y: {
                 beginAtZero: true,
                 grid: { color: colors.grid },
-                ticks: { color: colors.text },
+                ticks: { color: colors.text, font: { family: colors.tickFont } },
                 border: { color: colors.grid },
               },
             },
@@ -498,6 +541,16 @@
   });
 
   window.addEventListener("__themeChanged", applyThemeToCharts);
+
+  // Adopt the embedded font globally for any Chart.js text not covered by the
+  // explicit per-axis tick font (legend labels, tooltips). Set once at init;
+  // a theme toggle doesn't change the family, only the token VALUES the family
+  // resolves to, so this needn't be re-applied on __themeChanged. Guarded in
+  // case Chart isn't present.
+  if (window.Chart && Chart.defaults) {
+    Chart.defaults.font.family = themeColors().tickFont;
+    Chart.defaults.color = themeColors().text;
+  }
 
   // Initial page-load render. loadAndRender reads each canvas's data-range
   // and fetches the matching /system + /traffic windows.
