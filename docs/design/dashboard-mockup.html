@@ -1,0 +1,1039 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WireGuard Dashboard — Design System Mockup (spec 009, Slice 1)</title>
+
+<!--
+  OFFLINE, SELF-CONTAINED DESIGN MOCKUP — spec 009 "precision instrument".
+  This file lives OUTSIDE dashboard/web/ so the binary never embeds/serves it.
+  Fonts are referenced by RELATIVE PATH to the vendored woff2 under
+  dashboard/web/static/fonts/ — NO CDN, NO external request of any kind.
+
+  The :root token block below is the EXTRACTION SOURCE for Slice 2 (app.css).
+  Aesthetic: a calibrated lab instrument. Cool graphite surfaces with a faint
+  signal-grid texture, IBM Plex Mono for every byte of technical data, a single
+  sharp amber accent reserved for primary action + the active-tab indicator,
+  and a teal "signal" hue for charts/focus. Distinctive, dense, calm.
+-->
+
+<style>
+/* ===========================================================================
+   @font-face — local subset woff2, relative to this file. No external src.
+   =========================================================================== */
+@font-face {
+  font-family: "Plex Sans";
+  src: url("../../dashboard/web/static/fonts/IBMPlexSans-Regular.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Plex Sans";
+  src: url("../../dashboard/web/static/fonts/IBMPlexSans-Medium.woff2") format("woff2");
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Plex Sans";
+  src: url("../../dashboard/web/static/fonts/IBMPlexSans-SemiBold.woff2") format("woff2");
+  font-weight: 600; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Plex Mono";
+  src: url("../../dashboard/web/static/fonts/IBMPlexMono-Regular.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Plex Mono";
+  src: url("../../dashboard/web/static/fonts/IBMPlexMono-Medium.woff2") format("woff2");
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+
+/* ===========================================================================
+   DESIGN TOKENS  —  this block is the source of truth extracted into app.css.
+   Every token has a value in BOTH themes. Component CSS consumes tokens only.
+   =========================================================================== */
+:root {
+  /* — Font families — */
+  --font-display: "Plex Sans", system-ui, sans-serif;
+  --font-body:    "Plex Sans", system-ui, sans-serif;
+  --font-mono:    "Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* — Fluid type scale (clamp: min @360px … max @1400px) — */
+  --fs-overline: clamp(0.625rem, 0.58rem + 0.18vw, 0.6875rem);
+  --fs-caption:  clamp(0.6875rem, 0.65rem + 0.18vw, 0.75rem);
+  --fs-small:    clamp(0.75rem, 0.71rem + 0.2vw, 0.8125rem);
+  --fs-body:     clamp(0.8125rem, 0.78rem + 0.22vw, 0.875rem);
+  --fs-lead:     clamp(0.9375rem, 0.89rem + 0.28vw, 1rem);
+  --fs-h3:       clamp(1rem, 0.93rem + 0.36vw, 1.1875rem);
+  --fs-h2:       clamp(1.25rem, 1.12rem + 0.6vw, 1.625rem);
+  --fs-h1:       clamp(1.5rem, 1.28rem + 1.05vw, 2.25rem);
+  --fs-stat:     clamp(1.625rem, 1.35rem + 1.3vw, 2.5rem);
+
+  --lh-tight: 1.15;
+  --lh-snug:  1.3;
+  --lh-body:  1.5;
+
+  --tracking-overline: 0.14em;
+  --tracking-tight: -0.012em;
+  --tracking-mono: 0;
+
+  /* — Spacing scale (a few fluid for outer gutters) — */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --gutter: clamp(0.875rem, 0.5rem + 1.6vw, 1.75rem);
+  --gap:    clamp(0.75rem, 0.5rem + 1vw, 1.25rem);
+
+  /* — Layout — */
+  --content-max: 1480px;
+  --bp-card: 30rem;     /* container-query reflow threshold */
+
+  /* — Radii — */
+  --radius-sm: 5px;
+  --radius:    9px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* — Borders / hairlines — */
+  --border-w: 1px;
+
+  /* — Motion — */
+  --dur-1: 110ms;
+  --dur-2: 200ms;
+  --dur-3: 340ms;
+  --ease-out:  cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-std:  cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ====== LIGHT THEME COLOR ====== */
+  --bg:            #eef1f4;
+  --bg-grad-a:     #f1f4f7;
+  --bg-grad-b:     #e7ebef;
+  --grid-line:     rgba(22, 32, 43, 0.045);
+  --card-bg:       #f8fafb;
+  --card-bg-2:     #f1f4f7;          /* nested / table head */
+  --card-border:   #d6dde3;
+  --card-border-strong: #c2ccd4;
+  --hairline:      rgba(22, 32, 43, 0.08);
+
+  --text:          #16202b;
+  --text-strong:   #0c141c;
+  --text-muted:    #5a6b78;
+  --text-faint:    #8694a0;
+
+  --accent:        #c77f12;          /* amber — interactive text/link on light */
+  --accent-strong: #e8a33d;          /* amber fill */
+  --accent-fg:     #1c1305;          /* text on amber fill */
+  --accent-soft:   rgba(200, 127, 18, 0.12);
+
+  --signal:        #1d8d9c;          /* teal — charts / focus on light */
+  --signal-ring:   rgba(29, 141, 156, 0.4);
+
+  /* semantic state (online/offline, active/inactive, sev) */
+  --online-bg: #d6f0e0;  --online-fg: #0f5132;  --online-dot: #1a9d5e;
+  --offline-bg:#e7e1d3;  --offline-fg:#6b5a2e;  --offline-dot:#a98a3e;
+  --active-bg: #d6f0e0;  --active-fg: #0f5132;
+  --inactive-bg:#e1e6ea; --inactive-fg:#46545f;
+  --success-bg:#d6f0e0;  --success-fg:#0f5132;
+  --warning-bg:#fbeccf;  --warning-fg:#7a4f06;
+  --danger-bg: #fbe0e0;  --danger-fg: #8a1c1c;  --danger-line:#c0392b;
+  --info-bg:   #d6ecf0;  --info-fg:   #145a66;
+  --firing-bg: #fbe0e0;  --firing-fg: #8a1c1c;
+  --recovered-bg:#d6f0e0;--recovered-fg:#0f5132;
+
+  --btn-bg:        #f8fafb;
+  --btn-border:    #c2ccd4;
+  --btn-hover-bg:  #eef2f5;
+  --btn-active-bg: #e3e9ed;
+
+  --code-bg:       rgba(22, 32, 43, 0.05);
+  --row-stripe:    rgba(22, 32, 43, 0.022);
+  --row-hover:     rgba(29, 141, 156, 0.06);
+
+  /* — Elevation (light: soft, cool, low) — */
+  --elev-1: 0 1px 2px rgba(16, 26, 36, 0.05), 0 1px 1px rgba(16, 26, 36, 0.04);
+  --elev-2: 0 2px 4px rgba(16, 26, 36, 0.06), 0 6px 16px -6px rgba(16, 26, 36, 0.12);
+  --elev-3: 0 8px 28px -8px rgba(16, 26, 36, 0.22);
+  --inner-top: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+:root[data-theme="dark"] {
+  --bg:            #0b1116;
+  --bg-grad-a:     #0d141b;
+  --bg-grad-b:     #080d12;
+  --grid-line:     rgba(143, 175, 196, 0.05);
+  --card-bg:       #141d25;
+  --card-bg-2:     #18232c;
+  --card-border:   #25333e;
+  --card-border-strong: #324350;
+  --hairline:      rgba(143, 175, 196, 0.1);
+
+  --text:          #dbe4ea;
+  --text-strong:   #f1f6f9;
+  --text-muted:    #8da0ad;
+  --text-faint:    #61727f;
+
+  --accent:        #f0a948;
+  --accent-strong: #e8a33d;
+  --accent-fg:     #15100a;
+  --accent-soft:   rgba(240, 169, 72, 0.14);
+
+  --signal:        #3fb6c4;
+  --signal-ring:   rgba(63, 182, 196, 0.45);
+
+  --online-bg:#10271c;  --online-fg:#5fe39b;  --online-dot:#2fcf83;
+  --offline-bg:#241f12; --offline-fg:#d6b463; --offline-dot:#bd9a48;
+  --active-bg:#10271c;  --active-fg:#5fe39b;
+  --inactive-bg:#1c2730;--inactive-fg:#9fb1bd;
+  --success-bg:#10271c; --success-fg:#5fe39b;
+  --warning-bg:#2a2310; --warning-fg:#f0c265;
+  --danger-bg:#2a1414;  --danger-fg:#ff9a9a;  --danger-line:#e0584f;
+  --info-bg:#11272c;    --info-fg:#69d2e0;
+  --firing-bg:#2a1414;  --firing-fg:#ff9a9a;
+  --recovered-bg:#10271c;--recovered-fg:#5fe39b;
+
+  --btn-bg:        #18232c;
+  --btn-border:    #324350;
+  --btn-hover-bg:  #1e2b35;
+  --btn-active-bg: #243340;
+
+  --code-bg:       rgba(143, 175, 196, 0.09);
+  --row-stripe:    rgba(143, 175, 196, 0.028);
+  --row-hover:     rgba(63, 182, 196, 0.08);
+
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --elev-2: 0 2px 5px rgba(0, 0, 0, 0.45), 0 10px 24px -8px rgba(0, 0, 0, 0.6);
+  --elev-3: 0 14px 40px -10px rgba(0, 0, 0, 0.7);
+  --inner-top: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* ===========================================================================
+   BASE
+   =========================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-body);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text);
+  background-color: var(--bg);
+  /* atmosphere: a soft radial wash + a faint engineering grid, not a flat fill */
+  background-image:
+    radial-gradient(120% 80% at 80% -10%, var(--bg-grad-a), transparent 60%),
+    radial-gradient(120% 90% at -10% 110%, var(--bg-grad-b), transparent 55%),
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 28px 28px, 28px 28px;
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.shell {
+  max-width: var(--content-max);
+  margin-inline: auto;
+  padding: var(--gutter);
+}
+
+h1, h2, h3 { margin: 0; font-family: var(--font-display); font-weight: 600; line-height: var(--lh-tight); letter-spacing: var(--tracking-tight); color: var(--text-strong); }
+p { margin: 0; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.mono { font-family: var(--font-mono); font-feature-settings: "tnum" 1; letter-spacing: var(--tracking-mono); }
+.overline {
+  font-family: var(--font-mono);
+  font-size: var(--fs-overline);
+  font-weight: 500;
+  letter-spacing: var(--tracking-overline);
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ===========================================================================
+   TOP BAR
+   =========================================================================== */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-4);
+  border-bottom: var(--border-w) solid var(--hairline);
+}
+.brand { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.brand-mark {
+  width: 38px; height: 38px; flex: none;
+  border-radius: var(--radius);
+  display: grid; place-items: center;
+  background:
+    radial-gradient(120% 120% at 30% 20%, var(--accent-strong), transparent 60%),
+    linear-gradient(160deg, var(--card-bg-2), var(--card-bg));
+  border: var(--border-w) solid var(--card-border-strong);
+  box-shadow: var(--elev-1), var(--inner-top);
+  position: relative; overflow: hidden;
+}
+.brand-mark svg { width: 22px; height: 22px; }
+.brand-text h1 { font-size: var(--fs-h3); letter-spacing: var(--tracking-tight); }
+.brand-text .overline { display: block; margin-top: 1px; }
+
+.topbar-spacer { flex: 1 1 4rem; }
+
+.host-chip {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-small);
+  background: var(--card-bg);
+  border: var(--border-w) solid var(--card-border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--elev-1);
+}
+.host-chip .mono { color: var(--text-muted); }
+
+.icon-btn {
+  width: 40px; height: 40px; flex: none;
+  display: grid; place-items: center;
+  border-radius: var(--radius);
+  background: var(--btn-bg);
+  border: var(--border-w) solid var(--btn-border);
+  color: var(--text-muted);
+  cursor: pointer;
+  box-shadow: var(--elev-1);
+  transition: background var(--dur-1) var(--ease-std),
+              color var(--dur-1) var(--ease-std),
+              border-color var(--dur-1) var(--ease-std),
+              transform var(--dur-1) var(--ease-out);
+}
+.icon-btn:hover { background: var(--btn-hover-bg); color: var(--text); border-color: var(--card-border-strong); }
+.icon-btn:active { transform: translateY(1px) scale(0.98); }
+.icon-btn svg { width: 18px; height: 18px; }
+.theme-toggle .moon { display: none; }
+:root[data-theme="dark"] .theme-toggle .sun { display: none; }
+:root[data-theme="dark"] .theme-toggle .moon { display: block; }
+
+/* live tick pulse */
+.tick {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  font-size: var(--fs-caption); color: var(--text-muted);
+}
+.tick-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--signal); box-shadow: 0 0 0 0 var(--signal-ring);
+  animation: pulse 2.4s var(--ease-std) infinite;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 var(--signal-ring); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* ===========================================================================
+   TAB NAV — active indicator is an amber underline rail
+   =========================================================================== */
+.tabs {
+  display: flex; gap: var(--space-1);
+  margin-bottom: var(--gap);
+  padding: var(--space-1);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  border: var(--border-w) solid var(--card-border);
+  box-shadow: var(--elev-1);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.tab {
+  appearance: none;
+  position: relative;
+  white-space: nowrap;
+  border: 0; background: transparent;
+  font-family: var(--font-display);
+  font-size: var(--fs-small); font-weight: 500;
+  color: var(--text-muted);
+  padding: var(--space-3) var(--space-4);
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  transition: color var(--dur-1) var(--ease-std), background var(--dur-1) var(--ease-std);
+}
+.tab:hover { color: var(--text); background: var(--row-hover); }
+.tab .tab-count {
+  font-family: var(--font-mono); font-size: var(--fs-overline);
+  padding: 1px 6px; border-radius: var(--radius-pill);
+  background: var(--card-bg-2); color: var(--text-faint);
+  border: var(--border-w) solid var(--hairline);
+}
+.tab[aria-current="page"] { color: var(--text-strong); background: var(--accent-soft); }
+.tab[aria-current="page"]::after {
+  content: ""; position: absolute; left: var(--space-4); right: var(--space-4); bottom: 4px;
+  height: 2px; border-radius: 2px;
+  background: var(--accent-strong);
+  box-shadow: 0 0 8px -1px var(--accent-strong);
+}
+.tab[aria-current="page"] .tab-count { color: var(--accent); border-color: var(--accent-soft); background: var(--accent-soft); }
+
+/* ===========================================================================
+   GRID & CARDS
+   =========================================================================== */
+.grid {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: repeat(auto-fit, minmax(clamp(15rem, 40vw, 19rem), 1fr));
+  align-items: start;
+}
+.span-all { grid-column: 1 / -1; }
+.span-2 { grid-column: span 2; }
+@media (max-width: 48rem) { .span-2 { grid-column: 1 / -1; } }
+
+.card {
+  container-type: inline-size;
+  position: relative;
+  background:
+    linear-gradient(180deg, var(--card-bg), var(--card-bg-2));
+  border: var(--border-w) solid var(--card-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-1), var(--inner-top);
+  padding: var(--space-5);
+  transition: box-shadow var(--dur-2) var(--ease-out), border-color var(--dur-2) var(--ease-std);
+}
+.card::before {
+  /* top hairline highlight for instrument depth */
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(180deg, var(--hairline), transparent 64px);
+  opacity: 0.5;
+}
+.card:hover { box-shadow: var(--elev-2), var(--inner-top); border-color: var(--card-border-strong); }
+.card.flush { padding: 0; }
+
+.card-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.card-head h2, .card-head h3 { font-size: var(--fs-h3); }
+.card-sub { color: var(--text-muted); font-size: var(--fs-small); }
+
+/* ===========================================================================
+   STAT BLOCKS
+   =========================================================================== */
+.stat-grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(2, 1fr); }
+@container (min-width: 30rem) { .stat-grid { grid-template-columns: repeat(4, 1fr); } }
+.stat { display: flex; flex-direction: column; gap: var(--space-1); }
+.stat .num {
+  font-family: var(--font-mono); font-weight: 500;
+  font-size: var(--fs-stat); line-height: 1; color: var(--text-strong);
+  font-feature-settings: "tnum" 1;
+}
+.stat .unit { font-size: 0.5em; color: var(--text-muted); font-weight: 400; }
+.stat .delta { font-size: var(--fs-caption); font-family: var(--font-mono); }
+.delta.up { color: var(--online-dot); }
+.delta.down { color: var(--danger-line); }
+
+/* ===========================================================================
+   PILLS / BADGES
+   =========================================================================== */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: var(--fs-caption); font-weight: 500;
+  line-height: 1; letter-spacing: 0.01em;
+  padding: 5px 9px 5px 8px; border-radius: var(--radius-pill);
+  border: var(--border-w) solid transparent;
+  white-space: nowrap;
+}
+.pill .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.pill.online   { background: var(--online-bg);   color: var(--online-fg); }   .pill.online .dot   { background: var(--online-dot); box-shadow: 0 0 0 3px color-mix(in srgb, var(--online-dot) 22%, transparent); }
+.pill.offline  { background: var(--offline-bg);  color: var(--offline-fg); }  .pill.offline .dot  { background: var(--offline-dot); }
+.pill.active   { background: var(--active-bg);    color: var(--active-fg); }
+.pill.inactive { background: var(--inactive-bg);  color: var(--inactive-fg); }
+.pill.success  { background: var(--success-bg);   color: var(--success-fg); }
+.pill.warning  { background: var(--warning-bg);   color: var(--warning-fg); }
+.pill.danger   { background: var(--danger-bg);    color: var(--danger-fg); }
+.pill.info     { background: var(--info-bg);      color: var(--info-fg); }
+.pill.firing   { background: var(--firing-bg);    color: var(--firing-fg); border-color: color-mix(in srgb, var(--danger-line) 30%, transparent); }
+.pill.recovered{ background: var(--recovered-bg); color: var(--recovered-fg); }
+
+/* ===========================================================================
+   BUTTONS
+   =========================================================================== */
+.btn {
+  appearance: none; cursor: pointer;
+  font-family: var(--font-display); font-size: var(--fs-small); font-weight: 500;
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+  min-height: 38px; padding: 0 var(--space-4);
+  border-radius: var(--radius);
+  background: var(--btn-bg); color: var(--text);
+  border: var(--border-w) solid var(--btn-border);
+  box-shadow: var(--elev-1);
+  transition: background var(--dur-1) var(--ease-std), border-color var(--dur-1) var(--ease-std),
+              transform var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-std);
+}
+.btn:hover { background: var(--btn-hover-bg); border-color: var(--card-border-strong); }
+.btn:active { background: var(--btn-active-bg); transform: translateY(1px); }
+.btn svg { width: 15px; height: 15px; }
+.btn.primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-strong) 92%, white), var(--accent-strong));
+  color: var(--accent-fg); border-color: color-mix(in srgb, var(--accent-strong) 60%, #000);
+  box-shadow: var(--elev-1), 0 0 0 0 var(--accent-soft);
+}
+.btn.primary:hover { filter: brightness(1.04); box-shadow: var(--elev-2); }
+.btn.ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-muted); }
+.btn.ghost:hover { background: var(--row-hover); color: var(--text); }
+.btn:disabled, .btn[aria-disabled="true"] {
+  cursor: not-allowed; opacity: 0.5; box-shadow: none;
+  background: var(--btn-bg); color: var(--text-faint); transform: none; filter: none;
+}
+.btn.sm { min-height: 32px; padding: 0 var(--space-3); font-size: var(--fs-caption); }
+
+/* ===========================================================================
+   RANGE SELECTOR (segmented)
+   =========================================================================== */
+.segmented {
+  display: inline-flex; padding: 3px; gap: 2px;
+  background: var(--card-bg-2);
+  border: var(--border-w) solid var(--card-border);
+  border-radius: var(--radius);
+  box-shadow: var(--inner-top);
+}
+.segmented button {
+  appearance: none; border: 0; cursor: pointer;
+  font-family: var(--font-mono); font-size: var(--fs-caption); font-weight: 500;
+  color: var(--text-muted); background: transparent;
+  padding: 6px 12px; min-height: 32px; border-radius: var(--radius-sm);
+  transition: color var(--dur-1) var(--ease-std), background var(--dur-1) var(--ease-std);
+}
+.segmented button:hover { color: var(--text); }
+.segmented button[aria-pressed="true"] {
+  color: var(--text-strong);
+  background: var(--card-bg);
+  box-shadow: var(--elev-1);
+}
+
+/* ===========================================================================
+   CHART PLACEHOLDER
+   =========================================================================== */
+.chart {
+  position: relative;
+  height: clamp(160px, 26vw, 240px);
+  border-radius: var(--radius);
+  border: var(--border-w) solid var(--hairline);
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, transparent, var(--row-hover)),
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 36px, 9% 100%;
+}
+.chart svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.chart .area-rx { fill: var(--signal); opacity: 0.12; }
+.chart .area-tx { fill: var(--accent-strong); opacity: 0.1; }
+.chart .line-rx { fill: none; stroke: var(--signal); stroke-width: 1.6; }
+.chart .line-tx { fill: none; stroke: var(--accent-strong); stroke-width: 1.6; }
+.chart-legend { display: flex; gap: var(--space-4); margin-top: var(--space-3); font-size: var(--fs-caption); color: var(--text-muted); }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 12px; height: 3px; border-radius: 2px; }
+
+/* ===========================================================================
+   DATA TABLE — peer list
+   =========================================================================== */
+.table-wrap { overflow-x: auto; border-radius: var(--radius); border: var(--border-w) solid var(--card-border); }
+table.peers { width: 100%; border-collapse: collapse; font-size: var(--fs-small); min-width: 640px; }
+table.peers thead th {
+  text-align: left; font-family: var(--font-mono);
+  font-size: var(--fs-overline); font-weight: 500; letter-spacing: var(--tracking-overline);
+  text-transform: uppercase; color: var(--text-faint);
+  padding: var(--space-3) var(--space-4);
+  background: var(--card-bg-2);
+  border-bottom: var(--border-w) solid var(--card-border);
+  position: sticky; top: 0;
+}
+table.peers tbody td { padding: var(--space-3) var(--space-4); border-bottom: var(--border-w) solid var(--hairline); vertical-align: middle; }
+table.peers tbody tr:nth-child(even) { background: var(--row-stripe); }
+table.peers tbody tr { transition: background var(--dur-1) var(--ease-std); }
+table.peers tbody tr:hover { background: var(--row-hover); }
+table.peers tbody tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; }
+.peer-name { display: flex; align-items: center; gap: var(--space-2); font-weight: 500; color: var(--text); }
+.peer-key { color: var(--text-muted); }
+.copy {
+  appearance: none; border: 0; background: transparent; cursor: pointer; color: var(--text-faint);
+  width: 26px; height: 26px; border-radius: var(--radius-sm); display: inline-grid; place-items: center;
+  transition: color var(--dur-1) var(--ease-std), background var(--dur-1) var(--ease-std);
+}
+.copy:hover { color: var(--signal); background: var(--row-hover); }
+.copy svg { width: 13px; height: 13px; }
+
+/* ===========================================================================
+   FORM — webhook Set / Test / Revert
+   =========================================================================== */
+.field-row {
+  display: grid; gap: var(--space-3);
+  grid-template-columns: 1fr;
+}
+@container (min-width: 34rem) { .field-row { grid-template-columns: 1fr auto; align-items: end; } }
+.field { display: flex; flex-direction: column; gap: var(--space-2); }
+.field label { font-size: var(--fs-caption); color: var(--text-muted); font-weight: 500; }
+.field label .req { color: var(--accent); }
+.input {
+  font-family: var(--font-mono); font-size: var(--fs-small); color: var(--text);
+  background: var(--card-bg-2);
+  border: var(--border-w) solid var(--card-border);
+  border-radius: var(--radius); padding: 0 var(--space-3); min-height: 40px;
+  width: 100%;
+  box-shadow: var(--inner-top);
+  transition: border-color var(--dur-1) var(--ease-std), box-shadow var(--dur-1) var(--ease-std);
+}
+.input::placeholder { color: var(--text-faint); }
+.input:focus { outline: 0; border-color: var(--signal); box-shadow: 0 0 0 3px var(--signal-ring); }
+.btn-cluster { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.form-note { margin-top: var(--space-3); font-size: var(--fs-caption); color: var(--text-muted); display: flex; align-items: center; gap: var(--space-2); }
+
+/* ===========================================================================
+   ALERTS STRIP
+   =========================================================================== */
+.alerts-strip {
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+.alert-row {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--card-bg-2);
+  border: var(--border-w) solid var(--hairline);
+  border-left: 3px solid var(--inactive-fg);
+}
+.alert-row.firing { border-left-color: var(--danger-line); background: color-mix(in srgb, var(--danger-bg) 40%, var(--card-bg-2)); }
+.alert-row.recovered { border-left-color: var(--online-dot); }
+.alert-row .a-title { font-weight: 500; }
+.alert-row .a-meta { font-size: var(--fs-caption); color: var(--text-muted); }
+
+/* ===========================================================================
+   STATE BLOCKS — loading / empty / error / stale
+   =========================================================================== */
+.states { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.state {
+  display: flex; flex-direction: column; gap: var(--space-2); align-items: flex-start;
+  padding: var(--space-5);
+  border-radius: var(--radius);
+  border: var(--border-w) dashed var(--card-border);
+  background: var(--card-bg-2);
+}
+.state .overline { color: var(--text-muted); }
+.state .msg { color: var(--text-muted); font-size: var(--fs-small); }
+.state.error { border-style: solid; border-color: color-mix(in srgb, var(--danger-line) 40%, transparent); background: var(--danger-bg); }
+.state.error .overline, .state.error .msg { color: var(--danger-fg); }
+
+/* skeleton shimmer for loading */
+.skel { width: 100%; height: 12px; border-radius: var(--radius-pill); background:
+  linear-gradient(90deg, var(--hairline) 25%, var(--row-hover) 37%, var(--hairline) 63%);
+  background-size: 320% 100%; animation: shimmer 1.4s linear infinite; }
+.skel.w60 { width: 60%; } .skel.w40 { width: 40%; }
+@keyframes shimmer { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
+
+/* stale pill (mirrors htmx-stale.js global indicator) */
+.stale-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: var(--fs-caption); font-weight: 500;
+  padding: 5px 10px; border-radius: var(--radius-pill);
+  background: var(--warning-bg); color: var(--warning-fg);
+  border: var(--border-w) solid color-mix(in srgb, var(--warning-fg) 28%, transparent);
+}
+
+/* ===========================================================================
+   FOOTNOTE
+   =========================================================================== */
+.foot { margin-top: var(--space-6); padding-top: var(--space-4); border-top: var(--border-w) solid var(--hairline);
+  font-size: var(--fs-caption); color: var(--text-faint); display: flex; gap: var(--space-4); flex-wrap: wrap; justify-content: space-between; }
+
+/* section label between mockup blocks */
+.section-label { margin: var(--space-6) 0 var(--space-3); display: flex; align-items: center; gap: var(--space-3); }
+.section-label::after { content: ""; flex: 1; height: 1px; background: var(--hairline); }
+
+/* ===========================================================================
+   MOTION — user-initiated tab reveal only (NOT periodic). Reduced-motion safe.
+   =========================================================================== */
+.reveal > * { opacity: 1; }
+.reveal.run > * {
+  animation: rise var(--dur-3) var(--ease-out) backwards;
+}
+.reveal.run > *:nth-child(1) { animation-delay: 0ms; }
+.reveal.run > *:nth-child(2) { animation-delay: 45ms; }
+.reveal.run > *:nth-child(3) { animation-delay: 90ms; }
+.reveal.run > *:nth-child(4) { animation-delay: 135ms; }
+.reveal.run > *:nth-child(5) { animation-delay: 180ms; }
+.reveal.run > *:nth-child(6) { animation-delay: 225ms; }
+.reveal.run > *:nth-child(7) { animation-delay: 270ms; }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .reveal.run > * { animation: none; opacity: 1; transform: none; }
+}
+</style>
+</head>
+
+<body>
+<div class="shell">
+
+  <!-- ========================= TOP BAR ========================= -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent-fg)">
+          <path d="M4 13c2-4 4-4 6 0s4 4 6 0" /><path d="M2 13h2M20 13h2" opacity="0.7"/>
+        </svg>
+      </span>
+      <span class="brand-text">
+        <h1>WireGuard</h1>
+        <span class="overline">operations console</span>
+      </span>
+    </div>
+
+    <div class="topbar-spacer"></div>
+
+    <span class="tick"><span class="tick-dot" aria-hidden="true"></span> live · 10s</span>
+    <span class="host-chip">
+      <span class="pill online"><span class="dot"></span>tunnel up</span>
+      <span class="mono">172.16.15.1</span>
+    </span>
+    <button class="icon-btn theme-toggle" id="theme-toggle" type="button" aria-label="Toggle light / dark theme">
+      <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
+    </button>
+  </header>
+
+  <!-- ========================= TAB NAV ========================= -->
+  <nav class="tabs" aria-label="Dashboard sections">
+    <button class="tab" aria-current="page" type="button">Overview</button>
+    <button class="tab" type="button">Peers <span class="tab-count">7</span></button>
+    <button class="tab" type="button">Throughput</button>
+    <button class="tab" type="button">History</button>
+    <button class="tab" type="button">Geo Map</button>
+    <button class="tab" type="button">Alerts <span class="tab-count">2</span></button>
+    <button class="tab" type="button">Webhooks</button>
+  </nav>
+
+  <!-- ========================= OVERVIEW GRID ========================= -->
+  <div class="grid reveal run" id="tab-body">
+
+    <!-- summary stat card -->
+    <section class="card span-all">
+      <div class="card-head">
+        <div>
+          <span class="overline">server snapshot</span>
+          <h2 style="margin-top:4px">ip-172-16-15-1 · eu-central-1</h2>
+        </div>
+        <span class="pill active"><span class="dot" style="display:none"></span>wg-quick@wg0 · active</span>
+      </div>
+      <div class="stat-grid">
+        <div class="stat">
+          <span class="overline">peers online</span>
+          <span class="num">5<span class="unit"> / 7</span></span>
+          <span class="delta up">▲ 1 since 1h</span>
+        </div>
+        <div class="stat">
+          <span class="overline">rx total</span>
+          <span class="num">48.2<span class="unit"> GiB</span></span>
+          <span class="delta">▸ 11.4 Mb/s now</span>
+        </div>
+        <div class="stat">
+          <span class="overline">tx total</span>
+          <span class="num">21.9<span class="unit"> GiB</span></span>
+          <span class="delta">▸ 3.8 Mb/s now</span>
+        </div>
+        <div class="stat">
+          <span class="overline">uptime</span>
+          <span class="num">18<span class="unit">d 04h</span></span>
+          <span class="delta">since 2026-06-07</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- throughput chart card -->
+    <section class="card span-2">
+      <div class="card-head">
+        <div><span class="overline">last 60 min</span><h3 style="margin-top:4px">Throughput</h3></div>
+        <div class="segmented" role="group" aria-label="Range">
+          <button type="button" aria-pressed="true">1H</button>
+          <button type="button" aria-pressed="false">6H</button>
+          <button type="button" aria-pressed="false">24H</button>
+          <button type="button" aria-pressed="false">7D</button>
+        </div>
+      </div>
+      <div class="chart" role="img" aria-label="Throughput chart placeholder">
+        <svg viewBox="0 0 600 220" preserveAspectRatio="none" aria-hidden="true">
+          <path class="area-rx" d="M0,170 C60,150 90,90 150,110 C210,130 240,60 300,80 C360,100 390,40 450,70 C510,95 540,120 600,100 L600,220 L0,220 Z"/>
+          <path class="line-rx" d="M0,170 C60,150 90,90 150,110 C210,130 240,60 300,80 C360,100 390,40 450,70 C510,95 540,120 600,100"/>
+          <path class="area-tx" d="M0,195 C60,185 100,175 160,182 C220,189 260,160 320,172 C380,184 420,168 480,176 C540,183 570,188 600,180 L600,220 L0,220 Z"/>
+          <path class="line-tx" d="M0,195 C60,185 100,175 160,182 C220,189 260,160 320,172 C380,184 420,168 480,176 C540,183 570,188 600,180"/>
+        </svg>
+      </div>
+      <div class="chart-legend">
+        <span><span class="swatch" style="background:var(--signal)"></span> rx · <span class="mono">11.4 Mb/s</span></span>
+        <span><span class="swatch" style="background:var(--accent-strong)"></span> tx · <span class="mono">3.8 Mb/s</span></span>
+        <span style="margin-left:auto" class="mono">peak 24.6 Mb/s</span>
+      </div>
+    </section>
+
+    <!-- active alerts strip -->
+    <section class="card">
+      <div class="card-head">
+        <div><span class="overline">active</span><h3 style="margin-top:4px">Alerts</h3></div>
+        <span class="pill firing">2 firing</span>
+      </div>
+      <div class="alerts-strip">
+        <div class="alert-row firing">
+          <span class="pill firing">firing</span>
+          <div>
+            <div class="a-title">Peer offline &gt; 30m</div>
+            <div class="a-meta mono">phone-pixel · since 14:02:11</div>
+          </div>
+          <span class="overline">12m</span>
+        </div>
+        <div class="alert-row firing">
+          <span class="pill warning">warning</span>
+          <div>
+            <div class="a-title">Handshake stale</div>
+            <div class="a-meta mono">laptop-x1 · 3m45s ago</div>
+          </div>
+          <span class="overline">4m</span>
+        </div>
+        <div class="alert-row recovered">
+          <span class="pill recovered">recovered</span>
+          <div>
+            <div class="a-title">High rx rate</div>
+            <div class="a-meta mono">nas-backup · cleared 13:40</div>
+          </div>
+          <span class="overline">23m</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- peer table -->
+    <section class="card span-all flush">
+      <div class="card-head" style="padding:var(--space-5) var(--space-5) var(--space-4)">
+        <div><span class="overline">interface wg0</span><h3 style="margin-top:4px">Peers</h3></div>
+        <button class="btn sm ghost" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          columns
+        </button>
+      </div>
+      <div class="table-wrap">
+        <table class="peers">
+          <thead>
+            <tr>
+              <th>Peer</th>
+              <th>Allowed IP</th>
+              <th>Public key</th>
+              <th>Endpoint</th>
+              <th class="num">Rx</th>
+              <th class="num">Tx</th>
+              <th>Handshake</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="peer-name"><span class="pill online" style="padding:3px 5px"><span class="dot"></span></span>laptop-x1</span></td>
+              <td class="mono">172.16.15.2/32</td>
+              <td><span class="mono peer-key">kHs9…2pQ=</span> <button class="copy" aria-label="Copy key"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></td>
+              <td class="mono">203.0.113.44:51820</td>
+              <td class="num mono">12.4 GiB</td>
+              <td class="num mono">5.1 GiB</td>
+              <td class="mono">3m45s ago</td>
+              <td><span class="pill warning">stale hs</span></td>
+            </tr>
+            <tr>
+              <td><span class="peer-name"><span class="pill online" style="padding:3px 5px"><span class="dot"></span></span>desktop-studio</span></td>
+              <td class="mono">172.16.15.3/32</td>
+              <td><span class="mono peer-key">9Lm2…7Rt=</span> <button class="copy" aria-label="Copy key"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></td>
+              <td class="mono">198.51.100.7:43210</td>
+              <td class="num mono">19.8 GiB</td>
+              <td class="num mono">8.0 GiB</td>
+              <td class="mono">14s ago</td>
+              <td><span class="pill online"><span class="dot"></span>online</span></td>
+            </tr>
+            <tr>
+              <td><span class="peer-name"><span class="pill online" style="padding:3px 5px"><span class="dot"></span></span>nas-backup</span></td>
+              <td class="mono">172.16.15.4/32</td>
+              <td><span class="mono peer-key">Qz4P…1Hd=</span> <button class="copy" aria-label="Copy key"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></td>
+              <td class="mono">192.0.2.18:51820</td>
+              <td class="num mono">14.9 GiB</td>
+              <td class="num mono">7.7 GiB</td>
+              <td class="mono">52s ago</td>
+              <td><span class="pill online"><span class="dot"></span>online</span></td>
+            </tr>
+            <tr>
+              <td><span class="peer-name"><span class="pill offline" style="padding:3px 5px"><span class="dot"></span></span>phone-pixel</span></td>
+              <td class="mono">172.16.15.5/32</td>
+              <td><span class="mono peer-key">Bv7K…9Wc=</span> <button class="copy" aria-label="Copy key"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></td>
+              <td class="mono">—</td>
+              <td class="num mono">0.9 GiB</td>
+              <td class="num mono">0.3 GiB</td>
+              <td class="mono">31m ago</td>
+              <td><span class="pill offline"><span class="dot"></span>offline</span></td>
+            </tr>
+            <tr>
+              <td><span class="peer-name"><span class="pill offline" style="padding:3px 5px"><span class="dot"></span></span>tablet-air</span></td>
+              <td class="mono">172.16.15.6/32</td>
+              <td><span class="mono peer-key">Tg1N…4Yx=</span> <button class="copy" aria-label="Copy key"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></td>
+              <td class="mono">—</td>
+              <td class="num mono">2.1 GiB</td>
+              <td class="num mono">0.6 GiB</td>
+              <td class="mono">2h 11m ago</td>
+              <td><span class="pill offline"><span class="dot"></span>offline</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- webhook form card -->
+    <section class="card span-2">
+      <div class="card-head">
+        <div><span class="overline">runtime config</span><h3 style="margin-top:4px">Alert Webhook</h3></div>
+        <span class="pill success">verified 13:51</span>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="wh">Endpoint URL <span class="req">*</span></label>
+          <input class="input" id="wh" type="text" value="https://hooks.slack.com/services/T0/B0/xY" spellcheck="false" />
+        </div>
+        <div class="btn-cluster">
+          <button class="btn primary" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
+            Set
+          </button>
+          <button class="btn" type="button">Test</button>
+          <button class="btn" type="button" aria-disabled="true" disabled>Revert</button>
+        </div>
+      </div>
+      <p class="form-note">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--signal)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+        Stored in memory only — reverts to the embedded default on restart.
+      </p>
+    </section>
+
+    <!-- stale + small state card -->
+    <section class="card">
+      <div class="card-head">
+        <div><span class="overline">feed</span><h3 style="margin-top:4px">Connection History</h3></div>
+        <span class="stale-pill">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+          stale · 38s
+        </span>
+      </div>
+      <p class="card-sub">Last successful swap 13:52:04. Showing cached data until the next tick reconnects.</p>
+    </section>
+  </div>
+
+  <!-- ========================= STATE GALLERY ========================= -->
+  <div class="section-label"><span class="overline">component states — loading · empty · error</span></div>
+  <div class="states">
+    <div class="card state">
+      <span class="overline">loading</span>
+      <div class="skel"></div><div class="skel w60"></div><div class="skel w40"></div>
+      <span class="msg">Fetching peer handshakes…</span>
+    </div>
+    <div class="card state">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--text-faint)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16" opacity="0.6"/></svg>
+      <span class="overline">empty</span>
+      <span class="msg">No peers configured yet. Add a client public key to the server config.</span>
+    </div>
+    <div class="card state error">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/></svg>
+      <span class="overline">error</span>
+      <span class="msg">Couldn't read /proc/net/dev — retrying on the next 10s tick.</span>
+    </div>
+  </div>
+
+  <!-- ========================= COMPONENT SPECIMENS ========================= -->
+  <div class="section-label"><span class="overline">specimens — pills · buttons</span></div>
+  <section class="card">
+    <div style="display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center;margin-bottom:var(--space-5)">
+      <span class="pill online"><span class="dot"></span>online</span>
+      <span class="pill offline"><span class="dot"></span>offline</span>
+      <span class="pill active">active</span>
+      <span class="pill inactive">inactive</span>
+      <span class="pill success">success</span>
+      <span class="pill warning">warning</span>
+      <span class="pill danger">danger</span>
+      <span class="pill info">info</span>
+      <span class="pill firing">firing</span>
+      <span class="pill recovered">recovered</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center">
+      <button class="btn primary" type="button">Primary</button>
+      <button class="btn" type="button">Default</button>
+      <button class="btn ghost" type="button">Ghost</button>
+      <button class="btn" type="button" disabled>Disabled</button>
+      <div class="segmented" role="group" aria-label="Range demo">
+        <button type="button" aria-pressed="false">1H</button>
+        <button type="button" aria-pressed="true">24H</button>
+        <button type="button" aria-pressed="false">7D</button>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>spec 009 · design-system mockup · slice 1 — <span class="mono">IBM Plex Sans + Mono</span>, offline / embedded</span>
+    <span class="mono">precision-instrument · v0.1</span>
+  </footer>
+</div>
+
+<script>
+  // — Theme toggle (mirrors production theme.js: prefers-color-scheme + override) —
+  (function () {
+    var root = document.documentElement;
+    var KEY = "wg-mockup-theme";
+    var saved = null;
+    try { saved = localStorage.getItem(KEY); } catch (e) {}
+    if (saved) {
+      root.setAttribute("data-theme", saved);
+    } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      root.setAttribute("data-theme", "dark");
+    }
+    var btn = document.getElementById("theme-toggle");
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+    });
+  })();
+
+  // — Tab switch: one-shot reveal on USER click only (never the 10s tick) —
+  (function () {
+    var tabs = document.querySelectorAll(".tab");
+    var body = document.getElementById("tab-body");
+    tabs.forEach(function (t) {
+      t.addEventListener("click", function () {
+        tabs.forEach(function (x) { x.removeAttribute("aria-current"); });
+        t.setAttribute("aria-current", "page");
+        // re-trigger the staggered entrance without leaving the class on
+        body.classList.remove("run");
+        void body.offsetWidth; // reflow so the animation restarts
+        body.classList.add("run");
+      });
+    });
+  })();
+</script>
+</body>
+</html>

@@ -38,3 +38,46 @@ world.svg
     linearly to lon and y to lat, so the projection x=(lon+180)/360*2000,
     y=(90-lat)/180*1000 lines up. Calibrated: London (-0.13,51.5), NYC
     (-74,40.7), Sydney (151.2,-33.9) all project inside their country outlines.
+
+# ---------------------------------------------------------------------------
+# Embedded fonts (spec 009) — IBM Plex Sans + IBM Plex Mono.
+# License: SIL Open Font License, Version 1.1 (OFL). Redistribution permitted.
+# The upstream license text travels with the repo at fonts/OFL.txt.
+# These woff2 are subset, design-time artifacts (the committed woff2 are the
+# source of truth — subsetting is NOT a runtime/build dependency).
+#
+# Subset coverage (--unicodes): Latin-1 + Latin-Ext fragments, General
+# Punctuation, Arrows (U+2190-21FF), Geometric Shapes, currency/trademark.
+# Pipeline: fonttools varLib.instancer (Sans VF -> static wght) then
+#   pyftsubset --flavor=woff2 --layout-features='kern,liga,calt,tnum'
+#              --desubroutinize --drop-tables+=meta
+
+fonts/IBMPlexSans-Regular.woff2
+  version: 3.201 (subset of IBMPlexSans[wdth,wght] @ wght=400,wdth=100)
+  source:  https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsans/IBMPlexSans%5Bwdth,wght%5D.ttf
+  license: SIL OFL 1.1 (see fonts/OFL.txt)
+  sha256:  813a7f96dbea87e3c1ba7939e29b2dcdec318d93e95d2ed81dd0cbab48a07156
+
+fonts/IBMPlexSans-Medium.woff2
+  version: 3.201 (subset of IBMPlexSans[wdth,wght] @ wght=500,wdth=100)
+  source:  https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsans/IBMPlexSans%5Bwdth,wght%5D.ttf
+  license: SIL OFL 1.1 (see fonts/OFL.txt)
+  sha256:  2663ece4f9faec9630cc100d6764fd88742b835aad01545fc8a6ed5601d6f54f
+
+fonts/IBMPlexSans-SemiBold.woff2
+  version: 3.201 (subset of IBMPlexSans[wdth,wght] @ wght=600,wdth=100)
+  source:  https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsans/IBMPlexSans%5Bwdth,wght%5D.ttf
+  license: SIL OFL 1.1 (see fonts/OFL.txt)
+  sha256:  acb286bb74a343d9c66d2873af54acfcb373f46f6b8fda67fac0d77bed08b051
+
+fonts/IBMPlexMono-Regular.woff2
+  version: 1.x (subset of static IBMPlexMono-Regular)
+  source:  https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/IBMPlexMono-Regular.ttf
+  license: SIL OFL 1.1 (see fonts/OFL.txt)
+  sha256:  6bf8414a557737f1d6a18c409f040711c7050aa8e37b7f6a99e322dd9ea50024
+
+fonts/IBMPlexMono-Medium.woff2
+  version: 1.x (subset of static IBMPlexMono-Medium)
+  source:  https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexmono/IBMPlexMono-Medium.ttf
+  license: SIL OFL 1.1 (see fonts/OFL.txt)
+  sha256:  8e9970c0f9e0f43ea0af04ff1dd7db46f75b7b7882efad770d6c35798e0b5ae9

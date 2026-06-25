@@ -2,133 +2,299 @@
  *
  * Design intent:
  *   - One source of truth for palette / spacing / radii via :root custom props.
+ *     Slice 2 (spec 009) re-homed the file into explicit @layer order and
+ *     swapped the palette over to the approved "precision instrument" tokens
+ *     (graphite/slate surfaces, amber accent, teal "signal") extracted from
+ *     docs/design/dashboard-mockup.html. Existing token NAMES are preserved so
+ *     every component rule keeps a defined var; only their VALUES changed, plus
+ *     a set of new tokens (fluid type scale, spacing/elevation/motion) that
+ *     Slices 3/4 will consume.
  *   - #tab-body uses an auto-fit CSS grid so cards reflow without a
  *     per-breakpoint layout matrix; the Overview tab opts into an
  *     explicit 2-col layout via .overview-grid (section 16g).
  *   - Status and state pills share a base style; per-state colors are layered
  *     on top so adding a new state is one rule, not a redesign.
  *   - Touch targets (.copy-btn) are >= 44x44 px to meet the spec.
+ *
+ * Cascade layers — explicit order so component overrides never depend on
+ * source position. tokens < base < components < utilities < responsive.
  */
 
-/* 1. Reset / base ---------------------------------------------------------- */
+@layer tokens, base, components, utilities, responsive;
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
+/* 0. @font-face — IBM Plex (UI Sans + technical Mono), local woff2 only.
+ *    Served from /static/fonts/ (web/static is mounted at /static). No CDN /
+ *    external src by design: the dashboard is VPN-only and ships offline. */
+
+@font-face {
+  font-family: "Plex Sans";
+  src: url("/static/fonts/IBMPlexSans-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
 }
-
-html {
-  -webkit-text-size-adjust: 100%;
+@font-face {
+  font-family: "Plex Sans";
+  src: url("/static/fonts/IBMPlexSans-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
 }
-
-body {
-  margin: 0;
-  padding: 1rem;
-  max-width: 1400px;
-  margin-left: auto;
-  margin-right: auto;
-  background: var(--bg);
-  color: var(--text);
-  font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    "Helvetica Neue",
-    Arial,
-    sans-serif;
-  font-size: 14px;
-  line-height: 1.45;
+@font-face {
+  font-family: "Plex Sans";
+  src: url("/static/fonts/IBMPlexSans-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Plex Mono";
+  src: url("/static/fonts/IBMPlexMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Plex Mono";
+  src: url("/static/fonts/IBMPlexMono-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
 }
 
 /* 2. Design tokens --------------------------------------------------------- */
 
-:root {
-  --bg: #f6f7fb;
-  --card-bg: #ffffff;
-  --card-border: #e5e7eb;
-  --text: #1f2937;
-  --text-muted: #6b7280;
-  --accent: #2563eb;
-  --accent-fg: #ffffff;
-  --success: #16a34a;
-  --warning: #d97706;
-  --danger: #dc2626;
+@layer tokens {
+  :root {
+    /* — Font families — */
+    --font-display: "Plex Sans", system-ui, sans-serif;
+    --font-body: "Plex Sans", system-ui, sans-serif;
+    --font-mono: "Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 
-  --state-active-bg: #dcfce7;
-  --state-active-fg: #166534;
-  --state-inactive-bg: #e5e7eb;
-  --state-inactive-fg: #374151;
-  --state-failed-bg: #fee2e2;
-  --state-failed-fg: #991b1b;
-  --state-warning-bg: #fde68a;
-  --state-warning-fg: #92400e;
-  --state-info-bg: #dbeafe;
-  --state-info-fg: #1e40af;
-  --state-unknown-bg: #f3f4f6;
-  --state-unknown-fg: #6b7280;
-  --state-unknown-border: #fcd34d;
+    /* — Fluid type scale (clamp: min @360px … max @1400px) — */
+    --fs-overline: clamp(0.625rem, 0.58rem + 0.18vw, 0.6875rem);
+    --fs-caption: clamp(0.6875rem, 0.65rem + 0.18vw, 0.75rem);
+    --fs-small: clamp(0.75rem, 0.71rem + 0.2vw, 0.8125rem);
+    --fs-body: clamp(0.8125rem, 0.78rem + 0.22vw, 0.875rem);
+    --fs-lead: clamp(0.9375rem, 0.89rem + 0.28vw, 1rem);
+    --fs-h3: clamp(1rem, 0.93rem + 0.36vw, 1.1875rem);
+    --fs-h2: clamp(1.25rem, 1.12rem + 0.6vw, 1.625rem);
+    --fs-h1: clamp(1.5rem, 1.28rem + 1.05vw, 2.25rem);
+    --fs-stat: clamp(1.625rem, 1.35rem + 1.3vw, 2.5rem);
 
-  --error-bg: #fef2f2;
-  --error-fg: #991b1b;
-  --error-border: #fecaca;
+    --lh-tight: 1.15;
+    --lh-snug: 1.3;
+    --lh-body: 1.5;
 
-  --btn-hover-bg: #f3f4f6;
-  --btn-active-bg: #e5e7eb;
-  --btn-hover-border: #d1d5db;
+    --tracking-overline: 0.14em;
+    --tracking-tight: -0.012em;
+    --tracking-mono: 0;
 
-  --row-stripe: rgba(0, 0, 0, 0.02);
-  --code-bg: rgba(0, 0, 0, 0.04);
-  --gridline: rgba(0, 0, 0, 0.08);
+    /* — Spacing scale — */
+    --space-0: 0;
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.5rem;
+    --space-6: 2rem;
+    --space-7: 3rem;
+    --gutter: clamp(0.875rem, 0.5rem + 1.6vw, 1.75rem);
 
-  --radius: 8px;
-  --gap: 1rem;
-  --pad: 1rem;
+    /* — Layout — */
+    --content-max: 1480px;
+    --bp-card: 30rem; /* container-query reflow threshold (Slice 3) */
+
+    /* — Radii — */
+    --radius-sm: 5px;
+    --radius: 9px;
+    --radius-lg: 14px;
+    --radius-pill: 999px;
+
+    /* — Borders / hairlines — */
+    --border-w: 1px;
+    --hairline: rgba(22, 32, 43, 0.08);
+    --grid-line: rgba(22, 32, 43, 0.045);
+
+    /* — Motion — */
+    --dur-1: 110ms;
+    --dur-2: 200ms;
+    --dur-3: 340ms;
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-std: cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* ====== Surfaces / text (light) ====== */
+    --bg: #eef1f4;
+    --bg-grad-a: #f1f4f7;
+    --bg-grad-b: #e7ebef;
+    --card-bg: #f8fafb;
+    --card-bg-2: #f1f4f7; /* nested / table head */
+    --card-border: #d6dde3;
+    --card-border-strong: #c2ccd4;
+
+    --text: #16202b;
+    --text-strong: #0c141c;
+    --text-muted: #5a6b78;
+    --text-faint: #8694a0;
+
+    /* ====== Accent (amber) + signal (teal) ====== */
+    --accent: #c77f12; /* amber — interactive text/link on light */
+    --accent-strong: #e8a33d; /* amber fill */
+    --accent-fg: #1c1305; /* text on amber fill */
+    --accent-soft: rgba(200, 127, 18, 0.12);
+
+    --signal: #1d8d9c; /* teal — charts / focus on light */
+    --signal-ring: rgba(29, 141, 156, 0.4);
+
+    /* ====== Solid semantic colors (progress fills, swatches) ====== */
+    --success: #1a9d5e;
+    --warning: #e8a33d;
+    --danger: #c0392b;
+
+    /* ====== State / status pills (existing names, mapped to new palette) ====== */
+    --state-active-bg: #d6f0e0; /* mockup --active-bg / --online-bg */
+    --state-active-fg: #0f5132;
+    --state-inactive-bg: #e1e6ea;
+    --state-inactive-fg: #46545f;
+    --state-failed-bg: #fbe0e0; /* mockup --danger-bg */
+    --state-failed-fg: #8a1c1c;
+    --state-warning-bg: #fbeccf;
+    --state-warning-fg: #7a4f06;
+    --state-info-bg: #d6ecf0;
+    --state-info-fg: #145a66;
+    --state-unknown-bg: #e1e6ea;
+    --state-unknown-fg: #5a6b78;
+    --state-unknown-border: #e8a33d;
+
+    --error-bg: #fbe0e0; /* mockup --danger-bg */
+    --error-fg: #8a1c1c;
+    --error-border: #c0392b;
+
+    --btn-bg: #f8fafb;
+    --btn-hover-bg: #eef2f5;
+    --btn-active-bg: #e3e9ed;
+    --btn-hover-border: #c2ccd4;
+
+    --row-stripe: rgba(22, 32, 43, 0.022);
+    --row-hover: rgba(29, 141, 156, 0.06);
+    --code-bg: rgba(22, 32, 43, 0.05);
+    --gridline: rgba(22, 32, 43, 0.08); /* legacy alias of --hairline */
+
+    --gap: clamp(0.75rem, 0.5rem + 1vw, 1.25rem);
+    --pad: 1rem;
+
+    /* — Elevation (light: soft, cool, low) — */
+    --elev-1: 0 1px 2px rgba(16, 26, 36, 0.05), 0 1px 1px rgba(16, 26, 36, 0.04);
+    --elev-2: 0 2px 4px rgba(16, 26, 36, 0.06),
+      0 6px 16px -6px rgba(16, 26, 36, 0.12);
+    --elev-3: 0 8px 28px -8px rgba(16, 26, 36, 0.22);
+    --inner-top: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0b1116;
+    --bg-grad-a: #0d141b;
+    --bg-grad-b: #080d12;
+    --grid-line: rgba(143, 175, 196, 0.05);
+    --card-bg: #141d25;
+    --card-bg-2: #18232c;
+    --card-border: #25333e;
+    --card-border-strong: #324350;
+    --hairline: rgba(143, 175, 196, 0.1);
+
+    --text: #dbe4ea;
+    --text-strong: #f1f6f9;
+    --text-muted: #8da0ad;
+    --text-faint: #61727f;
+
+    --accent: #f0a948;
+    --accent-strong: #e8a33d;
+    --accent-fg: #15100a;
+    --accent-soft: rgba(240, 169, 72, 0.14);
+
+    --signal: #3fb6c4;
+    --signal-ring: rgba(63, 182, 196, 0.45);
+
+    --success: #2fcf83;
+    --warning: #f0c265;
+    --danger: #e0584f;
+
+    --state-active-bg: #10271c;
+    --state-active-fg: #5fe39b;
+    --state-inactive-bg: #1c2730;
+    --state-inactive-fg: #9fb1bd;
+    --state-failed-bg: #2a1414;
+    --state-failed-fg: #ff9a9a;
+    --state-warning-bg: #2a2310;
+    --state-warning-fg: #f0c265;
+    --state-info-bg: #11272c;
+    --state-info-fg: #69d2e0;
+    --state-unknown-bg: #1c2730;
+    --state-unknown-fg: #8da0ad;
+    --state-unknown-border: #e8a33d;
+
+    --error-bg: #2a1414;
+    --error-fg: #ff9a9a;
+    --error-border: #e0584f;
+
+    --btn-bg: #18232c;
+    --btn-hover-bg: #1e2b35;
+    --btn-active-bg: #243340;
+    --btn-hover-border: #324350;
+
+    --row-stripe: rgba(143, 175, 196, 0.028);
+    --row-hover: rgba(63, 182, 196, 0.08);
+    --code-bg: rgba(143, 175, 196, 0.09);
+    --gridline: rgba(143, 175, 196, 0.1);
+
+    --elev-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --elev-2: 0 2px 5px rgba(0, 0, 0, 0.45), 0 10px 24px -8px rgba(0, 0, 0, 0.6);
+    --elev-3: 0 14px 40px -10px rgba(0, 0, 0, 0.7);
+    --inner-top: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
 }
 
-:root[data-theme="dark"] {
-  --bg: #0f172a;
-  --card-bg: #1e293b;
-  --card-border: #334155;
-  --text: #e2e8f0;
-  --text-muted: #94a3b8;
-  --accent: #3b82f6;
-  --accent-fg: #ffffff;
-  --success: #22c55e;
-  --warning: #f59e0b;
-  --danger: #ef4444;
+/* 1. Reset / base ---------------------------------------------------------- */
 
-  --state-active-bg: rgba(34, 197, 94, 0.18);
-  --state-active-fg: #4ade80;
-  --state-inactive-bg: rgba(148, 163, 184, 0.18);
-  --state-inactive-fg: #cbd5e1;
-  --state-failed-bg: rgba(239, 68, 68, 0.18);
-  --state-failed-fg: #fca5a5;
-  --state-warning-bg: rgba(245, 158, 11, 0.18);
-  --state-warning-fg: #fcd34d;
-  --state-info-bg: rgba(59, 130, 246, 0.18);
-  --state-info-fg: #93c5fd;
-  --state-unknown-bg: rgba(148, 163, 184, 0.12);
-  --state-unknown-fg: #94a3b8;
-  --state-unknown-border: #b45309;
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
 
-  --error-bg: rgba(220, 38, 38, 0.15);
-  --error-fg: #fecaca;
-  --error-border: #7f1d1d;
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
 
-  --btn-hover-bg: rgba(255, 255, 255, 0.06);
-  --btn-active-bg: rgba(255, 255, 255, 0.10);
-  --btn-hover-border: #475569;
-
-  --row-stripe: rgba(255, 255, 255, 0.03);
-  --code-bg: rgba(255, 255, 255, 0.06);
-  --gridline: rgba(255, 255, 255, 0.10);
+  body {
+    margin: 0 auto;
+    padding: 1rem;
+    max-width: var(--content-max);
+    min-height: 100vh;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: var(--fs-body);
+    line-height: var(--lh-body);
+    /* Atmosphere: a soft radial wash + a faint engineering grid over the
+       graphite base, rather than a flat fill. Pure CSS gradients — no images
+       or external assets (offline constraint). */
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(120% 80% at 80% -10%, var(--bg-grad-a), transparent 60%),
+      radial-gradient(120% 90% at -10% 110%, var(--bg-grad-b), transparent 55%),
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 28px 28px, 28px 28px;
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
 }
 
 /* 3. Header ---------------------------------------------------------------- */
 
+@layer components {
 .dashboard-header {
   display: flex;
   align-items: baseline;
@@ -912,8 +1078,12 @@ body {
   grid-column: 1 / -1;
 }
 
+}
+/* end @layer components */
+
 /* 17. Responsive ----------------------------------------------------------- */
 
+@layer responsive {
 @media (max-width: 600px) {
   body {
     padding: 0.5rem;
@@ -995,18 +1165,25 @@ body {
   }
 }
 
+}
+/* end @layer responsive */
+
 /* 18. Reduced motion ------------------------------------------------------- */
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
+@layer base {
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation: none !important;
+      transition: none !important;
+    }
   }
 }
 
 /* 19. Range selector ------------------------------------------------------- */
+
+@layer components {
 
 /* The selector spans the full tab-body grid row so the chart pair below sits
    on its own row; the form itself stays a compact label+select pair. */
@@ -1166,3 +1343,5 @@ body {
 .geo-swatch.offline { background: var(--text-muted); opacity: 0.55; }
 
 .geo-caption { margin-left: auto; }
+}
+/* end @layer components */

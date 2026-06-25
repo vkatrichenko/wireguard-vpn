@@ -1,7 +1,9 @@
 # Technical Specification: Alert Notifications
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
-- **Status:** Draft
+- **Status:** Completed
+
+> **Implementation deviations (recorded at verify):** (1) **Config is env-var-only, not SSM-in-process** — the dashboard reads `DASHBOARD_WEBHOOK_URL` + threshold knobs purely from the environment (cloud-agnostic); the Option-A SSM data source below was implemented as Terraform-reads-SSM → systemd `EnvironmentFile` (see spec 008), NOT an in-process SSM/KMS read, and no instance IAM grant was added. (2) **Host label is `os.Hostname()`, not the IMDSv2 instance id** (portability). (3) **A fifth condition — per-peer cumulative-transfer cap — was added** alongside peer-down (functional spec §2.1 lists four). These were owner-confirmed during implementation.
 - **Author(s):** Vladyslav Katrychenko
 
 ---
