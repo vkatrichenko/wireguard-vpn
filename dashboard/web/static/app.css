@@ -171,6 +171,7 @@
     --error-border: #c0392b;
 
     --btn-bg: #f8fafb;
+    --btn-border: #c2ccd4;
     --btn-hover-bg: #eef2f5;
     --btn-active-bg: #e3e9ed;
     --btn-hover-border: #c2ccd4;
@@ -181,7 +182,9 @@
     --gridline: rgba(22, 32, 43, 0.08); /* legacy alias of --hairline */
 
     --gap: clamp(0.75rem, 0.5rem + 1vw, 1.25rem);
-    --pad: 1rem;
+    /* Fluid card padding: 0.75rem on phones → 1rem on desktop, so the <600px
+       --pad override (Slice 2) is folded into the scale itself. */
+    --pad: clamp(0.75rem, 0.6rem + 0.65vw, 1rem);
 
     /* — Elevation (light: soft, cool, low) — */
     --elev-1: 0 1px 2px rgba(16, 26, 36, 0.05), 0 1px 1px rgba(16, 26, 36, 0.04);
@@ -238,6 +241,7 @@
     --error-border: #e0584f;
 
     --btn-bg: #18232c;
+    --btn-border: #324350;
     --btn-hover-bg: #1e2b35;
     --btn-active-bg: #243340;
     --btn-hover-border: #324350;
@@ -269,7 +273,10 @@
 
   body {
     margin: 0 auto;
-    padding: 1rem;
+    /* Fluid page gutter: --gutter interpolates 0.875rem→1.75rem with viewport,
+       so the outer frame breathes on desktop and tightens on phones without a
+       breakpoint. Replaces the old fixed 1rem + the <600px 0.5rem override. */
+    padding: var(--gutter);
     max-width: var(--content-max);
     min-height: 100vh;
     color: var(--text);
@@ -297,35 +304,54 @@
 @layer components {
 .dashboard-header {
   display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
+  align-items: center;
+  gap: var(--space-3);
   flex-wrap: wrap;
+  padding-bottom: var(--space-4);
   margin-bottom: var(--gap);
+  border-bottom: var(--border-w) solid var(--hairline);
 }
 
 .dashboard-header h1 {
   margin: 0;
-  font-size: 1.5rem;
+  margin-right: auto;
+  font-family: var(--font-display);
+  font-size: var(--fs-h1);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-strong);
 }
 
 .stale-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   background: var(--state-warning-bg);
   color: var(--state-warning-fg);
-  border-radius: 999px;
-  padding: 0.15rem 0.6rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  border: var(--border-w) solid
+    color-mix(in srgb, var(--state-warning-fg) 28%, transparent);
+  border-radius: var(--radius-pill);
+  padding: 0.2rem 0.6rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  letter-spacing: var(--tracking-mono);
 }
 
 /* 4. Layout grids ---------------------------------------------------------- */
 
+/* Fluid auto-fit: the min track is itself a clamp, so cards stack to one
+   column below ~360px (min(100%, …) prevents an overflowing track), widen
+   their floor as the viewport grows, and the auto-fit lets the grid pack MORE
+   columns on ultrawide (up to --content-max) instead of leaving dead margin.
+   Replaces the fixed minmax(300px,1fr) + the <600px `1fr` override. */
 #tab-body {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(100%, clamp(17rem, 24vw, 22rem)), 1fr)
+  );
   gap: var(--gap);
 }
 
@@ -339,13 +365,18 @@
 .tab-bar {
   display: flex;
   flex-direction: row;
-  gap: 0.5rem;
+  gap: var(--space-1);
   margin-bottom: var(--gap);
+  padding: var(--space-1);
   flex-wrap: nowrap;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   scroll-snap-type: x mandatory;
+  background: var(--card-bg);
+  border: var(--border-w) solid var(--card-border);
+  border-radius: var(--radius);
+  box-shadow: var(--elev-1);
 }
 
 .tab-bar::-webkit-scrollbar {
@@ -353,62 +384,121 @@
 }
 
 .tab-pill {
+  position: relative;
   min-height: 44px;
   min-width: 44px;
-  padding: 0.4rem 0.9rem;
-  border-radius: 999px;
-  border: 1px solid var(--card-border);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 0;
   background: transparent;
   color: var(--text-muted);
-  font: inherit;
+  font-family: var(--font-display);
+  font-size: var(--fs-small);
+  font-weight: 500;
   cursor: pointer;
   flex: 0 0 auto;
+  white-space: nowrap;
   scroll-snap-align: start;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: color var(--dur-1) var(--ease-std),
+    background var(--dur-1) var(--ease-std);
 }
 
 .tab-pill:hover {
-  background: var(--btn-hover-bg);
-  border-color: var(--btn-hover-border);
+  background: var(--row-hover);
+  color: var(--text);
 }
 
 .tab-pill:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--signal);
   outline-offset: 2px;
 }
 
 .tab-pill.active,
 .tab-pill[aria-current="page"] {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+
+/* Amber underline rail under the active tab — the single sharp accent the
+   "precision instrument" reserves for the active section indicator. */
+.tab-pill.active::after,
+.tab-pill[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: var(--space-4);
+  right: var(--space-4);
+  bottom: 4px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent-strong);
+  box-shadow: 0 0 8px -1px var(--accent-strong);
 }
 
 /* 5. Card base ------------------------------------------------------------- */
 
 .card {
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius);
+  position: relative;
+  /* Instrument depth: a faint top-to-bottom surface gradient instead of a flat
+     fill, lifted off the page with --elev-1 + an inner top highlight. */
+  background: linear-gradient(180deg, var(--card-bg), var(--card-bg-2));
+  border: var(--border-w) solid var(--card-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-1), var(--inner-top);
   padding: var(--pad);
   /* Lets the table card overflow horizontally without the card itself
      blowing out the grid track. */
   min-width: 0;
+  /* Establish an inline-size containment context so card-internal layouts
+     (dl grids, tables) can reflow on the CARD's width via @container, not the
+     viewport — a card in a narrow grid track reflows even on a wide screen.
+     `inline-size` only (not `size`) so height stays content-driven and the
+     sticky #disk header / aspect-ratio map are unaffected. */
+  container-type: inline-size;
+  transition: box-shadow var(--dur-2) var(--ease-out),
+    border-color var(--dur-2) var(--ease-std);
+}
+
+/* Top hairline highlight rail — reads as a machined edge catching light. */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, var(--hairline), transparent 64px);
+  opacity: 0.5;
+}
+
+.card:hover {
+  box-shadow: var(--elev-2), var(--inner-top);
+  border-color: var(--card-border-strong);
 }
 
 .card h2 {
-  font-size: 1rem;
+  font-family: var(--font-display);
+  font-size: var(--fs-h3);
   font-weight: 600;
+  line-height: var(--lh-snug);
   margin-top: 0;
-  margin-bottom: 0.75rem;
-  color: var(--text);
+  margin-bottom: var(--space-3);
+  color: var(--text-strong);
 }
 
 .card.error {
   background: var(--error-bg);
   border-color: var(--error-border);
   color: var(--error-fg);
-  padding: calc(var(--pad) + 0.25rem);
+  padding: calc(var(--pad) + var(--space-1));
+}
+
+/* Keep the error card flat — the danger fill carries the meaning, the surface
+   gradient + highlight rail would muddy it. */
+.card.error::before {
+  display: none;
+}
+
+.card.error:hover {
+  border-color: var(--error-border);
 }
 
 /* 6. Definition lists ------------------------------------------------------ */
@@ -441,11 +531,11 @@
 }
 
 .server-pubkey {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
   background: var(--code-bg);
   padding: 0.15rem 0.4rem;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   word-break: break-all;
   /* Without min-width:0, a flex child with long content forces overflow. */
   min-width: 0;
@@ -456,14 +546,18 @@
 
 .state-pill,
 .status-pill {
-  display: inline-block;
-  padding: 0.15rem 0.6rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 5px 9px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  border: var(--border-w) solid transparent;
+  white-space: nowrap;
   margin: 0;
 }
 
@@ -481,10 +575,11 @@
   color: var(--state-inactive-fg);
 }
 
-/* failed → red */
+/* failed → red, with a danger hairline to match the mockup's firing pill */
 .state-failed {
   background: var(--state-failed-bg);
   color: var(--state-failed-fg);
+  border-color: color-mix(in srgb, var(--error-border) 30%, transparent);
 }
 
 /* activating / deactivating → amber */
@@ -511,7 +606,16 @@
 .meta {
   margin: 0.5rem 0 0;
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: var(--fs-small);
+}
+
+.meta code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+  background: var(--code-bg);
+  padding: 0.05rem 0.3rem;
+  border-radius: var(--radius-sm);
+  word-break: break-all;
 }
 
 /* 8. (Removed — the dedicated uptime card was retired in Slice 12; "Active
@@ -526,28 +630,34 @@
   min-width: 44px;
   padding: 0.4rem 0.8rem;
   border-radius: var(--radius);
-  border: 1px solid var(--card-border);
-  background: var(--card-bg);
+  border: var(--border-w) solid var(--btn-border);
+  background: var(--btn-bg);
   color: var(--text);
-  font: inherit;
+  font-family: var(--font-display);
+  font-size: var(--fs-small);
+  font-weight: 500;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
+  box-shadow: var(--elev-1);
+  transition: background var(--dur-1) var(--ease-std),
+    border-color var(--dur-1) var(--ease-std),
+    transform var(--dur-1) var(--ease-out);
 }
 
 .copy-btn:hover,
 .theme-toggle:hover {
   background: var(--btn-hover-bg);
-  border-color: var(--btn-hover-border);
+  border-color: var(--card-border-strong);
 }
 
 .copy-btn:active,
 .theme-toggle:active {
   background: var(--btn-active-bg);
+  transform: translateY(1px);
 }
 
 .copy-btn:focus-visible,
 .theme-toggle:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--signal);
   outline-offset: 2px;
 }
 
@@ -569,21 +679,31 @@
 .webhook-form input[type="url"] {
   width: 100%;
   min-height: 44px;
-  padding: 0.4rem 0.6rem;
+  padding: 0.4rem var(--space-3);
   border-radius: var(--radius);
-  border: 1px solid var(--card-border);
-  background: var(--card-bg);
+  border: var(--border-w) solid var(--card-border);
+  background: var(--card-bg-2);
   color: var(--text);
-  font: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  box-shadow: var(--inner-top);
   /* Without min-width:0 a flex/grid child with a long placeholder can force
      horizontal page scroll below 360px. */
   min-width: 0;
   box-sizing: border-box;
+  transition: border-color var(--dur-1) var(--ease-std),
+    box-shadow var(--dur-1) var(--ease-std);
 }
 
+.webhook-form input[type="url"]::placeholder {
+  color: var(--text-faint);
+}
+
+/* Teal signal focus ring (no visible outline) — matches the mockup .input. */
 .webhook-form input[type="url"]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: 0;
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-ring);
 }
 
 .webhook-actions {
@@ -597,31 +717,60 @@
   min-width: 44px;
   padding: 0.4rem 0.9rem;
   border-radius: var(--radius);
-  border: 1px solid var(--card-border);
-  background: var(--card-bg);
+  border: var(--border-w) solid var(--btn-border);
+  background: var(--btn-bg);
   color: var(--text);
-  font: inherit;
+  font-family: var(--font-display);
+  font-size: var(--fs-small);
+  font-weight: 500;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
+  box-shadow: var(--elev-1);
+  transition: background var(--dur-1) var(--ease-std),
+    border-color var(--dur-1) var(--ease-std),
+    transform var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-1) var(--ease-std);
 }
 
+/* Set = the single primary action: amber fill with a soft top-light gradient. */
 .webhook-actions button[type="submit"] {
-  background: var(--accent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-strong) 92%, white),
+    var(--accent-strong)
+  );
   color: var(--accent-fg);
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent-strong) 60%, #000);
 }
 
 .webhook-actions button:hover {
   background: var(--btn-hover-bg);
-  border-color: var(--btn-hover-border);
+  border-color: var(--card-border-strong);
+}
+
+.webhook-actions button:active {
+  background: var(--btn-active-bg);
+  transform: translateY(1px);
 }
 
 .webhook-actions button[type="submit"]:hover {
-  filter: brightness(1.08);
+  filter: brightness(1.04);
+  box-shadow: var(--elev-2);
+  border-color: color-mix(in srgb, var(--accent-strong) 60%, #000);
+}
+
+.webhook-actions button[disabled],
+.webhook-actions button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+  box-shadow: none;
+  background: var(--btn-bg);
+  color: var(--text-faint);
+  transform: none;
+  filter: none;
 }
 
 .webhook-actions button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--signal);
   outline-offset: 2px;
 }
 
@@ -629,12 +778,13 @@
   display: inline-block;
   margin-left: 0.4rem;
   padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: 600;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--fs-overline);
+  font-weight: 500;
   background: var(--state-unknown-bg);
   color: var(--state-unknown-fg);
-  border: 1px solid var(--state-unknown-border);
+  border: var(--border-w) solid var(--state-unknown-border);
 }
 
 .webhook-message {
@@ -665,18 +815,24 @@
 .client-table th,
 .client-table td {
   text-align: left;
-  padding: 0.5rem 0.6rem;
-  border-bottom: 1px solid var(--card-border);
+  padding: var(--space-3) var(--space-3);
+  border-bottom: var(--border-w) solid var(--hairline);
   vertical-align: middle;
 }
 
 .client-table th {
-  font-weight: 600;
-  color: var(--text-muted);
-  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text-faint);
+  font-size: var(--fs-overline);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  background: var(--row-stripe);
+  letter-spacing: var(--tracking-overline);
+  background: var(--card-bg-2);
+  border-bottom: var(--border-w) solid var(--card-border);
+}
+
+.client-table tbody tr {
+  transition: background var(--dur-1) var(--ease-std);
 }
 
 .client-table tbody tr:nth-child(even) {
@@ -697,9 +853,10 @@
 
 .event-item {
   display: flex;
+  align-items: center;
   gap: 0.75rem;
   padding: 0.4rem 0;
-  border-bottom: 1px solid var(--card-border);
+  border-bottom: var(--border-w) solid var(--hairline);
 }
 
 .event-item:last-child {
@@ -708,6 +865,8 @@
 
 .event-time {
   color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
   font-variant-numeric: tabular-nums;
   min-width: 5em;
   flex-shrink: 0;
@@ -721,8 +880,139 @@
 
 .empty {
   color: var(--text-muted);
+  font-size: var(--fs-small);
   font-style: italic;
   margin: 0;
+}
+
+/* 12b. Alerts strip (Overview) + alert events (Events) --------------------- */
+
+/* The active-alerts strip and the recent-alerts feed share the alert-badge
+   pill + a left severity rail, matching the mockup's .alerts-strip / .alert-row.
+   Markup is unstyled by default; these rules dress it into the system. */
+.alert-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.alert-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--card-bg-2);
+  border: var(--border-w) solid var(--hairline);
+  border-left: 3px solid var(--state-inactive-fg);
+}
+
+.alert-item.alert-firing {
+  border-left-color: var(--error-border);
+  background: color-mix(in srgb, var(--error-bg) 40%, var(--card-bg-2));
+}
+
+.alert-condition {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.alert-detail {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+}
+
+.alert-since {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Severity badge — the firing/recovered tag on both surfaces. */
+.alert-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--fs-overline);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--error-bg);
+  color: var(--error-fg);
+  border: var(--border-w) solid
+    color-mix(in srgb, var(--error-border) 30%, transparent);
+}
+
+.alert-event-recovered .alert-badge {
+  background: var(--state-active-bg);
+  color: var(--state-active-fg);
+  border-color: transparent;
+}
+
+/* The recent-alerts feed reuses .event-item layout; left-tint its rail by
+   severity so firing vs recovered reads at a glance. */
+.alert-event {
+  border-left: 3px solid var(--error-border);
+  padding-left: var(--space-3);
+}
+
+.alert-event-recovered {
+  border-left-color: var(--success);
+}
+
+.alert-config-hint {
+  margin: var(--space-3) 0 0;
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+}
+
+/* When something is firing, mark the whole Overview alerts card with a danger
+   top edge so it reads as the page's attention magnet. */
+.active-alerts-firing {
+  border-top: 2px solid var(--error-border);
+}
+
+/* 12c. Tab-switch entrance reveal ----------------------------------------- */
+
+/* A one-shot staggered rise of the tab's top-level children on a USER tab
+   change. tabs.js adds `.tab-enter` to #tab-body after the htmx swap resolves
+   in route() and strips it on animationend — so it fires ONLY on hash-driven
+   tab navigation, never on the per-component 10s refreshes (those re-render
+   cards in place without re-running route()). Gated behind reduced-motion in
+   §18. The keyframe is `backwards` so children start hidden before their delay
+   elapses; data is present immediately (animation is presentation-only and
+   never blocks layout or interaction). */
+#tab-body.tab-enter > * {
+  animation: tab-rise var(--dur-3) var(--ease-out) backwards;
+}
+
+#tab-body.tab-enter > *:nth-child(1) { animation-delay: 0ms; }
+#tab-body.tab-enter > *:nth-child(2) { animation-delay: 45ms; }
+#tab-body.tab-enter > *:nth-child(3) { animation-delay: 90ms; }
+#tab-body.tab-enter > *:nth-child(4) { animation-delay: 135ms; }
+#tab-body.tab-enter > *:nth-child(5) { animation-delay: 180ms; }
+#tab-body.tab-enter > *:nth-child(6) { animation-delay: 225ms; }
+#tab-body.tab-enter > *:nth-child(n + 7) { animation-delay: 270ms; }
+
+@keyframes tab-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* 13. Charts --------------------------------------------------------------- */
@@ -735,11 +1025,14 @@
 
 /* 14. Tab layout grids ---------------------------------------------------- */
 
+/* Chart pairs: auto-fit with a wide-ish floor so the two canvases sit
+   side-by-side on tablet+ and stack to one column on phones without the old
+   <600px `1fr` override. */
 #tab-body .system-charts,
 #tab-body .network-charts {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
   gap: var(--gap);
 }
 
@@ -771,7 +1064,7 @@
 }
 
 .client-row:hover {
-  background-color: var(--btn-hover-bg);
+  background-color: var(--row-hover);
 }
 
 /* Config download links (Clients tab CONFIG column — spec 004). The browser
@@ -796,7 +1089,7 @@
 .config-actions a:focus-visible {
   color: var(--accent-fg);
   background-color: var(--accent);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   text-decoration: none;
 }
 
@@ -863,20 +1156,21 @@
 .disk-table td {
   text-align: left;
   padding: 0.4rem 0.5rem;
-  border-bottom: 1px solid var(--card-border);
+  border-bottom: var(--border-w) solid var(--hairline);
   vertical-align: middle;
 }
 
 .disk-table th {
-  font-weight: 600;
-  color: var(--text-muted);
-  font-size: 0.85em;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text-faint);
+  font-size: var(--fs-overline);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tracking-overline);
 }
 
 .disk-table code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.9em;
 }
 
@@ -886,14 +1180,14 @@
   min-width: 140px;
   height: 18px;
   background-color: var(--card-border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
 .progress-bar-fill {
   height: 100%;
-  border-radius: 4px;
-  transition: width 240ms ease-out;
+  border-radius: var(--radius-sm);
+  transition: width var(--dur-3) var(--ease-out);
 }
 
 .progress-bar-fill.threshold-ok    { background-color: var(--success); }
@@ -929,21 +1223,31 @@
 .process-table td {
   text-align: left;
   padding: 0.4rem 0.5rem;
-  border-bottom: 1px solid var(--card-border);
+  border-bottom: var(--border-w) solid var(--hairline);
   vertical-align: middle;
 }
 
 .process-table th {
-  font-weight: 600;
-  color: var(--text-muted);
-  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text-faint);
+  font-size: var(--fs-overline);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  background: var(--row-stripe);
+  letter-spacing: var(--tracking-overline);
+  background: var(--card-bg-2);
+  border-bottom: var(--border-w) solid var(--card-border);
+}
+
+.process-table tbody tr {
+  transition: background var(--dur-1) var(--ease-std);
 }
 
 .process-table tbody tr:nth-child(even) {
   background: var(--row-stripe);
+}
+
+.process-table tbody tr:hover {
+  background: var(--row-hover);
 }
 
 /* Column widths sized so PID / User / numeric columns stay snug and the
@@ -964,11 +1268,11 @@
 }
 
 .process-table td code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--code-bg);
   padding: 0.05rem 0.3rem;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 #processes {
@@ -1000,6 +1304,8 @@
   margin: 0;
   min-width: 0;
   word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1007,14 +1313,16 @@
 
 .aggregate-traffic-line {
   margin: 0;
-  font-size: 1rem;
-  line-height: 1.6;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
 }
 
 .aggregate-traffic-line strong {
-  font-size: 1.15rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-lead);
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-  color: var(--text);
+  color: var(--text-strong);
 }
 
 /* 16e. About cards -------------------------------------------------------- */
@@ -1025,11 +1333,11 @@
 #about-ec2 dd code,
 #about-binary dd code,
 #about-os dd code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--code-bg);
   padding: 0.05rem 0.3rem;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   overflow-wrap: anywhere;
   word-break: break-all;
 }
@@ -1044,8 +1352,11 @@
 
 .client-count {
   margin: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: var(--fs-stat);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  color: var(--text-strong);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -1064,7 +1375,10 @@
 .overview-grid {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* Fluid 2-up: auto-fit with a min(100%, …) floor collapses to a single
+     stacked column below ~32rem and pairs cards above it, replacing the old
+     fixed 1fr 1fr + the <600px `1fr` override. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
   gap: var(--gap);
   align-items: stretch;
 }
@@ -1084,84 +1398,113 @@
 /* 17. Responsive ----------------------------------------------------------- */
 
 @layer responsive {
-@media (max-width: 600px) {
-  body {
-    padding: 0.5rem;
-  }
+/* Slice 3 retired the single `@media (max-width:600px)` matrix: the fluid
+   --fs-*/--space-*/--gutter scales and the auto-fit grids (min(100%, …) floors)
+   now reflow type, spacing, and column counts continuously, so the global
+   stacking/sizing overrides are gone. What remains is genuinely LAYOUT-shape
+   work that a clamp can't express:
+     1. card-internal dl reflow keyed on the CARD's width (@container), so a
+        2-pair dl flattens when ITS card is narrow regardless of viewport;
+     2. an in-card scroll floor for the wide tables;
+     3. a small viewport breakpoint that only tightens the tab-bar on phones.
+   The @container rules carry @media (max-width) fallbacks for engines without
+   container-query support (the auto-fit grids degrade gracefully on their
+   own). */
 
-  :root {
-    --pad: 0.75rem;
-    --gap: 0.75rem;
-  }
+/* 17a. Card-internal dl reflow (container-query primary) ------------------- */
 
-  #tab-body {
-    grid-template-columns: 1fr;
-  }
-
-  #tab-body .system-charts,
-  #tab-body .network-charts {
-    grid-template-columns: 1fr;
-  }
-
-  /* Overview's 2-col grid collapses to a single stack at narrow widths. */
-  .overview-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .card h2 {
-    font-size: 0.95rem;
-  }
-
-  .dashboard-header h1 {
-    font-size: 1.25rem;
-  }
-
-  /* Tab-bar nowrap/overflow-x/scrollbar hiding were hoisted to Section 4b
-     as the default behavior; this block only tightens spacing at <600px. */
-  .tab-bar {
-    gap: 0.4rem;
-  }
-
-  .tab-pill {
-    padding: 0.4rem 0.7rem;
-  }
-
-  /* Re-flow multi-column cards to a single column at narrow widths.
-     Tables keep their columns but scroll horizontally inside the card so
-     page-level horizontal scroll never happens at 360px wide. */
-  #disk,
-  #processes {
-    overflow-x: auto;
-  }
-
-  #disk .disk-table,
-  #processes .process-table {
-    min-width: 480px;
-  }
-
-  /* Flatten the 2-pair-per-row dl grids in About + WG-iface to a single
-     stacked column. dt sits on its own line; dd indents below. */
+/* When the host card is narrower than --bp-card (30rem), flatten the
+   2-pair-per-row dl grids (About + WG-iface) to a single stacked column so the
+   [dt dd dt dd] row doesn't crush the value columns. */
+@container (max-width: 30rem) {
   #about-ec2 dl,
   #about-binary dl,
   #about-os dl,
   .wg-iface-stats {
     grid-template-columns: 1fr;
-    row-gap: 0.15rem;
+    row-gap: var(--space-1);
   }
 
   #about-ec2 dt,
   #about-binary dt,
   #about-os dt,
   .wg-iface-stats dt {
-    margin-top: 0.25rem;
+    margin-top: var(--space-1);
   }
 
   #about-ec2 dd,
   #about-binary dd,
   #about-os dd,
   .wg-iface-stats dd {
-    margin-bottom: 0.5rem;
-    padding-left: 0.25rem;
+    margin-bottom: var(--space-2);
+    padding-left: var(--space-1);
+  }
+}
+
+/* Fallback for engines without @container support: key the same reflow off the
+   viewport. The full-row-span About/WG cards are ~viewport-wide at <600px, so a
+   viewport breakpoint is a faithful stand-in there. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 600px) {
+    #about-ec2 dl,
+    #about-binary dl,
+    #about-os dl,
+    .wg-iface-stats {
+      grid-template-columns: 1fr;
+      row-gap: var(--space-1);
+    }
+
+    #about-ec2 dt,
+    #about-binary dt,
+    #about-os dt,
+    .wg-iface-stats dt {
+      margin-top: var(--space-1);
+    }
+
+    #about-ec2 dd,
+    #about-binary dd,
+    #about-os dd,
+    .wg-iface-stats dd {
+      margin-bottom: var(--space-2);
+      padding-left: var(--space-1);
+    }
+  }
+}
+
+/* 17b. Wide-table scroll floor -------------------------------------------- */
+
+/* The disk/process tables keep their columns and scroll horizontally INSIDE
+   the card (overflow-x:auto declared on the cards in §16/§16b) so page-level
+   horizontal scroll never happens. The min-width here is the floor below which
+   they begin to scroll; it kicks in on narrow cards via @container. */
+@container (max-width: 30rem) {
+  #disk .disk-table,
+  #processes .process-table {
+    min-width: 480px;
+  }
+}
+
+@supports not (container-type: inline-size) {
+  @media (max-width: 600px) {
+    #disk .disk-table,
+    #processes .process-table {
+      min-width: 480px;
+    }
+  }
+}
+
+/* 17c. Tab-bar spacing on phones ------------------------------------------ */
+
+/* The one surviving viewport breakpoint: the tab-bar is a page-level scroller
+   (not card-internal), so it keys on the viewport, not a container. Only
+   tightens spacing; nowrap/overflow-x live in §4b as the default. */
+@media (max-width: 600px) {
+  .tab-bar {
+    gap: var(--space-2);
+  }
+
+  .tab-pill {
+    padding: var(--space-2) var(--space-3);
   }
 }
 
@@ -1199,11 +1542,21 @@
 
 .range-selector select {
   padding: 0.25rem 0.5rem;
-  background-color: var(--card-bg);
+  background-color: var(--card-bg-2);
   color: var(--text);
-  border: 1px solid var(--card-border);
-  border-radius: 4px;
-  font: inherit;
+  border: var(--border-w) solid var(--card-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  box-shadow: var(--inner-top);
+  transition: border-color var(--dur-1) var(--ease-std),
+    box-shadow var(--dur-1) var(--ease-std);
+}
+
+.range-selector select:focus-visible {
+  outline: 0;
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-ring);
 }
 
 /* 12. Geo map card (spec 006 Slice 4) -------------------------------------- */
@@ -1227,8 +1580,8 @@
      with the projection exactly at any width. */
   aspect-ratio: 2 / 1;
   background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 6px;
+  border: var(--border-w) solid var(--card-border);
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -1299,9 +1652,9 @@
   max-width: 16rem;
   padding: 0.4rem 0.6rem;
   background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  border: var(--border-w) solid var(--card-border);
+  border-radius: var(--radius);
+  box-shadow: var(--elev-2);
   color: var(--text);
   font-size: 0.82rem;
   line-height: 1.4;
