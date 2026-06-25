@@ -45,10 +45,8 @@ module "wireguard" {
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]
-  dashboard_release_tag  = "v0.0.2"
+  dashboard_release_tag  = "v0.0.3"
   dashboard_release_repo = "vkatrichenko/wireguard-vpn"
-  # dashboard_release_tag  = local.dashboard_release_tag
-  # dashboard_release_repo = local.dashboard_release_repo
 
   tags = local.default_tags
 }
