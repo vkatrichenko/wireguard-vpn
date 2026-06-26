@@ -7,6 +7,12 @@
 ![Go](https://img.shields.io/badge/Go-1.25.5-00ADD8?logo=go&logoColor=white)
 ![WireGuard](https://img.shields.io/badge/WireGuard-UDP%2051820-88171A?logo=wireguard&logoColor=white)
 
+<p align="center">
+  <img src="docs/dashboard-demo.gif" alt="A tour of the VPN-only dashboard — Overview, Clients (with peer map), System, Network, Events, and About tabs" width="100%">
+</p>
+
+<p align="center"><sub>The VPN-only dashboard, tab by tab. Captured from a live instance; IPs, peer locations, keys, and host identifiers are replaced with illustrative values.</sub></p>
+
 ---
 
 ## What is this?
