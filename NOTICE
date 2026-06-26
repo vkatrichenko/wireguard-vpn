@@ -1,0 +1,88 @@
+WireGuard VPN on AWS
+Copyright 2026 Vladyslav Katrychenko
+
+This product is licensed under the Apache License, Version 2.0 (see the LICENSE
+file in the root of this repository).
+
+================================================================================
+Third-party software and assets
+================================================================================
+
+This product bundles / includes the following third-party software and assets.
+Each is distributed under its own license, identified below. Full license texts
+live in the referenced per-asset files (or with the upstream project) rather
+than being duplicated here.
+
+--------------------------------------------------------------------------------
+Embedded fonts
+--------------------------------------------------------------------------------
+
+IBM Plex Sans & IBM Plex Mono
+  Copyright (c) 2017 IBM Corp. with Reserved Font Name "Plex"
+  License: SIL Open Font License, Version 1.1 (OFL-1.1)
+  Full text: dashboard/web/static/fonts/OFL.txt
+  Note: the committed .woff2 files are subset, design-time artifacts derived
+  from the upstream variable/static fonts; see
+  dashboard/web/static/VENDORED.txt for the subsetting pipeline.
+
+--------------------------------------------------------------------------------
+Embedded geolocation data
+--------------------------------------------------------------------------------
+
+DB-IP IP-to-City Lite database (dbip-city-lite.mmdb)
+  License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+  Full text / details: dashboard/internal/geoip/LICENSE-DB-IP.txt
+  Required attribution:
+      IP Geolocation by DB-IP (https://db-ip.com)
+
+--------------------------------------------------------------------------------
+Embedded map outline
+--------------------------------------------------------------------------------
+
+World map outline (world.svg), derived from Natural Earth 110m Admin-0 countries
+  License: Public Domain (Natural Earth — https://www.naturalearthdata.com/about/terms-of-use/)
+  No attribution required.
+  Provenance: dashboard/web/static/VENDORED.txt
+
+--------------------------------------------------------------------------------
+Vendored JavaScript (dashboard/web/static/)
+--------------------------------------------------------------------------------
+
+htmx (htmx.min.js, v2.0.6)
+  Copyright (c) Big Sky Software
+  License: BSD 2-Clause "Simplified" License (BSD-2-Clause)
+  Provenance: dashboard/web/static/VENDORED.txt
+  Full text: https://github.com/bigskysoftware/htmx/blob/master/LICENSE
+
+Chart.js (chart.umd.min.js, v4.4.7)
+  Copyright (c) Chart.js Contributors
+  License: MIT
+  Provenance: dashboard/web/static/VENDORED.txt
+  Full text: https://github.com/chartjs/Chart.js/blob/master/LICENSE.md
+
+chartjs-adapter-date-fns (chartjs-adapter-date-fns.bundle.min.js, v3.0.0)
+  Copyright (c) chartjs-adapter-date-fns contributors; bundles date-fns
+  (Copyright (c) Sasha Koss and Lesha Koss)
+  License: MIT (both the adapter and the bundled date-fns)
+  Provenance: dashboard/web/static/VENDORED.txt
+  Full text: https://github.com/chartjs/chartjs-adapter-date-fns/blob/master/LICENSE.md
+
+--------------------------------------------------------------------------------
+Go modules (see dashboard/go.mod; full license texts ship with each module)
+--------------------------------------------------------------------------------
+
+modernc.org/sqlite
+  License: BSD 3-Clause "New" or "Revised" License (BSD-3-Clause)
+  Full text: with the module (https://gitlab.com/cznic/sqlite/-/blob/master/LICENSE)
+
+github.com/oschwald/geoip2-golang
+github.com/oschwald/maxminddb-golang
+  License: ISC License
+  Full text: with each module
+  (https://github.com/oschwald/geoip2-golang/blob/main/LICENSE,
+   https://github.com/oschwald/maxminddb-golang/blob/main/LICENSE)
+
+golang.org/x/sys
+  Copyright (c) The Go Authors
+  License: BSD 3-Clause "New" or "Revised" License (BSD-3-Clause)
+  Full text: with the module (https://cs.opensource.google/go/x/sys/+/master:LICENSE)
