@@ -1,6 +1,11 @@
 .terraform
 *.tfstate
 
+# GeoIP databases (fetched at build, never committed) and Terraform plan files (may contain secrets)
+*.mmdb
+*.tfplan
+tfplan
+
 ### VS Code ###
 .vscode/
 .DS_Store

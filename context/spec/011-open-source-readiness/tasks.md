@@ -23,10 +23,10 @@ Each additive slice leaves the repo in a runnable state (`make pre-commit` stays
   - [x] Add `.github/PULL_REQUEST_TEMPLATE.md` mirroring the project PR convention (Summary / optional Architecture decisions / surface-area table). **[Agent: cicd-github-actions]**
   - [x] Verify: files present and valid; issue templates structurally correct; PR template matches the convention. (GitHub template rendering is an owner post-merge check.) **[Agent: cicd-github-actions]**
 
-- [ ] **Slice 4: Config & gitignore hygiene**
-  - [ ] Edit `.claude/settings.json` — remove `permissions.allow: ["Bash", "Write"]`; keep the `extraKnownMarketplaces` (awos) entry. **[Agent: devsecops-quality]**
-  - [ ] Edit `.gitignore` — add `*.mmdb` and `*.tfplan`. **[Agent: devsecops-quality]**
-  - [ ] Verify: committed `settings.json` has no broad `allow` and is valid JSON; `git check-ignore` confirms `*.mmdb` and `*.tfplan` are ignored; `settings.local.json` still ignored; `make pre-commit` passes. **[Agent: devsecops-quality]**
+- [x] **Slice 4: Config & gitignore hygiene**
+  - [x] Edit `.claude/settings.json` — remove `permissions.allow: ["Bash", "Write"]`; keep the `extraKnownMarketplaces` (awos) entry. **[Agent: devsecops-quality]** _(settings.json is harness-gated for subagents; the edit was applied by the lead agent.)_
+  - [x] Edit `.gitignore` — add `*.mmdb` and `*.tfplan` (plus bare `tfplan` for the extensionless historical plan file). **[Agent: devsecops-quality]**
+  - [x] Verify: committed `settings.json` has no broad `allow` and is valid JSON; `git check-ignore` confirms `*.mmdb` and `*.tfplan` are ignored; `settings.local.json` still ignored; `make pre-commit` passes. **[Agent: devsecops-quality]**
 
 - [ ] **Slice 5: Git-history rewrite — purge GeoLite2 blob (OWNER-RUN)**
   - [ ] Produce a runbook with the exact BFG commands: mirror clone → `java -jar bfg.jar --delete-files GeoLite2-City.mmdb` → `git reflog expire --expire=now --all && git gc --prune=now --aggressive` → verify → `git push --force`. **[Agent: general-purpose]**
