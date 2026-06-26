@@ -28,9 +28,8 @@ Each additive slice leaves the repo in a runnable state (`make pre-commit` stays
   - [x] Edit `.gitignore` — add `*.mmdb` and `*.tfplan` (plus bare `tfplan` for the extensionless historical plan file). **[Agent: devsecops-quality]**
   - [x] Verify: committed `settings.json` has no broad `allow` and is valid JSON; `git check-ignore` confirms `*.mmdb` and `*.tfplan` are ignored; `settings.local.json` still ignored; `make pre-commit` passes. **[Agent: devsecops-quality]**
 
-- [ ] **Slice 5: Git-history rewrite — purge GeoLite2 blob (OWNER-RUN)**
-  - [ ] Produce a runbook with the exact BFG commands: mirror clone → `java -jar bfg.jar --delete-files GeoLite2-City.mmdb` → `git reflog expire --expire=now --all && git gc --prune=now --aggressive` → verify → `git push --force`. **[Agent: general-purpose]**
-  - [ ] **Owner** executes the rewrite + `git push --force`, then confirms `git rev-list --objects --all | grep -i mmdb` is empty and the `.git` directory shrank materially. **(Owner-run — the agent cannot execute or verify this slice; force-push to the public remote is the owner's, per the never-push-without-confirmation rule.)**
+- [ ] ~~**Slice 5: Git-history rewrite — purge GeoLite2 blob (OWNER-RUN)**~~ — **DESCOPED (2026-06-26, owner decision: "no need to clean git history")**
+  - The ~65 MB GeoLite2 blob remains in history; the destructive force-push was judged not worth the disruption. The `.gitignore` hardening from Slice 4 (`*.mmdb`, `*.tfplan`, `tfplan`) prevents future re-commits, which was deemed sufficient. The BFG runbook is recorded in `technical-considerations.md` §2.3 should this be revisited.
 
 ---
 
@@ -39,7 +38,7 @@ Each additive slice leaves the repo in a runnable state (`make pre-commit` stays
 | Task/Slice | Issue | Resolution |
 |------------|-------|------------|
 | Slice 1 & 2 doc sub-tasks | Assigned to `general-purpose` — no legal/governance-docs specialist | Accepted (prose/legal files); a `docs-writer` agent could be added later |
-| Slice 5 (history rewrite) | Cannot be agent-executed/verified — owner-run force-push to a public remote | **Approved** to skip agent verification; owner runs the runbook + force-push and confirms the verification commands |
+| Slice 5 (history rewrite) | Owner-run force-push to a public remote | **DESCOPED (2026-06-26)** — owner decided the history purge is not needed; `.gitignore` hardening covers future re-commits |
 | GitHub-render checks (Slices 1–3) | License sidebar / Security tab / template rendering only verifiable on GitHub | Owner confirms post-merge on GitHub; local agent verification covers file presence/validity |
 
 ## Out of scope (recorded)
