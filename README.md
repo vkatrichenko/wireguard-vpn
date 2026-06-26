@@ -263,9 +263,9 @@ Contributions are welcome. Please:
 
 ## License
 
-> **No project license file is committed yet.** Add a `LICENSE` (e.g. MIT or Apache-2.0) before relying on this repository.
+This project is licensed under the **Apache License 2.0** — see [`LICENSE`](LICENSE) for the full text. Copyright 2026 Vladyslav Katrychenko.
 
-Bundled third-party assets retain their own licenses (recorded in [`dashboard/web/static/VENDORED.txt`](dashboard/web/static/VENDORED.txt)):
+Bundled third-party components retain their own licenses and are attributed in [`NOTICE`](NOTICE) (reconciled with [`dashboard/web/static/VENDORED.txt`](dashboard/web/static/VENDORED.txt)):
 
 - **IBM Plex Sans / Mono** — SIL Open Font License 1.1
 - **World map outline** (Natural Earth–derived `world.svg`) — Public Domain
