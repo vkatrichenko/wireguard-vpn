@@ -42,8 +42,8 @@ Offer a fully codified, version-controlled WireGuard VPN infrastructure that can
 - **One-command VPN deploy** — Fully codified Terraform modules that provision VPC, subnets, EC2, security groups, IAM, and WireGuard configuration in a single `terraform apply`.
 - **Multi-client support** — Support multiple WireGuard clients via a configurable client list in `main.tf`, each with unique public keys and IP assignments.
 - **VPN-only observability dashboard** — A self-contained Go web dashboard (reachable only over the tunnel) showing server health, per-client online/offline status, throughput, connection history, and an offline world map of peer locations. Clients can download their own ready-to-use configs (full / split tunnel) from it.
-- **Proactive alerting** — The dashboard watches for the failures that matter (service down, high disk, sustained high CPU, a dropped peer, a peer over a transfer cap) and pushes notifications to a Slack-compatible webhook, with edge-triggering, cooldown, and recovery messages. The webhook can be managed (set / test / revert) at runtime from the dashboard.
-- **Offline & self-contained** — The dashboard makes no outbound requests for its own operation (embedded map + geolocation, no CDNs); it holds no client private keys; the only egress it adds is the opt-in alert webhook.
+- **Proactive alerting** — The dashboard watches for the failures that matter (service down, high disk, sustained high CPU, a peer over a transfer cap) and fans out notifications to any combination of a Slack-compatible incoming webhook, a Slack bot, Telegram, and Discord — with edge-triggering, cooldown, and recovery messages. The incoming webhook can be managed (set / test / revert) at runtime; the additional transports are opt-in at boot. A Prometheus `GET /metrics` endpoint exposes current VPN health for external scraping (Grafana etc.).
+- **Offline & self-contained** — The dashboard makes no outbound requests for its own operation (embedded map + geolocation, no CDNs); it holds no client private keys; the only egress it adds is the opt-in alert transports (and the `/metrics` endpoint is pull-only, making no outbound requests).
 
 ### 2.2. User Journey
 
@@ -52,7 +52,7 @@ Offer a fully codified, version-controlled WireGuard VPN infrastructure that can
 3. **Bootstrap** — run `terraform init && terraform plan -out=tfplan && terraform apply tfplan` in `terraform/dev/backend/` to create the S3 state bucket (one-time step).
 4. **Deploy** — run `terraform init && terraform plan -out=tfplan && terraform apply tfplan` in `terraform/dev/` to provision the full VPN infrastructure (and, when pinned, the dashboard).
 5. **Connect** — configure the local WireGuard client with the server's public IP and the corresponding private key, then `wg-quick up`.
-6. **Monitor & be alerted** — over the tunnel, open the dashboard at `http://172.16.15.1:8080` to watch status/throughput/history and the peer map; optionally point alerting at a Slack-compatible webhook so failures arrive in chat.
+6. **Monitor & be alerted** — over the tunnel, open the dashboard at `http://172.16.15.1:8080` to watch status/throughput/history and the peer map; optionally fan out alerting to a Slack webhook/bot, Telegram, and/or Discord so failures arrive in chat, and scrape the Prometheus `/metrics` endpoint into an external monitoring stack.
 
 ---
 
@@ -68,11 +68,12 @@ Offer a fully codified, version-controlled WireGuard VPN infrastructure that can
 - Pre-commit hooks for code quality (fmt, tflint, trivy, docs).
 - S3 remote state with native locking (no DynamoDB).
 - A VPN-only, single-binary web dashboard: server/peer status, throughput, connection history, offline geo map, and per-client config download (specs 002–006).
-- Proactive alerting to a Slack-compatible webhook with runtime webhook management (specs 007–008).
+- Proactive alerting fanned out to a Slack incoming webhook (runtime-managed) plus opt-in Slack bot / Telegram / Discord transports, and a Prometheus `/metrics` endpoint for external scraping (specs 007–008 / 012).
 
 ### 3.2. What's Out-of-Scope (Non-Goals)
 
 - **CI/CD pipeline for infrastructure** — all plan/apply operations are manual and local. No automated apply workflows.
 - **Dashboard authentication** — access is gated solely by the WireGuard tunnel; there is no login/session layer (revisit only if it becomes multi-user).
-- **Multi-channel / non-webhook alerting** — a single Slack-compatible webhook only (no email/SMS/PagerDuty routing).
-- **Persisting runtime dashboard config** — runtime webhook overrides are in-memory and reset to the deploy-time (SSM/env) value on restart.
+- **Email / SMS / PagerDuty alerting** — alerting fans out to chat transports only (Slack incoming webhook, Slack bot, Telegram, Discord); no email/SMTP/SES, SMS, or PagerDuty routing.
+- **Authentication or historical data on `/metrics`** — the Prometheus endpoint is VPN-gated (no auth) and exposes only current in-memory values; long-term retention is the scraper's job, not the dashboard's.
+- **Persisting runtime dashboard config** — runtime webhook overrides are in-memory and reset to the deploy-time (SSM/env) value on restart; the new boot-config transports are immutable for the process lifetime (no runtime management UI).

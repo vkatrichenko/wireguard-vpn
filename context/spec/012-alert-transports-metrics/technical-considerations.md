@@ -1,7 +1,7 @@
 # Technical Specification: Alert Transports & Prometheus Metrics
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
-- **Status:** Draft
+- **Status:** Completed
 - **Author(s):** Vladyslav Katrychenko
 
 ---

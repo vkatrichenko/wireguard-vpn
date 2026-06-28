@@ -1,7 +1,7 @@
 # Functional Specification: Alert Transports & Prometheus Metrics
 
 - **Roadmap Item:** "Alerting & observability (Spec B)" (from _Future / Under Consideration_)
-- **Status:** Draft
+- **Status:** Completed
 - **Author:** Vladyslav Katrychenko
 
 ---
@@ -30,33 +30,33 @@ This spec therefore:
 
 - **As the operator, I want** alerts delivered to a Slack bot, Telegram, and/or Discord in addition to the existing incoming webhook, **so that** I am notified in the channel(s) I actually use, with redundancy.
   - **Acceptance Criteria:**
-    - [ ] A **Slack bot** transport posts alerts via the Slack Web API (`chat.postMessage`) to a configured channel when a **bot token + channel** are provided; it is a no-op when unconfigured. This is distinct from — and does not replace — the existing Slack **incoming webhook** transport (spec 008), which stays as-is including its runtime set/test/revert UI.
-    - [ ] A **Telegram** transport delivers alert messages to a configured chat when a **bot token + chat ID** are provided; no-op when unconfigured.
-    - [ ] A **Discord** transport delivers alert messages to a configured channel when an **incoming-webhook URL** is provided; no-op when unconfigured.
-    - [ ] **Fan-out:** every configured transport fires for the **same** alert — with, e.g., the incoming webhook + Slack bot + Telegram all enabled, one service-down alert arrives in all three.
-    - [ ] A single transport's failure (network, bad token, rate-limit) is logged and does **not** prevent the other transports from delivering, and does **not** block the poll loop (off-critical-path, same dispatch model as 007).
-    - [ ] The edge-trigger / cooldown / recovery semantics (007) apply **uniformly** — all transports receive the same message stream; no transport has its own alerting logic.
-    - [ ] Each new transport is **opt-in via env/SSM** configuration at boot; **no runtime management UI** is added for them. The existing incoming webhook keeps its 008 runtime set/test/revert.
-    - [ ] All transport secrets (Slack bot token, Telegram bot token, Discord webhook URL) are **never logged or rendered in full** (redacted like the webhook), never committed, and supplied via the existing SSM → `alerts.env` EnvironmentFile pattern.
+    - [x] A **Slack bot** transport posts alerts via the Slack Web API (`chat.postMessage`) to a configured channel when a **bot token + channel** are provided; it is a no-op when unconfigured. This is distinct from — and does not replace — the existing Slack **incoming webhook** transport (spec 008), which stays as-is including its runtime set/test/revert UI.
+    - [x] A **Telegram** transport delivers alert messages to a configured chat when a **bot token + chat ID** are provided; no-op when unconfigured.
+    - [x] A **Discord** transport delivers alert messages to a configured channel when an **incoming-webhook URL** is provided; no-op when unconfigured.
+    - [x] **Fan-out:** every configured transport fires for the **same** alert — with, e.g., the incoming webhook + Slack bot + Telegram all enabled, one service-down alert arrives in all three.
+    - [x] A single transport's failure (network, bad token, rate-limit) is logged and does **not** prevent the other transports from delivering, and does **not** block the poll loop (off-critical-path, same dispatch model as 007).
+    - [x] The edge-trigger / cooldown / recovery semantics (007) apply **uniformly** — all transports receive the same message stream; no transport has its own alerting logic.
+    - [x] Each new transport is **opt-in via env/SSM** configuration at boot; **no runtime management UI** is added for them. The existing incoming webhook keeps its 008 runtime set/test/revert.
+    - [x] All transport secrets (Slack bot token, Telegram bot token, Discord webhook URL) are **never logged or rendered in full** (redacted like the webhook), never committed, and supplied via the existing SSM → `alerts.env` EnvironmentFile pattern.
 
 ### 2.2 Prometheus `/metrics` endpoint
 
 - **As the operator, I want** to scrape the VPN's health into Prometheus/Grafana, **so that** I can build external dashboards, longer-retention graphs, and my own alerting.
   - **Acceptance Criteria:**
-    - [ ] `GET /metrics` returns current metrics in the **Prometheus text exposition format**, served on the existing VPN-bound listener (no new port, no authentication — VPN-gated like the rest of the dashboard).
-    - [ ] Exposed metrics cover at least: WireGuard service active (0/1), peers total and online, per-peer last-handshake age and cumulative rx/tx bytes, host CPU% / memory% / disk%, and active-alert count. (Exact metric names and labels are finalized in the technical spec.)
-    - [ ] Metrics reflect **current** values read from already-collected in-memory state — **no** extra `sudo`/`wg`/`/proc` exec and **no** per-scrape SQLite query; a scrape never disrupts the poll loop or the dashboard.
-    - [ ] Per-peer series are labeled by peer name; cardinality stays bounded to the configured client count.
-    - [ ] `/metrics` is documented (README / architecture) as VPN-only, making no outbound requests, and exposing only data the dashboard already shows.
+    - [x] `GET /metrics` returns current metrics in the **Prometheus text exposition format**, served on the existing VPN-bound listener (no new port, no authentication — VPN-gated like the rest of the dashboard).
+    - [x] Exposed metrics cover at least: WireGuard service active (0/1), peers total and online, per-peer last-handshake age and cumulative rx/tx bytes, host CPU% / memory% / disk%, and active-alert count. (Exact metric names and labels are finalized in the technical spec.)
+    - [x] Metrics reflect **current** values read from already-collected in-memory state — **no** extra `sudo`/`wg`/`/proc` exec and **no** per-scrape SQLite query; a scrape never disrupts the poll loop or the dashboard.
+    - [x] Per-peer series are labeled by peer name; cardinality stays bounded to the configured client count.
+    - [x] `/metrics` is documented (README / architecture) as VPN-only, making no outbound requests, and exposing only data the dashboard already shows.
 
 ### 2.3 Remove the peer-down alert
 
 - **As the operator, I want** alerts to reflect real incidents only, **so that** I am not paged when someone simply turns their VPN off.
   - **Acceptance Criteria:**
-    - [ ] The **peer-down / stale-peer** alert condition no longer exists: turning a client off (or a client going idle) produces **no** alert and **no** Events entry.
-    - [ ] The `DASHBOARD_ALERT_PEER_STALE` env var and the corresponding Terraform `dashboard_alerts.peer_stale` variable + its `alerts.env` line are removed; their absence is **not** a breaking configuration error.
-    - [ ] The remaining **four** conditions (service-down, high-disk, sustained-CPU, per-peer transfer-cap) are unchanged and still fire and recover correctly.
-    - [ ] Docs (architecture §8, product-definition) are updated from "five conditions / a dropped peer" to the four-condition set.
+    - [x] The **peer-down / stale-peer** alert condition no longer exists: turning a client off (or a client going idle) produces **no** alert and **no** Events entry.
+    - [x] The `DASHBOARD_ALERT_PEER_STALE` env var and the corresponding Terraform `dashboard_alerts.peer_stale` variable + its `alerts.env` line are removed; their absence is **not** a breaking configuration error.
+    - [x] The remaining **four** conditions (service-down, high-disk, sustained-CPU, per-peer transfer-cap) are unchanged and still fire and recover correctly.
+    - [x] Docs (architecture §8, product-definition) are updated from "five conditions / a dropped peer" to the four-condition set.
 
 ---
 
