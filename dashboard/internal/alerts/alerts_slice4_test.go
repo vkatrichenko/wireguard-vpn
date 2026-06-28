@@ -17,88 +17,43 @@ func hsAgo(name string, now time.Time, age time.Duration) PeerSample {
 	return PeerSample{Name: name, LastHandshake: now.Add(-age)}
 }
 
-func TestPeerDown_NeverOnlineNeverFires(t *testing.T) {
+// TestStalePeerNeverFires is the peer-down-removal regression guard (spec 012
+// §2.3): a client that was online and then goes stale/disconnected — an old
+// handshake or a zero (never-handshaked) one — must produce NO alert and leave
+// NO active-alert entry. Turning a VPN client off is normal behaviour, not an
+// incident, so the evaluator stays silent across every such tick.
+func TestStalePeerNeverFires(t *testing.T) {
 	e := New(Config{Host: "h"})
 
-	// A peer that has NEVER been within the online threshold, even though its
-	// (stale) handshake is far older than the stale threshold, must never fire:
-	// the seen-online gate has never latched.
-	for i := 0; i < 5; i++ {
-		now := base.Add(time.Duration(i) * time.Minute)
-		// Last handshake always 1h ago — never within the 3m online window.
-		in := peerInput(hsAgo("ghost", now, time.Hour))
-		if evs := e.Evaluate(now, in); len(evs) != 0 {
-			t.Fatalf("never-online peer must not fire, tick %d got %+v", i, evs)
+	// Tick 1: alice online with a fresh handshake.
+	if evs := e.Evaluate(base, peerInput(hsAgo("alice", base, time.Minute))); len(evs) != 0 {
+		t.Fatalf("online peer should not fire, got %+v", evs)
+	}
+
+	// Ticks 2..N: the handshake freezes and ages well past any old stale window;
+	// a previously-online peer going idle must never fire.
+	for i := 1; i <= 5; i++ {
+		now := base.Add(time.Duration(i) * 30 * time.Minute)
+		stale := PeerSample{Name: "alice", LastHandshake: base.Add(time.Minute)}
+		if evs := e.Evaluate(now, peerInput(stale)); len(evs) != 0 {
+			t.Fatalf("stale peer must not fire (tick %d), got %+v", i, evs)
 		}
 	}
 
 	// A peer that never handshaked at all (zero time) also never fires.
-	e2 := New(Config{Host: "h"})
-	if evs := e2.Evaluate(base, peerInput(PeerSample{Name: "newbie"})); len(evs) != 0 {
+	if evs := e.Evaluate(base.Add(3*time.Hour), peerInput(PeerSample{Name: "newbie"})); len(evs) != 0 {
 		t.Fatalf("zero-handshake peer must not fire, got %+v", evs)
 	}
-}
 
-func TestPeerDown_SeenThenIdleFiresOnce(t *testing.T) {
-	e := New(Config{Host: "h"})
-
-	// Tick 1: online (fresh handshake) — latches seenOnline, no event.
-	if evs := e.Evaluate(base, peerInput(hsAgo("alice", base, time.Minute))); len(evs) != 0 {
-		t.Fatalf("online peer should not fire, got %+v", evs)
-	}
-	if !e.seenOnline["alice"] {
-		t.Fatalf("seenOnline should latch true after an online tick")
-	}
-
-	// The handshake then freezes; later ticks show it ageing. Just under 10m: OK.
-	now := base.Add(20 * time.Minute)
-	justUnder := PeerSample{Name: "alice", LastHandshake: now.Add(-(10*time.Minute - time.Second))}
-	if evs := e.Evaluate(now, peerInput(justUnder)); len(evs) != 0 {
-		t.Fatalf("just-under stale threshold should suppress, got %+v", evs)
-	}
-
-	// Over 10m: fires exactly once.
-	now2 := now.Add(time.Minute)
-	overStale := PeerSample{Name: "alice", LastHandshake: now2.Add(-(10*time.Minute + time.Second))}
-	ev := onlyEvent(t, e.Evaluate(now2, peerInput(overStale)), ConditionPeerDown, Fire)
-	if ev.Key != "peer-down:alice" {
-		t.Fatalf("key = %q, want peer-down:alice", ev.Key)
-	}
-	if !strings.Contains(ev.Detail, "alice") || !strings.Contains(ev.Detail, "handshake") {
-		t.Fatalf("detail should name peer + handshake, got %q", ev.Detail)
-	}
-
-	// Still stale next tick: suppressed within cooldown.
-	now3 := now2.Add(time.Minute)
-	stillStale := PeerSample{Name: "alice", LastHandshake: now3.Add(-(11 * time.Minute))}
-	if evs := e.Evaluate(now3, peerInput(stillStale)); len(evs) != 0 {
-		t.Fatalf("still-stale within cooldown should suppress, got %+v", evs)
-	}
-}
-
-func TestPeerDown_RecoversOnHandshake(t *testing.T) {
-	e := New(Config{Host: "h"})
-
-	e.Evaluate(base, peerInput(hsAgo("alice", base, time.Minute))) // seen online
-	now := base.Add(30 * time.Minute)
-	onlyEvent(t, e.Evaluate(now, peerInput(hsAgo("alice", now, 11*time.Minute))), ConditionPeerDown, Fire)
-
-	// Handshakes again (back within the online window): one Recovery.
-	now2 := now.Add(time.Minute)
-	onlyEvent(t, e.Evaluate(now2, peerInput(hsAgo("alice", now2, time.Minute))), ConditionPeerDown, Recovery)
-
-	// The seen-online flag persists, and it's online, so nothing further.
-	now3 := now2.Add(time.Minute)
-	if evs := e.Evaluate(now3, peerInput(hsAgo("alice", now3, time.Minute))); len(evs) != 0 {
-		t.Fatalf("recovered+online should emit nothing, got %+v", evs)
-	}
-	if !e.seenOnline["alice"] {
-		t.Fatalf("seenOnline must persist across the fire/recover cycle")
+	// And nothing is left FIRING in the active-alerts view.
+	if act := e.Active(); len(act) != 0 {
+		t.Fatalf("no peer condition should be active, got %+v", act)
 	}
 }
 
 func capPeer(name string, rx, tx int64) PeerSample {
-	// A fresh handshake so peer-down never interferes with transfer-cap tests.
+	// No condition keys off the handshake time; the transfer-cap tests care only
+	// about the byte counters.
 	return PeerSample{Name: name, LastHandshake: time.Time{}, RxBytes: rx, TxBytes: tx}
 }
 
@@ -166,49 +121,39 @@ func TestTransferCap_CounterResetReArms(t *testing.T) {
 	onlyEvent(t, e.Evaluate(base.Add(3*time.Minute), peerInput(capPeer("carol", (1<<30)+(50<<30), 0))), ConditionTransferCap, Fire)
 }
 
-// TestPerClientIsolation proves the per-name Keys give each (peer, condition)
-// pair an independent state machine: alice firing peer-down leaves
-// transfer-cap:alice, peer-down:bob and service-down untouched.
+// TestPerClientIsolation proves the per-name Keys give each peer's transfer-cap
+// its own independent state machine: bob crossing the cap leaves
+// transfer-cap:carol and service-down untouched.
 func TestPerClientIsolation(t *testing.T) {
-	e := New(Config{Host: "h"})
+	cap := int64(50 << 30)
+	e := New(Config{Host: "h", TransferCapBytes: cap})
 
-	// Both seen online first.
-	e.Evaluate(base, peerInput(
-		hsAgo("alice", base, time.Minute),
-		hsAgo("bob", base, time.Minute),
-	))
+	// Both baselined at zero.
+	e.Evaluate(base, peerInput(capPeer("bob", 0, 0), capPeer("carol", 0, 0)))
 
-	now := base.Add(30 * time.Minute)
-	// alice goes stale (fires peer-down); bob stays fresh; service stays up.
+	// bob crosses the cap; carol stays well under; service stays up.
 	in := Input{
 		ServiceActive: true,
 		Peers: []PeerSample{
-			hsAgo("alice", now, 11*time.Minute), // stale → fire
-			hsAgo("bob", now, time.Minute),      // fresh → ok
+			capPeer("bob", 60<<30, 0),  // over → fire
+			capPeer("carol", 1<<30, 0), // under → ok
 		},
 	}
-	evs := e.Evaluate(now, in)
-	ev := onlyEvent(t, evs, ConditionPeerDown, Fire)
-	if ev.Key != "peer-down:alice" {
-		t.Fatalf("only alice should fire, got key %q", ev.Key)
+	ev := onlyEvent(t, e.Evaluate(base.Add(time.Minute), in), ConditionTransferCap, Fire)
+	if ev.Key != "transfer-cap:bob" {
+		t.Fatalf("only bob should fire, got key %q", ev.Key)
 	}
 
 	// Independent machines untouched (all OK / never-fired).
-	for _, key := range []string{"transfer-cap:alice", "peer-down:bob", string(ConditionServiceDown)} {
+	for _, key := range []string{"transfer-cap:carol", string(ConditionServiceDown)} {
 		if sm := e.states[key]; sm != nil && sm.firing {
-			t.Fatalf("key %q should not be firing — alice's peer-down leaked state", key)
+			t.Fatalf("key %q should not be firing — bob's transfer-cap leaked state", key)
 		}
 	}
 }
 
 func TestPeerDefaultsApplied(t *testing.T) {
 	e := New(Config{Host: "h"})
-	if e.peerOnlineThreshold != DefaultPeerOnlineThreshold {
-		t.Fatalf("peer online default = %v, want %v", e.peerOnlineThreshold, DefaultPeerOnlineThreshold)
-	}
-	if e.peerStaleThreshold != DefaultPeerStaleThreshold {
-		t.Fatalf("peer stale default = %v, want %v", e.peerStaleThreshold, DefaultPeerStaleThreshold)
-	}
 	if e.transferCapBytes != DefaultTransferCapBytes {
 		t.Fatalf("transfer cap default = %v, want %v", e.transferCapBytes, DefaultTransferCapBytes)
 	}

@@ -122,14 +122,43 @@ variable "dashboard_webhook_url_param" {
   default     = ""
 }
 
+variable "dashboard_slack_bot_token_param" {
+  description = "SSM parameter NAME holding the Slack bot token used with chat.postMessage. Created out-of-band (like wg_server_private_key_param), not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_SLACK_BOT_TOKEN. The value is a secret and is never output. Empty string (default) disables the Slack-bot transport — no DASHBOARD_SLACK_BOT_TOKEN line is written. Pair with dashboard_slack_channel."
+  type        = string
+  default     = ""
+}
+
+variable "dashboard_slack_channel" {
+  description = "Non-secret Slack channel id or name (e.g. \"C0123456789\" or \"#alerts\") the Slack-bot transport posts to via chat.postMessage. Plain string seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_SLACK_CHANNEL. Empty string (default) omits the line. Pair with dashboard_slack_bot_token_param."
+  type        = string
+  default     = ""
+}
+
+variable "dashboard_telegram_token_param" {
+  description = "SSM parameter NAME holding the Telegram bot token. Created out-of-band (like wg_server_private_key_param), not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_TELEGRAM_TOKEN. The value is a secret and is never output. Empty string (default) disables the Telegram transport — no DASHBOARD_TELEGRAM_TOKEN line is written. Pair with dashboard_telegram_chat_id."
+  type        = string
+  default     = ""
+}
+
+variable "dashboard_telegram_chat_id" {
+  description = "Non-secret Telegram chat id (e.g. \"-1001234567890\") the Telegram transport sends to. Plain string seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_TELEGRAM_CHAT_ID. Empty string (default) omits the line. Pair with dashboard_telegram_token_param."
+  type        = string
+  default     = ""
+}
+
+variable "dashboard_discord_webhook_url_param" {
+  description = "SSM parameter NAME holding the Discord incoming-webhook URL. Created out-of-band (like wg_server_private_key_param), not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_DISCORD_WEBHOOK_URL. The value is a secret and is never output. Empty string (default) disables the Discord transport — no DASHBOARD_DISCORD_WEBHOOK_URL line is written."
+  type        = string
+  default     = ""
+}
+
 variable "dashboard_alerts" {
-  description = "Spec-007 alert thresholds seeded into /etc/wireguard-dashboard/alerts.env (mapped to DASHBOARD_HOST_LABEL / DASHBOARD_ALERT_DISK_PCT / _CPU_PCT / _CPU_SUSTAIN / _PEER_STALE / _TRANSFER_BYTES). host_label empty (default) omits DASHBOARD_HOST_LABEL so the Go side falls back to os.Hostname(). cpu_sustain/peer_stale are Go durations (e.g. \"5m\"); transfer_bytes is a humanized size (e.g. \"50GiB\")."
+  description = "Spec-007 alert thresholds seeded into /etc/wireguard-dashboard/alerts.env (mapped to DASHBOARD_HOST_LABEL / DASHBOARD_ALERT_DISK_PCT / _CPU_PCT / _CPU_SUSTAIN / _TRANSFER_BYTES). host_label empty (default) omits DASHBOARD_HOST_LABEL so the Go side falls back to os.Hostname(). cpu_sustain is a Go duration (e.g. \"5m\"); transfer_bytes is a humanized size (e.g. \"50GiB\")."
   type = object({
     host_label     = optional(string, "")
     disk_pct       = optional(number, 90)
     cpu_pct        = optional(number, 90)
     cpu_sustain    = optional(string, "5m")
-    peer_stale     = optional(string, "10m")
     transfer_bytes = optional(string, "50GiB")
   })
   default = {}

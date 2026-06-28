@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"wireguard-dashboard/internal/poller"
 )
 
 // metricsResponse is the payload of GET /api/metrics?range=<duration> — the
@@ -202,6 +206,153 @@ func (s *server) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(body)
+}
+
+// MetricsProvider is the seam GET /metrics reads its in-memory sample through
+// (spec 012, Slice 4). *poller.Poller satisfies it; the implementation does ZERO
+// I/O on the scrape path (no exec, no /proc, no DB) — it returns a deep copy of
+// the last poll's readings. It is nil-tolerant by design: server.New may be
+// passed a nil provider (tests, or a build with the poller disabled) and the
+// handler then emits a valid, mostly-empty exposition rather than panicking.
+type MetricsProvider interface {
+	MetricsSnapshot() poller.MetricsSnapshot
+}
+
+// promContentType is the Prometheus text exposition format v0.0.4 content type.
+// Pinned exactly so a scraper negotiating on the header parses our hand-rolled
+// body without falling back to a different format guess.
+const promContentType = "text/plain; version=0.0.4; charset=utf-8"
+
+// handleGetMetricsProm serves the Prometheus text exposition at GET /metrics —
+// DISTINCT from the JSON /api/metrics* chart endpoints. The body is hand-rolled
+// (no prometheus client lib, per the no-new-deps constraint) but follows the
+// exposition rules: namespaced wireguard_ metrics, each with one # HELP and one
+// # TYPE, label values escaped, floats rendered without scientific-notation
+// surprises, counters as integers.
+//
+// It NEVER 500s and NEVER panics: a nil provider, an unread service, a missing
+// proc sample each just OMIT the affected metric (or emit a documented default).
+// The only inputs are the in-memory MetricsSnapshot and alertSnapshot — both
+// lock-free reads of state the poller already accumulated, so a scrape costs no
+// exec / DB work regardless of frequency.
+func (s *server) handleGetMetricsProm(w http.ResponseWriter, _ *http.Request) {
+	var snap poller.MetricsSnapshot
+	if s.metricsProvider != nil {
+		snap = s.metricsProvider.MetricsSnapshot()
+	}
+	now := time.Now()
+
+	var b strings.Builder
+
+	// wireguard_service_active — OMITTED until a systemd status has been read at
+	// least once (ServiceKnown), so a cold-start scrape never reports the service
+	// as down (0) before we actually know its state.
+	if snap.ServiceKnown {
+		promHeader(&b, "wireguard_service_active", "gauge", "WireGuard wg-quick@wg0 systemd unit active (1) or inactive (0).")
+		v := 0
+		if snap.ServiceActive {
+			v = 1
+		}
+		fmt.Fprintf(&b, "wireguard_service_active %d\n", v)
+	}
+
+	promHeader(&b, "wireguard_peers_total", "gauge", "Total WireGuard peers in the manifest.")
+	fmt.Fprintf(&b, "wireguard_peers_total %d\n", snap.PeersTotal)
+
+	promHeader(&b, "wireguard_peers_online", "gauge", "Peers whose most recent handshake is within the online window.")
+	fmt.Fprintf(&b, "wireguard_peers_online %d\n", snap.PeersOnline)
+
+	// Per-peer last-handshake age. Computed at scrape time so a snapshot held
+	// briefly ages correctly. A never-handshaked peer (zero time) has no
+	// meaningful age, so its series is omitted; its byte counters still emit.
+	promHeader(&b, "wireguard_peer_last_handshake_age_seconds", "gauge", "Seconds since each peer's most recent handshake.")
+	for _, pm := range snap.Peers {
+		if pm.LastHandshake.IsZero() {
+			continue
+		}
+		age := now.Sub(pm.LastHandshake).Seconds()
+		if age < 0 {
+			age = 0
+		}
+		fmt.Fprintf(&b, "wireguard_peer_last_handshake_age_seconds{peer=\"%s\"} %s\n", promEscapeLabel(pm.Name), promFloat(age))
+	}
+
+	promHeader(&b, "wireguard_peer_rx_bytes_total", "counter", "Cumulative bytes received from each peer.")
+	for _, pm := range snap.Peers {
+		fmt.Fprintf(&b, "wireguard_peer_rx_bytes_total{peer=\"%s\"} %d\n", promEscapeLabel(pm.Name), pm.RxBytes)
+	}
+
+	promHeader(&b, "wireguard_peer_tx_bytes_total", "counter", "Cumulative bytes transmitted to each peer.")
+	for _, pm := range snap.Peers {
+		fmt.Fprintf(&b, "wireguard_peer_tx_bytes_total{peer=\"%s\"} %d\n", promEscapeLabel(pm.Name), pm.TxBytes)
+	}
+
+	// Host CPU% / Mem% — omitted when no proc sample has succeeded, so the scrape
+	// never reports a fabricated 0%.
+	if snap.CPUKnown {
+		promHeader(&b, "wireguard_host_cpu_percent", "gauge", "Host CPU utilisation percent.")
+		fmt.Fprintf(&b, "wireguard_host_cpu_percent %s\n", promFloat(snap.CPUPercent))
+	}
+	if snap.MemKnown {
+		promHeader(&b, "wireguard_host_memory_percent", "gauge", "Host memory utilisation percent.")
+		fmt.Fprintf(&b, "wireguard_host_memory_percent %s\n", promFloat(snap.MemPercent))
+	}
+
+	promHeader(&b, "wireguard_host_disk_percent", "gauge", "Filesystem fullness percent per mount.")
+	for _, d := range snap.Disks {
+		fmt.Fprintf(&b, "wireguard_host_disk_percent{mount=\"%s\"} %s\n", promEscapeLabel(d.Mount), promFloat(d.PctFull))
+	}
+
+	// Active alert count from the in-memory holder (nil-holder-safe via
+	// alertSnapshot). No I/O.
+	promHeader(&b, "wireguard_active_alerts", "gauge", "Number of currently-firing alerts.")
+	fmt.Fprintf(&b, "wireguard_active_alerts %d\n", len(s.alertSnapshot().Active))
+
+	// Build info as a constant-1 gauge with the version + sha as labels — the
+	// Prometheus convention for surfacing immutable build metadata.
+	var version, sha string
+	if s.serverinfoSvc != nil {
+		version = s.serverinfoSvc.Build.ReleaseTag
+		sha = s.serverinfoSvc.Build.SHA
+	}
+	promHeader(&b, "wireguard_build_info", "gauge", "Build metadata; value is always 1, version/sha carried as labels.")
+	fmt.Fprintf(&b, "wireguard_build_info{version=\"%s\",sha=\"%s\"} 1\n", promEscapeLabel(version), promEscapeLabel(sha))
+
+	w.Header().Set("Content-Type", promContentType)
+	_, _ = w.Write([]byte(b.String()))
+}
+
+// promHeader writes the # HELP and # TYPE lines for a metric family. HELP text
+// is escaped per the exposition rules (backslash and newline only; the double
+// quote is NOT special in HELP text, unlike in label values).
+func promHeader(b *strings.Builder, name, typ, help string) {
+	fmt.Fprintf(b, "# HELP %s %s\n", name, promEscapeHelp(help))
+	fmt.Fprintf(b, "# TYPE %s %s\n", name, typ)
+}
+
+// promEscapeLabel escapes a label VALUE per the Prometheus text format:
+// backslash → \\, double-quote → \", newline → \n. Order matters — backslash
+// first so the escapes we introduce aren't themselves re-escaped.
+func promEscapeLabel(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	return s
+}
+
+// promEscapeHelp escapes # HELP text: only backslash and newline are special
+// (the double quote is a literal in HELP). Backslash first, same reason as above.
+func promEscapeHelp(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	return s
+}
+
+// promFloat renders a float for the exposition without scientific-notation
+// surprises. 'g' with -1 precision gives the shortest round-trippable form; for
+// the small percentages/ages we emit it stays in plain decimal.
+func promFloat(v float64) string {
+	return strconv.FormatFloat(v, 'g', -1, 64)
 }
 
 // clientMetricsResponse is the payload of GET /api/metrics/client/{pubkey}.

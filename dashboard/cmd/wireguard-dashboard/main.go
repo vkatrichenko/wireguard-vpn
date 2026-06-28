@@ -191,11 +191,39 @@ func main() {
 	// (Slice 2) so the /api/webhook status/set/revert endpoints can re-point or
 	// disable delivery at runtime.
 	webhookCfg := notify.NewWebhookConfig(os.Getenv("DASHBOARD_WEBHOOK_URL"))
-	var notifier notify.Notifier = notify.NewNotifier(webhookCfg)
+	webhook := notify.NewNotifier(webhookCfg)
+	// Boot-config transports (spec 012, Slice 3). Each constructor returns a nil
+	// Notifier when its env is unset; NewMultiNotifier filters those out, so an
+	// unconfigured transport contributes nothing (no goroutine, no HTTP). Unlike
+	// the runtime-managed webhook, these are immutable for the process lifetime.
+	// Their tokens/URLs are secrets — the transports redact them, so we only log
+	// transport NAMES here, never config values.
+	slackBot := notify.NewSlackBotFromEnv()
+	telegram := notify.NewTelegramFromEnv()
+	discord := notify.NewDiscordFromEnv()
+	// Fan-out composite (spec 012): the evaluator/poller keep depending on a
+	// single Notifier while delivery targets grow. The runtime-managed Slack
+	// incoming webhook plus the three boot-config transports all fan out here.
+	var notifier notify.Notifier = notify.NewMultiNotifier(webhook, slackBot, telegram, discord)
 	if webhookCfg.Enabled() {
 		slog.Info("notify: webhook alerting enabled")
 	} else {
 		slog.Info("notify: DASHBOARD_WEBHOOK_URL unset; alerting disabled (no-op)")
+	}
+	bootTransports := make([]string, 0, 3)
+	if slackBot != nil {
+		bootTransports = append(bootTransports, "slack-bot")
+	}
+	if telegram != nil {
+		bootTransports = append(bootTransports, "telegram")
+	}
+	if discord != nil {
+		bootTransports = append(bootTransports, "discord")
+	}
+	if len(bootTransports) > 0 {
+		slog.Info("notify: boot-config transports enabled", "transports", strings.Join(bootTransports, ","))
+	} else {
+		slog.Info("notify: no boot-config transports configured (slack-bot/telegram/discord)")
 	}
 
 	// Alert evaluator (spec 007, Slices 2-3). It runs UNCONDITIONALLY — even
@@ -213,12 +241,11 @@ func main() {
 	// falling back to the alerts package default so a typo never disables a
 	// condition silently.
 	alertEvaluator := alerts.New(alerts.Config{
-		Host:               hostLabel(),
-		DiskThresholdPct:   envPct("DASHBOARD_ALERT_DISK_PCT", alerts.DefaultDiskThresholdPct),
-		CPUThresholdPct:    envPct("DASHBOARD_ALERT_CPU_PCT", alerts.DefaultCPUThresholdPct),
-		CPUSustain:         envDuration("DASHBOARD_ALERT_CPU_SUSTAIN", alerts.DefaultCPUSustain),
-		PeerStaleThreshold: envDuration("DASHBOARD_ALERT_PEER_STALE", alerts.DefaultPeerStaleThreshold),
-		TransferCapBytes:   envBytes("DASHBOARD_ALERT_TRANSFER_BYTES", alerts.DefaultTransferCapBytes),
+		Host:             hostLabel(),
+		DiskThresholdPct: envPct("DASHBOARD_ALERT_DISK_PCT", alerts.DefaultDiskThresholdPct),
+		CPUThresholdPct:  envPct("DASHBOARD_ALERT_CPU_PCT", alerts.DefaultCPUThresholdPct),
+		CPUSustain:       envDuration("DASHBOARD_ALERT_CPU_SUSTAIN", alerts.DefaultCPUSustain),
+		TransferCapBytes: envBytes("DASHBOARD_ALERT_TRANSFER_BYTES", alerts.DefaultTransferCapBytes),
 	})
 
 	// Shared status holder for the in-UI active-alerts view (spec 007, Slice 5).
@@ -264,7 +291,7 @@ func main() {
 	pollerSvc := poller.New(metricsDB, procSvc, wgSvc, clientsfileSvc, systemdSvc, diskSvc, alertEvaluator, notifier, alertStatus)
 	go pollerSvc.Run(ctx)
 
-	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc, alertStatus, webhookCfg)
+	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc, alertStatus, webhookCfg, pollerSvc)
 	if err != nil {
 		log.Fatalf("server init failed: %v", err)
 	}

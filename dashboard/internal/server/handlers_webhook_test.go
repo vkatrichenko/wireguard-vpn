@@ -42,6 +42,7 @@ func newWebhookServer(t *testing.T, cfg *notify.WebhookConfig) http.Handler {
 		fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(),
 		nil,
 		cfg,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

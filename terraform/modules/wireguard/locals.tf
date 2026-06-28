@@ -24,6 +24,13 @@ locals {
   # which suppresses the DASHBOARD_WEBHOOK_URL line in alerts.env. The count-gated
   # data source means we only touch SSM when the operator opts in.
   dashboard_webhook_url = var.dashboard_webhook_url_param != "" ? data.aws_ssm_parameter.dashboard_webhook_url[0].value : ""
+
+  # Resolved opt-in transport secrets (spec 012), each empty unless its SSM param
+  # name is wired — the count-gated data sources keep SSM untouched otherwise, and
+  # an empty value suppresses its line in alerts.env (no behavior change when off).
+  dashboard_slack_bot_token     = var.dashboard_slack_bot_token_param != "" ? data.aws_ssm_parameter.dashboard_slack_bot_token[0].value : ""
+  dashboard_telegram_token      = var.dashboard_telegram_token_param != "" ? data.aws_ssm_parameter.dashboard_telegram_token[0].value : ""
+  dashboard_discord_webhook_url = var.dashboard_discord_webhook_url_param != "" ? data.aws_ssm_parameter.dashboard_discord_webhook_url[0].value : ""
 }
 
 locals {
@@ -45,8 +52,15 @@ locals {
     dashboard_alert_disk_pct       = var.dashboard_alerts.disk_pct
     dashboard_alert_cpu_pct        = var.dashboard_alerts.cpu_pct
     dashboard_alert_cpu_sustain    = var.dashboard_alerts.cpu_sustain
-    dashboard_alert_peer_stale     = var.dashboard_alerts.peer_stale
     dashboard_alert_transfer_bytes = var.dashboard_alerts.transfer_bytes
+
+    # Opt-in multi-transport seed (spec 012). Tokens / Discord URL are secrets;
+    # channel + chat-id are non-secret. Each empty value drops its alerts.env line.
+    dashboard_slack_bot_token     = local.dashboard_slack_bot_token
+    dashboard_slack_channel       = var.dashboard_slack_channel
+    dashboard_telegram_token      = local.dashboard_telegram_token
+    dashboard_telegram_chat_id    = var.dashboard_telegram_chat_id
+    dashboard_discord_webhook_url = local.dashboard_discord_webhook_url
   })
 }
 
