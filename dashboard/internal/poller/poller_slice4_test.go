@@ -95,39 +95,6 @@ func newPeerPoller(t *testing.T, runner *fakeWGRunner, manifest string, ev *aler
 	}
 }
 
-func TestPoller_PeerDownDispatchedKeyedByName(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	clk := time.Date(2026, 6, 25, 10, 0, 0, 0, time.UTC)
-	now := func() time.Time { return clk }
-
-	runner := &fakeWGRunner{}
-	manifest := manifestJSON(t, [2]string{"alice", "ALICEPUB"})
-	notifier := &recordingNotifier{}
-	ev := alerts.New(alerts.Config{Host: "test-host"})
-	p := newPeerPoller(t, runner, manifest, ev, notifier, now)
-
-	go p.drainDispatch(ctx)
-
-	// Tick 1: alice online (fresh handshake) — latches seen-online, no event.
-	runner.dump = dumpServerLine + peerDumpLine("ALICEPUB", clk.Add(-time.Minute).Unix(), 100, 100)
-	_ = p.collect(ctx)
-	p.evaluateAlerts(ctx)
-
-	// Tick 2 (30m later): alice's handshake frozen → stale → peer-down fires.
-	clk = clk.Add(30 * time.Minute)
-	staleHS := clk.Add(-11 * time.Minute).Unix()
-	runner.dump = dumpServerLine + peerDumpLine("ALICEPUB", staleHS, 100, 100)
-	_ = p.collect(ctx)
-	p.evaluateAlerts(ctx)
-
-	waitFor(t, func() bool { return len(notifier.snapshot()) == 1 })
-	if msg := notifier.snapshot()[0]; !containsAll(msg, "FIRING", "peer-down", "alice") {
-		t.Fatalf("expected a peer-down fire naming alice, got %q", msg)
-	}
-}
-
 func TestPoller_TransferCapDispatchedKeyedByName(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

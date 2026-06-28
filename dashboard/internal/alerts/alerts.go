@@ -36,7 +36,7 @@
 // The state machine in stateMachine.observe is condition-agnostic: it takes a
 // boolean "firing now?" plus a human-readable detail string and drives the
 // OK↔FIRING transitions. Each condition (service-down here; high-disk,
-// sustained-CPU, peer-down, transfer-cap in later slices) is a thin function
+// sustained-CPU, transfer-cap in later slices) is a thin function
 // that turns its slice of the Input into per-Key (firing, detail) observations
 // and feeds them in. Adding a condition is "compute the booleans and call
 // observe" — no rewrite of the transition logic.
@@ -76,17 +76,6 @@ const (
 // corresponding Config field, exported so main.go can document the same value
 // beside the env knob that overrides it.
 const (
-	// DefaultPeerOnlineThreshold is the maximum age of a peer's last handshake
-	// for it to count as "online". It mirrors 003's server-side onlineThreshold
-	// (internal/server/clientrows.go, unexported there so it can't be imported);
-	// keep the two in sync. A peer must be seen online once — its last handshake
-	// within this window — before the peer-down condition can ever fire.
-	DefaultPeerOnlineThreshold = 3 * time.Minute
-	// DefaultPeerStaleThreshold is how long since a (previously-online) peer's
-	// last handshake before the peer-down condition fires (> is exclusive of the
-	// boundary). Deliberately wider than the online threshold so a peer that has
-	// merely dropped a single keepalive doesn't immediately alert.
-	DefaultPeerStaleThreshold = 10 * time.Minute
 	// DefaultTransferCapBytes is the cumulative-since-dashboard-start transfer (in
 	// EITHER direction) at or above which the per-peer transfer-cap condition
 	// fires. 50 GiB by default.
@@ -108,14 +97,10 @@ const (
 	// threshold continuously for the sustain window — a brief spike does not
 	// fire (Slice 3).
 	ConditionHighCPU Condition = "high-cpu"
-	// ConditionPeerDown fires when a client that has been seen online at least
-	// once this run has gone stale (no handshake within the stale threshold). It
-	// is the first PER-CLIENT condition: its Key is "peer-down:<name>" so each
-	// client gets an independent state machine (Slice 4).
-	ConditionPeerDown Condition = "peer-down"
 	// ConditionTransferCap fires when a client's cumulative-since-dashboard-start
 	// transfer in either direction reaches the cap. Key "transfer-cap:<name>",
-	// also per-client (Slice 4).
+	// the only PER-CLIENT condition: its Key suffixes the client name so each
+	// client gets an independent state machine (Slice 4).
 	ConditionTransferCap Condition = "transfer-cap"
 )
 
@@ -185,14 +170,15 @@ type FilesystemUsage struct {
 // FilesystemUsage it is the package's OWN shape, NOT wg.Peer, so internal/alerts
 // never imports the wg package — the poller maps wg.Peer (+ the manifest name)
 // into PeerSample at the seam, skipping wg-only peers that have no client name.
-// Name is the manifest client name and is the per-client sub-key for both
-// per-peer conditions.
+// Name is the manifest client name and is the per-client sub-key for the
+// per-peer transfer-cap condition.
 type PeerSample struct {
 	// Name is the manifest client name (e.g. "alice"). Used as the per-client
-	// sub-key of the peer-down / transfer-cap Keys.
+	// sub-key of the transfer-cap Key.
 	Name string
 	// LastHandshake is the peer's most recent handshake time, or the zero time
-	// if it has never handshaked. Zero means "never online".
+	// if it has never handshaked. Carried at the seam for completeness; no
+	// condition currently keys off it.
 	LastHandshake time.Time
 	// RxBytes / TxBytes are the peer's cumulative byte counters as reported by
 	// `wg show` (cumulative from before the dashboard started — the transfer-cap
@@ -225,8 +211,8 @@ type Input struct {
 	DiskUsage []FilesystemUsage
 	// Peers is the per-client WireGuard state for this tick, already filtered to
 	// manifest clients (wg-only peers with no client name are dropped at the
-	// poller seam). nil when the wg read failed: the per-peer conditions then
-	// observe nothing this tick, which is benign — peer-down keys hold their
+	// poller seam). nil when the wg read failed: the per-peer condition then
+	// observes nothing this tick, which is benign — transfer-cap keys hold their
 	// FIRING/OK state and transfer baselines persist on the Evaluator.
 	Peers []PeerSample
 }
@@ -250,13 +236,6 @@ type Config struct {
 	// sustained-CPU condition fires. Defaults to DefaultCPUSustain when <= 0.
 	CPUSustain time.Duration
 
-	// PeerOnlineThreshold: a peer counts as "online" (and so becomes eligible to
-	// ever fire peer-down) when its last handshake is within this window of now.
-	// Defaults to DefaultPeerOnlineThreshold when <= 0.
-	PeerOnlineThreshold time.Duration
-	// PeerStaleThreshold: a previously-online peer fires peer-down when its last
-	// handshake is older than this. Defaults to DefaultPeerStaleThreshold when <= 0.
-	PeerStaleThreshold time.Duration
 	// TransferCapBytes: the per-peer transfer-cap condition fires when a peer's
 	// rx OR tx since dashboard start reaches this many bytes. Defaults to
 	// DefaultTransferCapBytes when <= 0.
@@ -270,15 +249,13 @@ type Config struct {
 // avoids a mutex on the hot path and matches how the poller already serialises
 // its collect work.
 type Evaluator struct {
-	cooldown            time.Duration
-	host                string
-	diskThresholdPct    float64
-	cpuThresholdPct     float64
-	cpuSustain          time.Duration
-	peerOnlineThreshold time.Duration
-	peerStaleThreshold  time.Duration
-	transferCapBytes    int64
-	states              map[string]*stateMachine
+	cooldown         time.Duration
+	host             string
+	diskThresholdPct float64
+	cpuThresholdPct  float64
+	cpuSustain       time.Duration
+	transferCapBytes int64
+	states           map[string]*stateMachine
 
 	// cpuHighSince is the timestamp CPU first crossed cpuThresholdPct in the
 	// current high run, or the zero time when the most recent tick was below it.
@@ -290,14 +267,9 @@ type Evaluator struct {
 
 	// Per-peer state, keyed by client name — the same "extra per-condition state
 	// lives on the Evaluator" pattern as cpuHighSince (the shared stateMachine
-	// stays condition-agnostic). These maps persist across ticks for the life of
+	// stays condition-agnostic). This map persists across ticks for the life of
 	// the process.
 	//
-	// seenOnline[name] flips true the first tick a peer is observed online (last
-	// handshake within peerOnlineThreshold) and STAYS true: a peer that has never
-	// been online this run can never fire peer-down (avoids paging on a client
-	// that simply hasn't connected yet).
-	seenOnline map[string]bool
 	// transferBaseline[name] is the peer's rx/tx counter pair captured at FIRST
 	// observation, so (current - baseline) is the traffic "since dashboard start"
 	// (the wg counters are cumulative from before we started). On a counter reset
@@ -332,30 +304,19 @@ func New(cfg Config) *Evaluator {
 	if cpuSustain <= 0 {
 		cpuSustain = DefaultCPUSustain
 	}
-	peerOnline := cfg.PeerOnlineThreshold
-	if peerOnline <= 0 {
-		peerOnline = DefaultPeerOnlineThreshold
-	}
-	peerStale := cfg.PeerStaleThreshold
-	if peerStale <= 0 {
-		peerStale = DefaultPeerStaleThreshold
-	}
 	transferCap := cfg.TransferCapBytes
 	if transferCap <= 0 {
 		transferCap = DefaultTransferCapBytes
 	}
 	return &Evaluator{
-		cooldown:            cooldown,
-		host:                cfg.Host,
-		diskThresholdPct:    diskThreshold,
-		cpuThresholdPct:     cpuThreshold,
-		cpuSustain:          cpuSustain,
-		peerOnlineThreshold: peerOnline,
-		peerStaleThreshold:  peerStale,
-		transferCapBytes:    transferCap,
-		states:              make(map[string]*stateMachine),
-		seenOnline:          make(map[string]bool),
-		transferBaseline:    make(map[string]transferCounters),
+		cooldown:         cooldown,
+		host:             cfg.Host,
+		diskThresholdPct: diskThreshold,
+		cpuThresholdPct:  cpuThreshold,
+		cpuSustain:       cpuSustain,
+		transferCapBytes: transferCap,
+		states:           make(map[string]*stateMachine),
+		transferBaseline: make(map[string]transferCounters),
 	}
 }
 
@@ -390,46 +351,16 @@ func (e *Evaluator) Evaluate(now time.Time, in Input) []Event {
 	cpuFiring, cpuDetail := e.cpuObservation(in, now)
 	events = e.observe(events, string(ConditionHighCPU), ConditionHighCPU, cpuFiring, cpuDetail, now)
 
-	// Per-client conditions (Slice 4). Each peer gets two independent state
-	// machines via per-name Keys, so one noisy peer/condition never suppresses
-	// another. The Input.Peers slice is already manifest-filtered by the poller.
+	// Per-client condition (Slice 4). Each peer gets an independent state machine
+	// via a per-name Key, so one noisy peer never suppresses another. The
+	// Input.Peers slice is already manifest-filtered by the poller.
 	for _, peer := range in.Peers {
-		downFiring, downDetail := e.peerDownObservation(peer, now)
-		events = e.observe(events, string(ConditionPeerDown)+":"+peer.Name, ConditionPeerDown, downFiring, downDetail, now)
-
 		capFiring, capDetail := e.transferCapObservation(peer)
 		events = e.observe(events, string(ConditionTransferCap)+":"+peer.Name, ConditionTransferCap, capFiring, capDetail, now)
 	}
 
 	sort.Slice(events, func(i, j int) bool { return events[i].Key < events[j].Key })
 	return events
-}
-
-// peerDownObservation returns the peer-down condition's (firingNow, detail) for
-// one peer. A peer is eligible to fire only once it has been seen online (its
-// last handshake within peerOnlineThreshold of some tick) — seenOnline[name]
-// latches true and persists, so a never-connected peer can never page. Once
-// eligible, it fires when its last handshake is older than peerStaleThreshold
-// (> is exclusive of the boundary); a fresh handshake (back within the online
-// threshold, i.e. no longer stale) recovers it.
-func (e *Evaluator) peerDownObservation(peer PeerSample, now time.Time) (bool, string) {
-	if !peer.LastHandshake.IsZero() && now.Sub(peer.LastHandshake) <= e.peerOnlineThreshold {
-		e.seenOnline[peer.Name] = true
-	}
-	if !e.seenOnline[peer.Name] {
-		return false, fmt.Sprintf("%s not yet seen online", peer.Name)
-	}
-	if peer.LastHandshake.IsZero() {
-		// Marked seen-online earlier but no handshake time now: treat as still OK
-		// rather than fabricate an age. (Cannot normally happen once a real
-		// handshake has been recorded, but be defensive.)
-		return false, fmt.Sprintf("%s no handshake reading", peer.Name)
-	}
-	age := now.Sub(peer.LastHandshake)
-	if age > e.peerStaleThreshold {
-		return true, fmt.Sprintf("%s last handshake %s ago", peer.Name, age.Round(time.Minute))
-	}
-	return false, fmt.Sprintf("%s last handshake %s ago", peer.Name, age.Round(time.Second))
 }
 
 // transferCapObservation returns the transfer-cap condition's (firingNow, detail)

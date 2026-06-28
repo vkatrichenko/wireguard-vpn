@@ -53,6 +53,11 @@ module "wireguard" {
   # set its NAME here — Terraform reads it at apply and seeds DASHBOARD_WEBHOOK_URL
   # into /etc/wireguard-dashboard/alerts.env. Empty = no webhook line written.
   dashboard_webhook_url_param = ""
+  # Opt-in multi-transport secrets (spec 012), same SSM-name pattern as the
+  # webhook above — all default "" so every transport stays disabled until wired:
+  #   dashboard_slack_bot_token_param / dashboard_slack_channel
+  #   dashboard_telegram_token_param  / dashboard_telegram_chat_id
+  #   dashboard_discord_webhook_url_param
   # dashboard_alerts intentionally omitted — defaults apply (disk/cpu 90%, etc.).
 
   tags = local.default_tags

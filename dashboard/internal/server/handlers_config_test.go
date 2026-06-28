@@ -41,7 +41,7 @@ func newConfigHandler(t *testing.T, ip, vpcCIDR string, imdsErr error) http.Hand
 	systemdSvc := systemdRunnerActive(time.Now().Add(-time.Hour))
 	clientsSvc := seededClientsfileSvc(cfgName, cfgAddress, cfgPeerPubKey)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

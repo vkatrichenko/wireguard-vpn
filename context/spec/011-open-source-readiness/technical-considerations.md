@@ -1,7 +1,7 @@
 # Technical Specification: Open-Source Readiness
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
-- **Status:** Draft
+- **Status:** Completed
 - **Author(s):** Vladyslav Katrychenko
 
 ---
@@ -39,7 +39,9 @@ Existing per-asset license files stay where they are; `NOTICE` references them r
 - **`.claude/settings.json`** — remove `permissions.allow: ["Bash", "Write"]`; retain the `extraKnownMarketplaces` (awos) entry. `settings.local.json` is already gitignored (verified), so personal/permissive perms live there.
 - **`.gitignore` hardening (forward-looking)** — add `*.mmdb` and `*.tfplan`. Today the current DB-IP db is ignored via a nested `geoip/.gitignore`, but the old `GeoLite2-City.mmdb` name and `tfplan` are **not** ignored at root — which is how they were committed historically. This change touches no history; it prevents any future GeoIP-db or plan-file commit (and so partially mitigates the deferred `tfplan` secret risk going forward).
 
-### 2.3 Git-history rewrite (destructive, owner-run)
+### 2.3 Git-history rewrite (destructive, owner-run) — DESCOPED (2026-06-26)
+
+> **Not implemented.** Per owner decision (2026-06-26) the history rewrite was descoped; the ~65 MB GeoLite2 blob remains in history. The plan below is retained for reference should the purge be revisited. The forward-looking `.gitignore` hardening (§2.2) shipped instead and prevents future GeoIP-db/plan-file commits.
 
 - **Tool:** BFG Repo-Cleaner, run as a downloaded jar via the already-present `java` (no global install). _Alternative, if preferred: `git-filter-repo` (requires `brew`/`pip` install)._
 - **Procedure** — Claude provides the exact commands; the **owner** executes the force-push (consistent with the "never push without explicit confirmation" rule and the owner running destructive git ops):

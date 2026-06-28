@@ -172,6 +172,155 @@ type Poller struct {
 	peersMu        sync.Mutex
 	lastPeers      []alerts.PeerSample
 	lastPeersValid bool
+
+	// metricsMu guards metrics, the latest in-memory snapshot the Prometheus
+	// /metrics handler reads (spec 012, Slice 4). It is updated INCREMENTALLY
+	// from THIS tick's already-taken readings — collect writes the host CPU%/Mem%
+	// and per-peer fields; evaluateAlerts writes the service + disk fields. Both
+	// writers run on the single sample goroutine, so they never race each OTHER;
+	// the mutex exists solely so the HTTP handler can read a consistent deep copy
+	// from its own goroutine. Crucially, NO new exec / /proc read / DB query backs
+	// this — the scrape path is pure in-memory, off the poll critical path, so a
+	// hostile or frequent scraper can never amplify into extra `sudo wg show` /
+	// systemctl calls or split proc's per-tick CPU delta.
+	metricsMu sync.Mutex
+	metrics   MetricsSnapshot
+}
+
+// peerOnlineThreshold mirrors the server's clients-view definition of "online":
+// a peer whose most recent handshake landed within the last three minutes. Kept
+// as a poller-local const (rather than importing internal/server, which would be
+// a cycle) so wireguard_peers_online and the Clients tab agree on the boundary.
+// 3 minutes is the WireGuard rekey timeout — a meaningful protocol boundary, not
+// an arbitrary UI choice.
+const peerOnlineThreshold = 3 * time.Minute
+
+// MetricsSnapshot is the in-memory view the Prometheus /metrics handler renders
+// (spec 012, Slice 4). It is a flattened copy of the last sample's readings —
+// never a live pointer into poller state — so the HTTP goroutine reads it under
+// no lock once MetricsSnapshot has returned. The *Known flags distinguish "value
+// is genuinely 0" from "we have never successfully read this input": the handler
+// OMITS a metric whose Known flag is false rather than emit a fabricated zero.
+type MetricsSnapshot struct {
+	ServiceActive bool // wg-quick@wg0 active?
+	ServiceKnown  bool // false until a systemd status has been read at least once
+
+	PeersTotal  int
+	PeersOnline int
+	Peers       []PeerMetric
+
+	CPUPercent float64
+	CPUKnown   bool // false until a proc sample has succeeded at least once
+	MemPercent float64
+	MemKnown   bool
+
+	Disks []DiskMetric
+}
+
+// PeerMetric is one peer's per-scrape values. The handler computes the
+// last-handshake AGE (seconds) from LastHandshake versus scrape-time now, so a
+// snapshot held briefly before a scrape ages correctly rather than freezing the
+// age at sample time.
+type PeerMetric struct {
+	Name          string
+	LastHandshake time.Time // zero ⇒ never handshaked; handler omits the age series
+	RxBytes       int64
+	TxBytes       int64
+}
+
+// DiskMetric is one filesystem's fullness percentage for the scrape.
+type DiskMetric struct {
+	Mount   string
+	PctFull float64
+}
+
+// MetricsSnapshot returns a deep copy of the latest sampled metrics for the
+// Prometheus /metrics handler. The Peers/Disks slices are freshly allocated so
+// the caller can range over them after the lock is dropped without risking a
+// torn read against the next tick's overwrite. This method does ZERO I/O — no
+// exec, no /proc read, no DB query — it only copies state the sample loop has
+// already accumulated, which is what keeps /metrics off the poll critical path
+// and immune to scrape-frequency abuse.
+func (p *Poller) MetricsSnapshot() MetricsSnapshot {
+	p.metricsMu.Lock()
+	defer p.metricsMu.Unlock()
+	out := p.metrics
+	if p.metrics.Peers != nil {
+		out.Peers = append([]PeerMetric(nil), p.metrics.Peers...)
+	}
+	if p.metrics.Disks != nil {
+		out.Disks = append([]DiskMetric(nil), p.metrics.Disks...)
+	}
+	return out
+}
+
+// recordHostMetrics stashes THIS tick's host CPU%/Mem% into the metrics
+// snapshot. valid is statsErr == nil from collect's single proc.Sample — on a
+// proc failure the Known flags drop to false so the handler omits the host
+// gauges rather than emit a stale/zero reading. Called on the sample goroutine.
+func (p *Poller) recordHostMetrics(valid bool, cpuPct, memPct float64) {
+	p.metricsMu.Lock()
+	defer p.metricsMu.Unlock()
+	if valid {
+		p.metrics.CPUPercent = cpuPct
+		p.metrics.CPUKnown = true
+		p.metrics.MemPercent = memPct
+		p.metrics.MemKnown = true
+	} else {
+		p.metrics.CPUKnown = false
+		p.metrics.MemKnown = false
+	}
+}
+
+// recordPeerMetrics stashes THIS tick's per-peer snapshot, derived from the SAME
+// samples collect built for the alert path (never a second wg show). Online is
+// computed against now with peerOnlineThreshold so wireguard_peers_online tracks
+// the Clients tab. Called on the sample goroutine, only when the wg + manifest
+// reads both succeeded this tick; a failed read leaves the prior peer metrics in
+// place (best-effort, matching collect's posture).
+func (p *Poller) recordPeerMetrics(samples []alerts.PeerSample, now time.Time) {
+	peers := make([]PeerMetric, 0, len(samples))
+	online := 0
+	for _, s := range samples {
+		if !s.LastHandshake.IsZero() && now.Sub(s.LastHandshake) <= peerOnlineThreshold {
+			online++
+		}
+		peers = append(peers, PeerMetric{
+			Name:          s.Name,
+			LastHandshake: s.LastHandshake,
+			RxBytes:       s.RxBytes,
+			TxBytes:       s.TxBytes,
+		})
+	}
+	p.metricsMu.Lock()
+	p.metrics.Peers = peers
+	p.metrics.PeersTotal = len(peers)
+	p.metrics.PeersOnline = online
+	p.metricsMu.Unlock()
+}
+
+// recordServiceMetric stashes the wg-quick@wg0 active flag from THIS tick's
+// systemd read into the metrics snapshot, marking it Known. Called on the sample
+// goroutine only after a SUCCESSFUL status read, so ServiceKnown stays false (and
+// the handler omits wireguard_service_active) until the first good read.
+func (p *Poller) recordServiceMetric(active bool) {
+	p.metricsMu.Lock()
+	p.metrics.ServiceActive = active
+	p.metrics.ServiceKnown = true
+	p.metricsMu.Unlock()
+}
+
+// recordDiskMetrics stashes THIS tick's filesystem fullness, reusing the disk
+// sample evaluateAlerts already took for the high-disk condition — no extra
+// statfs. Called on the sample goroutine only when the disk read succeeded.
+func (p *Poller) recordDiskMetrics(mounts []disk.Mount) {
+	disks := make([]DiskMetric, 0, len(mounts))
+	for _, m := range mounts {
+		disks = append(disks, DiskMetric{Mount: m.Path, PctFull: m.PctFull})
+	}
+	p.metricsMu.Lock()
+	p.metrics.Disks = disks
+	p.metricsMu.Unlock()
 }
 
 // New returns a Poller wired with the production cadence/retention
@@ -369,6 +518,10 @@ func (p *Poller) collect(ctx context.Context) error {
 	}
 	p.statsMu.Unlock()
 
+	// Mirror the same reading into the Prometheus metrics snapshot (spec 012,
+	// Slice 4). Same single-sample reuse as lastCPUPct — no second proc read.
+	p.recordHostMetrics(statsErr == nil, stats.CPUPercent, stats.MemUsedPercent)
+
 	// system_metrics — needs stats only. Skip the write if the proc
 	// sample failed (e.g. running on macOS where /proc doesn't exist):
 	// inserting a zero-valued row would lie on the chart.
@@ -438,28 +591,38 @@ func (p *Poller) collect(ctx context.Context) error {
 	// without the manifest we couldn't resolve names, and a partial snapshot would
 	// silently drop peers from alerting. On failure lastPeersValid stays false so
 	// the evaluator gets no fabricated peer input.
-	p.peersMu.Lock()
-	if peersErr == nil && clientsErr == nil {
+	peersOK := peersErr == nil && clientsErr == nil
+	var peerSamples []alerts.PeerSample
+	if peersOK {
 		index := clientsfile.ByPublicKey(clients)
-		samples := make([]alerts.PeerSample, 0, len(peers))
+		peerSamples = make([]alerts.PeerSample, 0, len(peers))
 		for _, peer := range peers {
 			c, ok := index[peer.PublicKey]
 			if !ok {
 				continue // wg-only peer, not a manifest client — skip
 			}
-			samples = append(samples, alerts.PeerSample{
+			peerSamples = append(peerSamples, alerts.PeerSample{
 				Name:          c.Name,
 				LastHandshake: peer.LatestHandshake,
 				RxBytes:       peer.TransferRx,
 				TxBytes:       peer.TransferTx,
 			})
 		}
-		p.lastPeers = samples
+	}
+	p.peersMu.Lock()
+	if peersOK {
+		p.lastPeers = peerSamples
 		p.lastPeersValid = true
 	} else {
 		p.lastPeersValid = false
 	}
 	p.peersMu.Unlock()
+
+	// Feed the Prometheus metrics snapshot (spec 012, Slice 4) from the SAME
+	// samples — never a second wg show. Online is counted against this tick's now.
+	if peersOK {
+		p.recordPeerMetrics(peerSamples, now)
+	}
 
 	// handshake_events — needs peers only. Names are resolved against the
 	// manifest if it loaded; otherwise we fall back to public-key-as-name
@@ -541,6 +704,9 @@ func (p *Poller) evaluateAlerts(ctx context.Context) {
 			return
 		}
 		in.ServiceActive = status.Active
+		// Mirror the same read into the Prometheus metrics snapshot (spec 012,
+		// Slice 4) — no extra systemctl call.
+		p.recordServiceMetric(status.Active)
 	}
 
 	// Reuse the CPU% collect already computed from this tick's single
@@ -578,6 +744,9 @@ func (p *Poller) evaluateAlerts(ctx context.Context) {
 			for _, m := range mounts {
 				in.DiskUsage = append(in.DiskUsage, alerts.FilesystemUsage{Mount: m.Path, PctFull: m.PctFull})
 			}
+			// Mirror the same disk sample into the Prometheus metrics snapshot
+			// (spec 012, Slice 4) — reuses this tick's statfs, no extra read.
+			p.recordDiskMetrics(mounts)
 		}
 	}
 

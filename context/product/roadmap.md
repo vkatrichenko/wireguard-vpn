@@ -69,8 +69,25 @@ _Dashboard design & legibility._
 
 ---
 
+### Phase 6
+
+_Preparing the project to be published as open source._
+
+- [x] **Open-Source Readiness (spec 011):** Apache-2.0 `LICENSE` + `NOTICE` attribution, `SECURITY.md` (GitHub private advisories), `CONTRIBUTING.md`, GitHub issue/PR templates, and repo hygiene — scoped-down committed agent permissions + `.gitignore` hardening (`*.mmdb` / `*.tfplan` / `tfplan`). _(Deployed to main 2026-06-26. The git-history blob purge was descoped; CI is a separate future effort.)_
+
+---
+
+### Phase 7
+
+_Alerting fan-out & external observability._
+
+- [~] **Alert Transports & Prometheus Metrics (spec 012):** Fan out alert delivery to opt-in Slack bot (`chat.postMessage`), Telegram, and Discord transports alongside the runtime-managed Slack incoming webhook (a `MultiNotifier` composite that isolates and aggregates per-transport failures); add a hand-rolled Prometheus `GET /metrics` endpoint (VPN-only, no auth, current in-memory values only, no client library, no per-scrape exec/DB); and remove the noisy peer-down/stale-peer alert condition (five → four conditions). Terraform seeds the new transport secrets from SSM (opt-in, empty-default → no behavior change when unconfigured). _(Terraform applied 2026-06-28; the dashboard binary release + live delivery/scrape E2E remain owner-run post-deploy.)_
+
+---
+
 ### Future / Under Consideration
 
 _Not yet specified; captured so the direction isn't lost._
 
-- **Repository open-sourcing** — finalize licensing, scope down committed permissions, and purge any historical secrets/large blobs before the repo goes public.
+- **Repository open-sourcing — remaining work** — flip the repo to public; the optional git-history purge of the ~65 MB GeoLite2 blob (descoped from spec 011); the deferred `tfplan` / server-key history exposure; and CI + branch-protection so PR checks pass (the recurring `mergeable_state: blocked`).
+- **ARM option (Spec C)** — option to run the EC2 host on Graviton `arm64` (instance type/AMI + an arm64 dashboard build).

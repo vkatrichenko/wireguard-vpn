@@ -113,9 +113,11 @@ chmod 0640 /etc/wireguard-dashboard/clients.json
 #     stops bash from re-expanding the Terraform-substituted values (the webhook
 #     URL in particular is a secret and may contain shell-special characters).
 #     Non-secret knobs are always written. DASHBOARD_HOST_LABEL is omitted when
-#     empty so the Go side falls back to os.Hostname(); DASHBOARD_WEBHOOK_URL is
-#     written only when a webhook is wired. Mode 0640 + group wireguard-dashboard:
-#     only the dashboard user can read the secret (same as clients.json).
+#     empty so the Go side falls back to os.Hostname(); the opt-in transport
+#     lines (Slack bot token/channel, Telegram token/chat-id, Discord webhook,
+#     spec 012) and DASHBOARD_WEBHOOK_URL are each written only when wired. Mode
+#     0640 + group wireguard-dashboard: only the dashboard user can read the
+#     secrets (same as clients.json).
 cat > /etc/wireguard-dashboard/alerts.env <<'ALERTS_EOF'
 %{ if dashboard_host_label != "" ~}
 DASHBOARD_HOST_LABEL=${dashboard_host_label}
@@ -123,8 +125,22 @@ DASHBOARD_HOST_LABEL=${dashboard_host_label}
 DASHBOARD_ALERT_DISK_PCT=${dashboard_alert_disk_pct}
 DASHBOARD_ALERT_CPU_PCT=${dashboard_alert_cpu_pct}
 DASHBOARD_ALERT_CPU_SUSTAIN=${dashboard_alert_cpu_sustain}
-DASHBOARD_ALERT_PEER_STALE=${dashboard_alert_peer_stale}
 DASHBOARD_ALERT_TRANSFER_BYTES=${dashboard_alert_transfer_bytes}
+%{ if dashboard_slack_bot_token != "" ~}
+DASHBOARD_SLACK_BOT_TOKEN=${dashboard_slack_bot_token}
+%{ endif ~}
+%{ if dashboard_slack_channel != "" ~}
+DASHBOARD_SLACK_CHANNEL=${dashboard_slack_channel}
+%{ endif ~}
+%{ if dashboard_telegram_token != "" ~}
+DASHBOARD_TELEGRAM_TOKEN=${dashboard_telegram_token}
+%{ endif ~}
+%{ if dashboard_telegram_chat_id != "" ~}
+DASHBOARD_TELEGRAM_CHAT_ID=${dashboard_telegram_chat_id}
+%{ endif ~}
+%{ if dashboard_discord_webhook_url != "" ~}
+DASHBOARD_DISCORD_WEBHOOK_URL=${dashboard_discord_webhook_url}
+%{ endif ~}
 %{ if dashboard_webhook_url != "" ~}
 DASHBOARD_WEBHOOK_URL=${dashboard_webhook_url}
 %{ endif ~}

@@ -70,6 +70,12 @@ type server struct {
 	// URL is observed by delivery and by test sends alike, with no shared sender
 	// state to coordinate.
 	webhookNotifier notify.Notifier
+	// metricsProvider backs GET /metrics, the Prometheus text exposition (spec
+	// 012, Slice 4). The poller satisfies it; it is read on the scrape path with
+	// no I/O (a deep copy of the last poll's in-memory readings). OPTIONAL: nil
+	// makes the handler emit a valid mostly-empty exposition rather than panic, so
+	// tests can pass nil.
+	metricsProvider MetricsProvider
 }
 
 // alertSnapshot returns the current alert view from the holder, or a zeroed
@@ -172,6 +178,7 @@ func New(
 	netdevSvc *netdev.Service,
 	alertStatus *alerts.StatusHolder,
 	webhookCfg *notify.WebhookConfig,
+	metricsProvider MetricsProvider,
 ) (http.Handler, error) {
 	// Two globs because templates/*.html does not recurse into cards/. The
 	// cards/ directory holds named-template fragments ({{ define "..." }})
@@ -197,19 +204,20 @@ func New(
 	}
 
 	s := &server{
-		tmpl:           tmpl,
-		serverinfoSvc:  serverinfoSvc,
-		systemdSvc:     systemdSvc,
-		clientsfileSvc: clientsfileSvc,
-		wgSvc:          wgSvc,
-		procSvc:        procSvc,
-		metricsDB:      metricsDB,
-		geoipSvc:       geoipSvc,
-		diskSvc:        diskSvc,
-		processesSvc:   processesSvc,
-		netdevSvc:      netdevSvc,
-		alertStatus:    alertStatus,
-		webhookCfg:     webhookCfg,
+		tmpl:            tmpl,
+		serverinfoSvc:   serverinfoSvc,
+		systemdSvc:      systemdSvc,
+		clientsfileSvc:  clientsfileSvc,
+		wgSvc:           wgSvc,
+		procSvc:         procSvc,
+		metricsDB:       metricsDB,
+		geoipSvc:        geoipSvc,
+		diskSvc:         diskSvc,
+		processesSvc:    processesSvc,
+		netdevSvc:       netdevSvc,
+		alertStatus:     alertStatus,
+		webhookCfg:      webhookCfg,
+		metricsProvider: metricsProvider,
 	}
 
 	// Build the server-owned test-send notifier from the same holder the write
@@ -248,6 +256,7 @@ func New(
 	mux.HandleFunc("POST /api/webhook/test", s.handleTestWebhook)
 	mux.HandleFunc("POST /api/webhook/revert", s.handleRevertWebhook)
 	mux.HandleFunc("GET /api/snapshot", s.handleGetSnapshot)
+	mux.HandleFunc("GET /metrics", s.handleGetMetricsProm)
 	mux.HandleFunc("GET /api/metrics", s.handleGetMetrics)
 	mux.HandleFunc("GET /api/metrics/system", s.handleGetMetricsSystem)
 	mux.HandleFunc("GET /api/metrics/traffic", s.handleGetMetricsTraffic)
