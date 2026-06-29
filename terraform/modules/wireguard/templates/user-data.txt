@@ -10,8 +10,32 @@ done
 apt-get update -y
 apt-get install -y wireguard wireguard-tools unzip curl
 
-# Install awscli
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+# Detect the CPU architecture so the SAME user-data boots on both amd64
+# (x86_64) and arm64 (aarch64) instances. Two spellings are needed downstream:
+#   ARCH   - the `uname -m` value AWS uses verbatim in its CLI installer URL
+#            (x86_64 / aarch64).
+#   GOARCH - the Go convention used for the dashboard release assets
+#            (amd64 / arm64), matching the names published by the build.
+# Anything else is an unsupported instance type: fail hard (consistent with the
+# script's explicit no-`set -e` fail-hard model) so the failure surfaces in
+# /var/log/cloud-init-output.log instead of fetching a wrong-arch binary.
+case "$(uname -m)" in
+  x86_64)
+    ARCH=x86_64
+    GOARCH=amd64
+    ;;
+  aarch64)
+    ARCH=aarch64
+    GOARCH=arm64
+    ;;
+  *)
+    echo "FATAL: unsupported CPU architecture $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+# Install awscli (arch-aware: AWS publishes one installer per `uname -m` value)
+curl "https://awscli.amazonaws.com/awscli-exe-linux-$ARCH.zip" -o "awscliv2.zip"
 unzip awscliv2.zip
 ./aws/install
 
@@ -157,7 +181,9 @@ chmod 0640 /etc/wireguard-dashboard/alerts.env
 #    /var/log/cloud-init-output.log rather than a wrong/partial binary going live.
 RELEASE_URL="https://github.com/${dashboard_release_repo}/releases/download/${dashboard_release_tag}"
 DL_DIR="$(mktemp -d)"
-if ! curl -fsSL "$RELEASE_URL/wireguard-dashboard" -o "$DL_DIR/wireguard-dashboard"; then
+# The release ships one binary per architecture (wireguard-dashboard-amd64 /
+# wireguard-dashboard-arm64); fetch the one matching this instance's GOARCH.
+if ! curl -fsSL "$RELEASE_URL/wireguard-dashboard-$GOARCH" -o "$DL_DIR/wireguard-dashboard-$GOARCH"; then
   echo "FATAL: failed to download dashboard binary from $RELEASE_URL" >&2
   exit 1
 fi
@@ -165,17 +191,21 @@ if ! curl -fsSL "$RELEASE_URL/SHA256SUMS" -o "$DL_DIR/SHA256SUMS"; then
   echo "FATAL: failed to download SHA256SUMS from $RELEASE_URL" >&2
   exit 1
 fi
-# SHA256SUMS lists the bare filename `wireguard-dashboard`, so verify from
-# within DL_DIR. --ignore-missing keeps this correct if SHA256SUMS ever covers
-# additional assets we didn't download.
+# SHA256SUMS lists both arch binaries under their bare filenames
+# (wireguard-dashboard-amd64 / wireguard-dashboard-arm64), so verify from within
+# DL_DIR using the same arch-suffixed name we downloaded. --ignore-missing makes
+# sha256sum check only the file we actually fetched and skip the other arch's
+# entry (and any future assets) instead of failing on its absence.
 if ! ( cd "$DL_DIR" && sha256sum -c --ignore-missing SHA256SUMS ); then
   echo "FATAL: dashboard binary failed SHA256 verification" >&2
   exit 1
 fi
 
 # 6. Install the verified binary atomically with the executable bit set, then
-#    drop the temp dir.
-install -o root -g root -m 0755 "$DL_DIR/wireguard-dashboard" /opt/wireguard-dashboard/bin/wireguard-dashboard
+#    drop the temp dir. The arch suffix is dropped here: the installed path stays
+#    /opt/wireguard-dashboard/bin/wireguard-dashboard so the systemd unit's
+#    ExecStart needs no per-arch change.
+install -o root -g root -m 0755 "$DL_DIR/wireguard-dashboard-$GOARCH" /opt/wireguard-dashboard/bin/wireguard-dashboard
 rm -rf "$DL_DIR"
 
 # 7. Drop the systemd unit. Bound to the WG tunnel IP via LISTEN_ADDR;

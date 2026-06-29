@@ -19,8 +19,9 @@
 # nor writes any AWS resource (functional spec §2.2).
 #
 # Published assets (per tag, immutable):
-#   wireguard-dashboard   linux/amd64 static binary, version-stamped via ldflags
-#   SHA256SUMS            sha256 of the binary, for boot-time + manual verification
+#   wireguard-dashboard-amd64   linux/amd64 static binary, version-stamped via ldflags
+#   wireguard-dashboard-arm64   linux/arm64 static binary, version-stamped via ldflags
+#   SHA256SUMS                  sha256 of both binaries, for boot-time + manual verification
 
 name: dashboard-release
 
@@ -68,33 +69,39 @@ jobs:
         working-directory: dashboard
         run: go test -race ./...
 
-      - name: Cross-compile linux/amd64 binary
+      - name: Cross-compile linux amd64 + arm64 binaries
         working-directory: dashboard
         env:
           CGO_ENABLED: '0'
           GOOS: linux
-          GOARCH: amd64
+        # Pure cross-compile (CGO off) for both target architectures in one
+        # loop — the instance picks the matching asset by its own arch at boot.
         # Inject build-time metadata into main.ReleaseTag / BuildSHA / BuildTime
         # / GoVersion via `-ldflags -X` so the About tab renders the exact
         # release tag and commit. ReleaseTag is GITHUB_REF_NAME (the pushed tag,
         # e.g. v1.2.3); BuildSHA is the 7-char prefix of GITHUB_SHA for parity
-        # with the Makefile's `git rev-parse --short HEAD`.
+        # with the Makefile's `git rev-parse --short HEAD`. Both binaries share
+        # identical ldflags metadata; only GOARCH (and the -o suffix) differ.
         run: |
           BUILD_SHA="${GITHUB_SHA:0:7}"
           BUILD_TIME="$(date -u +%FT%TZ)"
           GO_VERSION="$(go env GOVERSION)"
-          go build -ldflags "-s -w \
-              -X main.ReleaseTag=${GITHUB_REF_NAME} \
-              -X main.BuildSHA=${BUILD_SHA} \
-              -X main.BuildTime=${BUILD_TIME} \
-              -X main.GoVersion=${GO_VERSION}" \
-            -o wireguard-dashboard ./cmd/wireguard-dashboard
+          for arch in amd64 arm64; do
+            GOARCH="$arch" go build -ldflags "-s -w \
+                -X main.ReleaseTag=${GITHUB_REF_NAME} \
+                -X main.BuildSHA=${BUILD_SHA} \
+                -X main.BuildTime=${BUILD_TIME} \
+                -X main.GoVersion=${GO_VERSION}" \
+              -o "wireguard-dashboard-$arch" ./cmd/wireguard-dashboard
+          done
 
       - name: Generate SHA256SUMS
         working-directory: dashboard
-        # Bare filename (not a path) so the sum verifies after `curl -o
-        # wireguard-dashboard` on the instance, where the binary sits in cwd.
-        run: sha256sum wireguard-dashboard > SHA256SUMS
+        # Bare filenames (not paths) so the sums verify after the instance
+        # `curl -o wireguard-dashboard-<arch>` into a download dir and runs
+        # `sha256sum -c --ignore-missing SHA256SUMS` there (only its own arch
+        # is present locally, hence --ignore-missing).
+        run: sha256sum wireguard-dashboard-amd64 wireguard-dashboard-arm64 > SHA256SUMS
 
       - name: Publish GitHub Release
         working-directory: dashboard
@@ -103,11 +110,12 @@ jobs:
         # `gh` is preinstalled on ubuntu-latest; no third-party action to pin.
         # --generate-notes gives an auto changelog from commits since the last
         # tag. Asset URLs become:
-        #   https://github.com/<owner>/<repo>/releases/download/<tag>/wireguard-dashboard
+        #   https://github.com/<owner>/<repo>/releases/download/<tag>/wireguard-dashboard-amd64
+        #   https://github.com/<owner>/<repo>/releases/download/<tag>/wireguard-dashboard-arm64
         #   https://github.com/<owner>/<repo>/releases/download/<tag>/SHA256SUMS
-        # which is exactly what user-data curls in Slice 3.
+        # which is exactly what user-data curls (per-arch binary + SHA256SUMS) in Slice 3.
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
-            wireguard-dashboard SHA256SUMS
+            wireguard-dashboard-amd64 wireguard-dashboard-arm64 SHA256SUMS
