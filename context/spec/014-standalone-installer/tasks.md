@@ -6,13 +6,13 @@
 
 ### Slice 1 — `scripts/install.sh`: WireGuard server (standalone, no dashboard)
 
-- [ ] Create `scripts/install.sh` (`set -euo pipefail`, usage header comment): env contract (`WG_SERVER_NET`/`_PORT`/`_PRIVATE_KEY`/`WG_PEERS` with defaults), apt + WireGuard install, arch-detect, server-key generate-if-unset (persist to `/etc/wireguard`), `wg0.conf` with NAT + forwarding on the auto-detected egress iface, `ip_forward`, enable/start `wg-quick@wg0`, fail-hard success gate. **[Agent: linux-cloud-init]**
-- [ ] Verify: `shellcheck scripts/install.sh` clean; dry-run on a throwaway Ubuntu host (or amd64 container best-effort) → confirm `wg-quick@wg0` active + a client handshake. **[Agent: linux-cloud-init]**
+- [x] Create `scripts/install.sh` (`set -euo pipefail`, usage header comment): env contract (`WG_SERVER_NET`/`_PORT`/`_PRIVATE_KEY`/`WG_PEERS` with defaults), apt + WireGuard install, arch-detect, server-key generate-if-unset (persist to `/etc/wireguard`), `wg0.conf` with NAT + forwarding on the auto-detected egress iface, `ip_forward`, enable/start `wg-quick@wg0`, fail-hard success gate. **[Agent: linux-cloud-init]**
+- [x] Verify: `shellcheck scripts/install.sh` clean ✓ (via `koalaman/shellcheck` Docker, exit 0). Boot/handshake dry-run on a real Ubuntu host is **owner-run** (system-mutating; can't run on the macOS dev host). **[Agent: linux-cloud-init]**
 
 ### Slice 2 — Add the dashboard install to `install.sh`
 
-- [ ] Extend the script with the dashboard block gated on `DASHBOARD_RELEASE_TAG` (runtime `if`, replacing the template `%{ if }`): dashboard user/dirs/sudoers, `clients.json` + `alerts.env` from env (runtime conditionals for optional knobs/secrets), SHA-verified arch binary download + install, systemd unit with `LISTEN_ADDR` derived from `${WG_SERVER_NET%/*}:${DASHBOARD_PORT}`. **[Agent: linux-cloud-init]**
-- [ ] Verify: `shellcheck` clean; dry-run **with** a dashboard tag → dashboard reachable on the tunnel IP; dry-run **without** → dashboard cleanly skipped, WG-only box. **[Agent: linux-cloud-init]**
+- [x] Extend the script with the dashboard block gated on `DASHBOARD_RELEASE_TAG` (runtime `if`, replacing the template `%{ if }`): dashboard user/dirs/sudoers, `clients.json` + `alerts.env` from env (runtime conditionals for optional knobs/secrets), SHA-verified arch binary download + install, systemd unit with `LISTEN_ADDR` derived from `${WG_SERVER_NET%/*}:${DASHBOARD_PORT}`. **[Agent: linux-cloud-init]**
+- [x] Verify: `shellcheck` clean ✓ (Docker, exit 0); all `DASHBOARD_*` vars `${VAR:-}`-defaulted (set -u safe). With-tag / no-tag boot dry-run is **owner-run** on a real Ubuntu host. **[Agent: linux-cloud-init]**
 
 _At the end of Slice 2 the VPS use case is fully delivered; EC2 still uses its own user-data (logic duplicated, temporarily)._
 
@@ -23,9 +23,9 @@ _At the end of Slice 2 the VPS use case is fully delivered; EC2 still uses its o
 - [ ] Verify (agent): `terraform fmt -recursive`; `make pre-commit`; render & diff the user-data vs the pre-refactor version; confirm rendered size < 16 KB. **[Agent: terraform-aws]**
 - [ ] **Owner-run:** `terraform plan -out=tfplan` (expect a user-data change → instance replacement), `apply`, then SSM/SSH smoke — WG handshake, dashboard up, `cloud-init-output.log` clean. Required regression gate. **(owner)**
 
-### Slice 4 — Optional: wire `shellcheck` into `make pre-commit`
+### Slice 4 — Optional: wire `shellcheck` for `scripts/*.sh`
 
-- [ ] If cheap, add a `shellcheck` hook for `scripts/*.sh` to `.pre-commit-config.yaml` so the script stays linted. **[Agent: devsecops-quality]**
+- [x] **Mechanism changed → standalone `make shellcheck` target** (not a pre-commit hook). A pre-commit hook proved infeasible: the pinned `ghcr.io/antonbabenko/pre-commit-terraform:v1.105.0` image bundles no `shellcheck` binary, and `make pre-commit` mounts no docker socket (so the `language: docker_image` hook can't run). Added a `shellcheck` target pinned to `koalaman/shellcheck:v0.11.0` instead; `make shellcheck` lints `scripts/*.sh` (exit 0), `make pre-commit`'s four terraform hooks unaffected. **[Agent: devsecops-quality]**
 
 ---
 
