@@ -52,7 +52,7 @@ module "wireguard" {
   # asset — there is NO `wireguard-dashboard-arm64` on this tag. An arm64 instance
   # boots, the user-data download for the arm64 binary 404s, provisioning aborts
   # (no `.ready`), and the dashboard never comes up. This MUST be updated first.
-  dashboard_release_tag  = "v0.0.6"
+  dashboard_release_tag  = "v0.0.7"
   dashboard_release_repo = "vkatrichenko/wireguard-vpn"
 
   # Alert seed (spec 008 slice 5), wired-but-disabled. To enable: create the SSM
