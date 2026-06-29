@@ -19,10 +19,18 @@ _Vertical slices, ordered by the hard dependency: the dual-arch dashboard releas
 
 ### Slice 3 — Terraform single toggle + arm64 default (the flip)
 
-- [ ] Add `cpu_architecture` (default `"arm64"`), the `arch_config` map, and the derived `instance_type` (override-able) to `terraform/dev/locals.tf`, with map-index validation (invalid value fails plan). **[Agent: terraform-aws]**
-- [ ] Drive `datasource.tf` AMI name suffix + `architecture` filter from `arch_config`, and pass `instance_type = local.instance_type` into the module in `main.tf`. Bump `dashboard_release_tag` to a tag built by Slice 1. **[Agent: terraform-aws]**
-- [ ] Verify (agent, read-only): `terraform fmt -recursive`; `AWS_PROFILE=csm aws ec2 describe-images …` to confirm the arm64 Ubuntu 24.04 AMI actually resolves; `make pre-commit`. **[Agent: terraform-aws]**
+- [x] Add `cpu_architecture` (default `"arm64"`), the `arch_config` map, and the derived `instance_type` (override-able) to `terraform/dev/locals.tf`, with validation (map-index hard-errors on an invalid value; a `check` block adds a friendly message). **[Agent: terraform-aws]**
+- [x] Drive `datasource.tf` AMI name suffix + `architecture` filter from `arch_config`, and pass `instance_type = local.instance_type` into the module in `main.tf`. **[Agent: terraform-aws]**
+- [ ] **(owner-gated, deferred)** Bump `dashboard_release_tag` (currently `v0.0.6`) to a tag built by Slice 1's dual-arch pipeline — MUST happen before any arm64 apply (a TODO above the pin in `main.tf` flags this). Blocked until the owner cuts the dual-arch release.
+- [x] Verify (agent, read-only): `terraform fmt -recursive` ✓; `make pre-commit` ✓ (fmt/docs/tflint/trivy all Passed). `describe-images` for the arm64 AMI is **pending** — the `csm` SSO session is expired; re-run after `aws sso login --profile csm`. **[Agent: terraform-aws]**
 - [ ] **Owner-run:** `terraform validate` + `terraform plan -out=tfplan` in `terraform/dev/`; confirm the diff is exactly the AMI + instance replacement and the AMI is arm64. Flip to `x86_64` and re-plan to prove the toggle is symmetric.
+
+### Slice 3b — Refactor: AMI lookup + arch mapping into the module (supersedes Slice 3's dev-side placement)
+
+_Post-Slice-3 cleanup: the arch→{AMI, instance-type} ownership moved out of the dev root and into the `wireguard` module, so the module is self-contained and arch-aware. `make pre-commit` green (fmt/docs/tflint/trivy)._
+
+- [x] Module gains `cpu_architecture` var (with `validation`), the `arch_config` map, the `aws_ami` data source (count-gated on the `ami_id` override), and `effective_ami_id` / `effective_instance_type` locals. `ami_id` kept as explicit override; `instance_type` now an arch-derived optional override. **[Agent: terraform-aws]**
+- [x] Dev root slimmed: `terraform/dev/datasource.tf` deleted, `arch_config` / `instance_type` derivation / `check` block removed from `locals.tf`; `main.tf` module call now passes only `cpu_architecture`. No dangling refs (grep clean). **[Agent: terraform-aws]**
 
 ### Slice 4 — End-to-end arm64 validation (owner-run; cannot be done in-session)
 

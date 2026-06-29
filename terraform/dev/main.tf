@@ -11,9 +11,10 @@ module "network" {
 module "wireguard" {
   source = "../modules/wireguard"
 
-  project_name                = local.project_name
-  env                         = local.environment
-  ami_id                      = data.aws_ami.ubuntu_2404.id # Ubuntu Server 24.04 x86
+  project_name = local.project_name
+  env          = local.environment
+
+
   vpc_id                      = module.network.vpc_id
   subnet_id                   = module.network.public_subnets[0]
   wg_server_net               = "172.16.15.1/24"
@@ -45,6 +46,12 @@ module "wireguard" {
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]
+  # TODO(arm64): BEFORE any `terraform apply` with the default local.cpu_architecture
+  # = "arm64", BUMP this tag to a release built by the dual-arch pipeline (spec 013
+  # Slice 1). v0.0.6 only published the legacy amd64-only `wireguard-dashboard`
+  # asset — there is NO `wireguard-dashboard-arm64` on this tag. An arm64 instance
+  # boots, the user-data download for the arm64 binary 404s, provisioning aborts
+  # (no `.ready`), and the dashboard never comes up. This MUST be updated first.
   dashboard_release_tag  = "v0.0.6"
   dashboard_release_repo = "vkatrichenko/wireguard-vpn"
 

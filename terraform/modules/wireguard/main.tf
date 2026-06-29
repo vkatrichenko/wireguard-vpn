@@ -17,7 +17,7 @@ resource "aws_s3_bucket" "health_check" {
 resource "aws_launch_template" "wireguard" {
   name = "wireguard-${var.env}"
 
-  image_id = var.ami_id
+  image_id = local.effective_ami_id
   key_name = var.preconfigured_ssh_key_id != null ? var.preconfigured_ssh_key_id : aws_key_pair.ssh[0].id
 
   iam_instance_profile {
@@ -41,7 +41,7 @@ resource "aws_launch_template" "wireguard" {
 }
 
 resource "aws_instance" "wireguard" {
-  instance_type = var.instance_type
+  instance_type = local.effective_instance_type
   # vpc_security_group_ids = local.security_groups_ids
   # subnet_id              = var.subnet_id
 

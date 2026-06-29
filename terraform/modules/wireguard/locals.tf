@@ -64,6 +64,30 @@ locals {
   })
 }
 
+# Per-architecture lookup. ami_suffix is the token in the Ubuntu AMI name
+# ("amd64"/"arm64"); ami_arch is the value for the aws_ami `architecture` filter
+# ("x86_64"/"arm64"); default_instance_type is the matching family.
+locals {
+  arch_config = {
+    x86_64 = {
+      ami_suffix            = "amd64"
+      ami_arch              = "x86_64"
+      default_instance_type = "t3a.micro"
+    }
+    arm64 = {
+      ami_suffix            = "arm64"
+      ami_arch              = "arm64"
+      default_instance_type = "t4g.micro"
+    }
+  }
+
+  # An explicit ami_id override wins; otherwise resolve from the arch-aware lookup.
+  effective_ami_id = var.ami_id != null ? var.ami_id : data.aws_ami.ubuntu_2404[0].id
+
+  # An explicit instance_type override wins; otherwise use the architecture default.
+  effective_instance_type = var.instance_type != null ? var.instance_type : local.arch_config[var.cpu_architecture].default_instance_type
+}
+
 # turn the sg into a sorted list of string
 locals {
   sg_wireguard_external = sort([aws_security_group.sg_wireguard_external.id])
