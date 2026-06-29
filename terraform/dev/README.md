@@ -10,9 +10,7 @@
 
 ## Providers
 
-| Name | Version |
-|------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 6.41.0 |
+No providers.
 
 ## Modules
 
@@ -23,9 +21,7 @@
 
 ## Resources
 
-| Name | Type |
-|------|------|
-| [aws_ami.ubuntu_2404](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/ami) | data source |
+No resources.
 
 ## Inputs
 

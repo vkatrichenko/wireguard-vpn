@@ -9,10 +9,21 @@ variable "project_name" {
   type        = string
 }
 
-variable "instance_type" {
-  description = "The machine type to launch, some machines may offer higher throughput for higher use cases."
+variable "cpu_architecture" {
+  description = "CPU architecture for the WireGuard server. Drives the Ubuntu AMI name suffix, the AMI `architecture` filter, and the default instance type. Allowed: \"x86_64\" (amd64, t3a.micro default) or \"arm64\" (Graviton, t4g.micro default). Default \"arm64\" for better price/performance."
   type        = string
-  default     = "t3a.micro"
+  default     = "arm64"
+
+  validation {
+    condition     = contains(["x86_64", "arm64"], var.cpu_architecture)
+    error_message = "cpu_architecture must be one of: \"x86_64\", \"arm64\"."
+  }
+}
+
+variable "instance_type" {
+  description = "Optional explicit instance-type override. When null (default), the module uses the architecture's default (t3a.micro for x86_64, t4g.micro for arm64). A non-null value overrides the architecture-derived default."
+  type        = string
+  default     = null
 }
 
 variable "vpc_id" {
@@ -84,7 +95,7 @@ variable "wg_server_private_key_param" {
 }
 
 variable "ami_id" {
-  description = "The AWS AMI to use for the WG server, defaults to the latest Ubuntu 16.04 AMI if not specified."
+  description = "Optional explicit AMI override for the WG server. When set (non-null), it takes precedence over the cpu_architecture-derived AMI lookup. When null (default), the module resolves the latest Ubuntu 24.04 AMI for the selected cpu_architecture via the aws_ami data source."
   type        = string
   default     = null
 }
