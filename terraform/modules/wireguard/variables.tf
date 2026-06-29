@@ -127,6 +127,32 @@ variable "dashboard_release_repo" {
   }
 }
 
+variable "install_script_repo" {
+  description = "GitHub repository slug (owner/name) the portable installer scripts/install.sh is fetched from at first boot. Combined with install_script_ref into the raw-content URL https://raw.githubusercontent.com/<repo>/<ref>/scripts/install.sh. Anonymous fetch requires the repo to be public."
+  type        = string
+  default     = "vkatrichenko/wireguard-vpn"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.install_script_repo))
+    error_message = "install_script_repo must be a GitHub 'owner/name' slug."
+  }
+}
+
+variable "install_script_ref" {
+  description = "A commit SHA or tag pinning the exact scripts/install.sh version fetched at boot from install_script_repo. Must point at a ref on the PUBLIC default branch where the install.sh matching install_script_sha256 exists, otherwise the raw fetch 404s and boot aborts. Bumping this re-renders user-data, rolls a new launch-template version, and replaces the instance."
+  type        = string
+}
+
+variable "install_script_sha256" {
+  description = "Expected 64-hex SHA256 digest of scripts/install.sh at install_script_ref. The wrapper verifies the fetched script against this with `sha256sum -c -` before running it as root; a mismatch aborts the boot. Compute with `sha256sum scripts/install.sh` and update as an explicit reviewable commit whenever install.sh changes."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-f0-9]{64}$", var.install_script_sha256))
+    error_message = "install_script_sha256 must be a 64-character lowercase hex SHA256 digest."
+  }
+}
+
 variable "dashboard_webhook_url_param" {
   description = "SSM parameter NAME holding the Slack-compatible alert webhook URL. Created out-of-band (like wg_server_private_key_param), not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_WEBHOOK_URL. The value is a secret and is never output. Empty string (default) disables the webhook seed — alerts.env is still written with the non-secret knobs, but no DASHBOARD_WEBHOOK_URL line, so the dashboard's alerting stays dormant until the operator creates the SSM param and sets this name."
   type        = string

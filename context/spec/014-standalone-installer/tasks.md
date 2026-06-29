@@ -16,11 +16,14 @@
 
 _At the end of Slice 2 the VPS use case is fully delivered; EC2 still uses its own user-data (logic duplicated, temporarily)._
 
-### Slice 3 — Refactor EC2 user-data to consume the shared script
+### Slice 3 — Refactor EC2 user-data to consume the shared script (fetch-at-boot)
 
-- [ ] Add `install_script = file("${path.module}/../../../scripts/install.sh")` to the `templatefile()` var map in `terraform/modules/wireguard/locals.tf`. **[Agent: terraform-aws]**
-- [ ] Slim `user-data.txt` to the AWS wrapper: IMDSv2, `export` the env contract from TF vars (scalars single-quoted; `WG_PEERS`/`CLIENTS_JSON` via quoted heredoc-to-var), embed+run the script as a subprocess with exit-code check, then awscli + S3 `.ready` loop + EIP. Remove the now-duplicated install logic. **[Agent: linux-cloud-init]**
-- [ ] Verify (agent): `terraform fmt -recursive`; `make pre-commit`; render & diff the user-data vs the pre-refactor version; confirm rendered size < 16 KB. **[Agent: terraform-aws]**
+_Mechanism changed from **embed** → **fetch-at-boot**: embedding the ~17.9 KB script rendered ~23 KB, over EC2's 16 KB user-data cap. The wrapper now curls `install.sh` from raw GitHub at a pinned ref and verifies it against a TF-pinned SHA256 before running. Tech spec §2.2/§2.3 updated._
+
+- [x] Add `install_script_repo` / `install_script_ref` / `install_script_sha256` vars (hex-validated) to `terraform/modules/wireguard/variables.tf`; pass them through the `templatefile()` map in `locals.tf`. **[Agent: linux-cloud-init]**
+- [x] Slim `user-data.txt` to the AWS wrapper: IMDSv2, `export` the env contract from TF vars (scalars single-quoted; `WG_PEERS`/`CLIENTS_JSON` via quoted heredoc-to-var), **fetch + `sha256sum -c` verify + run** `install.sh` as a subprocess with exit-code check, then awscli + S3 `.ready` loop. All duplicated install logic removed (grep-confirmed). **[Agent: linux-cloud-init]**
+- [x] Verify (agent): `terraform fmt` + `validate` + `make pre-commit` all pass; wrapper = 6,022 B (≪ 16 KB); pinned `install_script_sha256` matches `sha256sum scripts/install.sh`. Full rendered-diff is owner-run (needs terraform render). **[Agent: linux-cloud-init]**
+- [ ] **(owner-gated)** Set `install_script_ref` (currently `REPLACE_ME_…`) to the public-branch commit SHA/tag carrying this exact `install.sh`; the repo must be public for the raw fetch to resolve. Blocked until `install.sh` lands on the public default branch.
 - [ ] **Owner-run:** `terraform plan -out=tfplan` (expect a user-data change → instance replacement), `apply`, then SSM/SSH smoke — WG handshake, dashboard up, `cloud-init-output.log` clean. Required regression gate. **(owner)**
 
 ### Slice 4 — Optional: wire `shellcheck` for `scripts/*.sh`

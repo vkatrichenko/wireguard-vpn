@@ -46,14 +46,21 @@ module "wireguard" {
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]
-  # TODO(arm64): BEFORE any `terraform apply` with the default local.cpu_architecture
-  # = "arm64", BUMP this tag to a release built by the dual-arch pipeline (spec 013
-  # Slice 1). v0.0.6 only published the legacy amd64-only `wireguard-dashboard`
-  # asset — there is NO `wireguard-dashboard-arm64` on this tag. An arm64 instance
-  # boots, the user-data download for the arm64 binary 404s, provisioning aborts
-  # (no `.ready`), and the dashboard never comes up. This MUST be updated first.
   dashboard_release_tag  = "v0.0.7"
   dashboard_release_repo = "vkatrichenko/wireguard-vpn"
+
+  # Portable installer fetched at boot from raw GitHub, SHA256-verified before it
+  # runs (spec 014). The repo MUST be public for the anonymous raw fetch to
+  # resolve — a private repo 404s and aborts the boot (no `.ready`).
+  install_script_repo   = "vkatrichenko/wireguard-vpn"
+  install_script_sha256 = "7be62a73b20c8845c8b9fd72c79f6d77b8ca6a2bb6e3d545e54ae5d67befd2cf"
+  # TODO(install_script_ref): BEFORE any `terraform apply`, set this to the commit
+  # SHA or tag on the PUBLIC default branch where this exact scripts/install.sh
+  # (matching install_script_sha256 above) lands. The placeholder below does NOT
+  # exist on GitHub yet — an instance would 404 on the raw fetch (or fail the
+  # checksum) and provisioning would abort. Update this AND re-run
+  # `sha256sum scripts/install.sh` whenever install.sh changes.
+  install_script_ref = "REPLACE_ME_WITH_PUBLIC_COMMIT_SHA_OR_TAG"
 
   # Alert seed (spec 008 slice 5), wired-but-disabled. To enable: create the SSM
   # parameter out-of-band (e.g. `aws ssm put-parameter --type SecureString`) and
