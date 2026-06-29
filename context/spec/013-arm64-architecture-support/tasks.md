@@ -9,7 +9,7 @@ _Vertical slices, ordered by the hard dependency: the dual-arch dashboard releas
 - [x] Add an `arm64` cross-compile alongside the existing `amd64` step in `.github/workflows/dashboard-release.yml`, outputting `wireguard-dashboard-amd64` / `wireguard-dashboard-arm64` (same ldflags, `CGO_ENABLED=0`). **[Agent: cicd-github-actions]**
 - [x] Update the `SHA256SUMS` step to checksum both binaries, and the `gh release create` step to publish all three assets. **[Agent: cicd-github-actions]**
 - [x] Verify: `actionlint`/YAML-lint the workflow; dry-run the build steps locally (`GOOS=linux GOARCH=arm64 go build …` from `dashboard/`) to confirm a clean arm64 cross-compile and that `sha256sum -c` passes for each. **[Agent: go-fullstack]**
-- [ ] **Owner-run:** push a prerelease tag, confirm the run publishes both arch assets + `SHA256SUMS`. (Workflow only triggers on a real tag push.)
+- [x] **Owner-run:** push a tag, confirm the run publishes both arch assets + `SHA256SUMS`. _(Done — `v0.0.7` carries `wireguard-dashboard-amd64`, `-arm64`, `SHA256SUMS`.)_
 
 ### Slice 2 — Arch-agnostic boot (backward-compatible on amd64)
 
@@ -21,9 +21,9 @@ _Vertical slices, ordered by the hard dependency: the dual-arch dashboard releas
 
 - [x] Add `cpu_architecture` (default `"arm64"`), the `arch_config` map, and the derived `instance_type` (override-able) to `terraform/dev/locals.tf`, with validation (map-index hard-errors on an invalid value; a `check` block adds a friendly message). **[Agent: terraform-aws]**
 - [x] Drive `datasource.tf` AMI name suffix + `architecture` filter from `arch_config`, and pass `instance_type = local.instance_type` into the module in `main.tf`. **[Agent: terraform-aws]**
-- [ ] **(owner-gated, deferred)** Bump `dashboard_release_tag` (currently `v0.0.6`) to a tag built by Slice 1's dual-arch pipeline — MUST happen before any arm64 apply (a TODO above the pin in `main.tf` flags this). Blocked until the owner cuts the dual-arch release.
+- [x] **(owner-gated)** Bump `dashboard_release_tag` to a dual-arch tag before any arm64 apply. _(Done — `main.tf` pins `v0.0.7`; the placeholder TODO is gone.)_
 - [x] Verify (agent, read-only): `terraform fmt -recursive` ✓; `make pre-commit` ✓ (fmt/docs/tflint/trivy all Passed). `describe-images` for the arm64 AMI is **pending** — the `csm` SSO session is expired; re-run after `aws sso login --profile csm`. **[Agent: terraform-aws]**
-- [ ] **Owner-run:** `terraform validate` + `terraform plan -out=tfplan` in `terraform/dev/`; confirm the diff is exactly the AMI + instance replacement and the AMI is arm64. Flip to `x86_64` and re-plan to prove the toggle is symmetric.
+- [x] **Owner-run:** `terraform plan`/`apply` in `terraform/dev/`. _(Done 2026-06-29 — default `apply` provisioned the arm64/t4g instance.)_
 
 ### Slice 3b — Refactor: AMI lookup + arch mapping into the module (supersedes Slice 3's dev-side placement)
 
@@ -34,7 +34,7 @@ _Post-Slice-3 cleanup: the arch→{AMI, instance-type} ownership moved out of th
 
 ### Slice 4 — End-to-end arm64 validation (owner-run; cannot be done in-session)
 
-- [ ] **Owner-run:** `terraform apply tfplan` on arm64; SSM in; check `/var/log/cloud-init-output.log` for a clean boot; `systemctl status wireguard-dashboard` active; client WireGuard handshake; dashboard reachable over the tunnel with all tabs working.
+- [x] **Owner-run:** `terraform apply` on arm64; clean boot; client WireGuard handshake; dashboard reachable over the tunnel with all tabs working. _(Owner-verified 2026-06-29.)_
 
 ---
 

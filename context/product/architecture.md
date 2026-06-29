@@ -25,13 +25,14 @@
 
 ## 3. Compute & Configuration
 
-- **Instance Type:** t3.micro (2 vCPU, 1 GB RAM, free-tier eligible)
-- **AMI:** Explicitly pinned in locals.tf (no `most_recent = true` data source)
-- **Configuration Method (Current):** Cloud-init user-data — installs and configures WireGuard at first boot, retrieves private key from SSM
-- **Alternatives Under Evaluation:**
-  - **Packer** — pre-baked AMI with WireGuard installed; faster boot, immutable infrastructure pattern; adds a build pipeline step
-  - **Ansible** — post-provisioning configuration; allows re-configuration without instance replacement; adds tool dependency
-- **Client Management:** Configurable `clients_config` list in Terraform, each entry with a unique public key and IP assignment
+- **CPU Architecture (spec 013):** Selectable via a single `cpu_architecture` variable on the `wireguard` module (`"arm64"` | `"x86_64"`, validated), **default `arm64`**. An `arch_config` map derives the AMI name suffix, the AMI `architecture` filter, and the default instance type from that one value. `dev/` does not set it today, so it inherits the module default (arm64).
+- **Instance Type:** Arch-derived default — `arm64` → **`t4g.micro`** (Graviton), `x86_64` → `t3a.micro`. Overridable via the module's optional `instance_type` for sizing without touching the module.
+- **AMI:** Resolved by an `aws_ami` data source in the `wireguard` module — Canonical Ubuntu Noble 24.04, `most_recent = true`, filtered by the arch-derived suffix + `architecture`. An explicit `ami_id` override (count-gated) preserves explicit pinning. _**Deviation note:** this `most_recent` default differs from the repo's "AMIs pinned explicitly, no `most_recent`" convention (CLAUDE.md); the `ami_id` override is the convention-compliant path._
+- **Configuration Method (spec 014):** A single committed, env-driven, Ubuntu-only `scripts/install.sh` is the source of truth for the install (WireGuard server + optional dashboard, fail-hard, shellcheck-clean). Two consumers of the **same script**:
+  - **EC2:** cloud-init user-data is a thin AWS wrapper (IMDSv2, SSM-sourced server key, S3 `.ready` signal, EIP, awscli) that **fetches `install.sh` from raw GitHub at a content-pinned ref** (`install_script_ref`, default `main`; `install_script_sha256` verifies the fetched script before it runs) and executes it. The 16 KB user-data cap drove fetch-at-boot over embedding.
+  - **Standalone VPS:** download `install.sh`, review, `sudo bash install.sh` — same result on any plain Ubuntu host, no AWS/Terraform.
+- **Architecture-agnostic boot:** the host detects its arch at runtime (`uname -m`) and selects the matching AWS CLI installer and the matching `wireguard-dashboard-$GOARCH` release asset (checksum-verified, fail-hard on mismatch).
+- **Client Management:** Configurable `clients_config` list in Terraform, each entry with a unique public key and IP assignment. _(Runtime UI-based client management is specified in spec 015 — not yet implemented.)_
 
 ---
 
@@ -72,8 +73,8 @@
 
 ## 7. Dashboard Build & Deployment
 
-- **Distribution (spec 005):** public GitHub Release artifact from `vkatrichenko/wireguard-vpn`, pinned via `dashboard_release_tag` in `terraform/dev/main.tf` (currently `v0.0.3`) — single reviewable source of truth, same explicit-pin philosophy as the AMI. Replaced the earlier private S3-artifact + ECR path.
-- **Install (cloud-init):** user-data downloads the binary + `SHA256SUMS` from the pinned release and verifies the checksum before install; provisioned only when `dashboard_release_tag` is non-empty.
+- **Distribution (spec 005 / 013):** public GitHub Release artifact from `vkatrichenko/wireguard-vpn`, pinned via `dashboard_release_tag` in `terraform/dev/main.tf` (currently **`v0.0.7`**) — single reviewable source of truth, same explicit-pin philosophy as the AMI. Each release publishes **both** `wireguard-dashboard-amd64` and `wireguard-dashboard-arm64` under one `SHA256SUMS` (spec 013). Replaced the earlier private S3-artifact + ECR path.
+- **Install (via `scripts/install.sh`):** the installer downloads `wireguard-dashboard-$GOARCH` + `SHA256SUMS` from the pinned release and verifies the checksum before install; provisioned only when `dashboard_release_tag` is non-empty. On EC2 this runs inside the fetched shared script (spec 014); on a VPS it is the same code path.
 - **Service:** systemd `wireguard-dashboard.service`, `Requires`/`After=wg-quick@wg0`; runs as a dedicated `wireguard-dashboard` system user (nologin). Alert config is supplied via an optional `EnvironmentFile=-/etc/wireguard-dashboard/alerts.env` (008, §8).
 - **Binding & access:** `LISTEN_ADDR=172.16.15.1:8080` — bound to the WireGuard tunnel IP, so reachable only over the VPN (no public listener; this is why no in-band auth is needed, including for the 008 write endpoints).
 

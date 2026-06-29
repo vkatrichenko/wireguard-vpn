@@ -23,8 +23,8 @@ _Mechanism changed from **embed** → **fetch-at-boot**: embedding the ~17.9 KB 
 - [x] Add `install_script_repo` / `install_script_ref` / `install_script_sha256` vars (hex-validated) to `terraform/modules/wireguard/variables.tf`; pass them through the `templatefile()` map in `locals.tf`. **[Agent: linux-cloud-init]**
 - [x] Slim `user-data.txt` to the AWS wrapper: IMDSv2, `export` the env contract from TF vars (scalars single-quoted; `WG_PEERS`/`CLIENTS_JSON` via quoted heredoc-to-var), **fetch + `sha256sum -c` verify + run** `install.sh` as a subprocess with exit-code check, then awscli + S3 `.ready` loop. All duplicated install logic removed (grep-confirmed). **[Agent: linux-cloud-init]**
 - [x] Verify (agent): `terraform fmt` + `validate` + `make pre-commit` all pass; wrapper = 6,022 B (≪ 16 KB); pinned `install_script_sha256` matches `sha256sum scripts/install.sh`. Full rendered-diff is owner-run (needs terraform render). **[Agent: linux-cloud-init]**
-- [ ] **(owner-gated)** Set `install_script_ref` (currently `REPLACE_ME_…`) to the public-branch commit SHA/tag carrying this exact `install.sh`; the repo must be public for the raw fetch to resolve. Blocked until `install.sh` lands on the public default branch.
-- [ ] **Owner-run:** `terraform plan -out=tfplan` (expect a user-data change → instance replacement), `apply`, then SSM/SSH smoke — WG handshake, dashboard up, `cloud-init-output.log` clean. Required regression gate. **(owner)**
+- [x] **(owner-gated)** `install_script_ref` resolution. _(Resolved by the module default `"main"` — `dev/main.tf:61` left commented; the raw fetch pulls `install.sh` from `main` and is content-pinned by `install_script_sha256` (`7be62a7…`), so a drifted script fails the boot loudly. Owner chose to keep `main` over a commit pin.)_
+- [x] **Owner-run:** `terraform apply` + smoke. _(Done 2026-06-29 — EC2 regression gate passed: arm64 box booted via the fetched `install.sh`, WG handshake + dashboard all tabs working.)_
 
 ### Slice 4 — Optional: wire `shellcheck` for `scripts/*.sh`
 
@@ -37,5 +37,6 @@ _Mechanism changed from **embed** → **fetch-at-boot**: embedding the ~17.9 KB 
 | Task/Slice | Issue | Recommendation |
 |---|---|---|
 | Slices 1–2 verify | No throwaway Ubuntu VPS in-session; systemd-in-container is unreliable | shellcheck runs in-session; full boot/handshake dry-run is owner-run (or a real cheap VPS) |
+| **RESIDUAL (post-verify 2026-06-29)** | Spec marked **Completed (EC2-verified)**, but the standalone-VPS path was never runtime-tested: the `wg genkey`-if-unset, zero-peer, and no-dashboard-skip branches are code-complete + shellcheck-clean only | Run `sudo bash install.sh` once on a plain non-AWS Ubuntu VPS to close the caveat |
 | Slice 3 owner-run | `plan`/`apply` are owner-only (CLAUDE.md); this is the EC2-regression gate | Agent does fmt/validate/render-diff/size; owner runs plan + apply + smoke |
 | Whole spec | Rewrites `user-data.txt` also changed by open PR #41 | Land #41 first; implement 014 on the merged base |
