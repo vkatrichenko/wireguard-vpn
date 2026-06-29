@@ -12,6 +12,7 @@ clean:
 
 # Pre-commit
 PRE_COMMIT_IMAGE=ghcr.io/antonbabenko/pre-commit-terraform:v1.105.0
+SHELLCHECK_IMAGE=koalaman/shellcheck:v0.11.0
 
 pre-commit:
 	@echo "Running pre-commit (dockerized)..."
@@ -26,4 +27,15 @@ pre-commit:
 	  run -a
 
 
-.PHONY: clean pre-commit
+# Shellcheck — run separately from `pre-commit`; the dockerized pre-commit
+# image (ghcr.io/antonbabenko/pre-commit-terraform) bundles no shellcheck and
+# mounts no docker socket, so it can't host a shellcheck hook.
+shellcheck:
+	@echo "Running shellcheck on scripts/*.sh..."
+	@docker run --rm \
+	  -v "$$PWD":/mnt -w /mnt \
+	  --platform linux/amd64 \
+	  $(SHELLCHECK_IMAGE) scripts/*.sh
+
+
+.PHONY: clean pre-commit shellcheck

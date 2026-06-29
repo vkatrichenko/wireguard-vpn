@@ -35,6 +35,14 @@ locals {
 
 locals {
   user_data = templatefile("${path.module}/templates/user-data.txt", {
+    # Shared portable installer, fetched at boot from raw GitHub at a pinned ref
+    # and verified against install_script_sha256 before it runs (keeps user-data
+    # under EC2's 16 KB cap regardless of script growth). The wrapper interpolates
+    # these three into the curl URL + the sha256sum -c expected-digest line.
+    install_script_repo   = var.install_script_repo
+    install_script_ref    = var.install_script_ref
+    install_script_sha256 = var.install_script_sha256
+
     wg_server_private_key  = data.aws_ssm_parameter.wg_server_private_key.value
     wg_server_net          = var.wg_server_net
     wg_server_port         = var.wg_server_port
