@@ -444,6 +444,49 @@ UNIT_EOF
   systemctl restart wireguard-dashboard.service
 fi
 
+# --- Example first-client config (template only) ----------------------------
+# Print an illustrative wg-quick client config to stdout so the operator can
+# connect the FIRST client straight from the install output — the chicken-and-egg
+# case, since the dashboard is VPN-gated (you can't reach it until you're already
+# a peer). This is a TEMPLATE only: no keypair is generated and no private key is
+# ever created or stored on the server. Reuses values already computed above
+# (SERVER_PUBLIC_KEY, WG_SERVER_PORT, WG_CLIENT_DNS, WG_SERVER_NET).
+#
+# First-client IP: assume the server holds the first host of WG_SERVER_NET (the
+# conventional `.1`), so the first client takes the next address (`.1` -> `.2`).
+# For the default 172.16.15.1/24 this yields 172.16.15.2/32.
+emit_example_client_config() {
+  local server_host net_prefix last_octet first_client_ip
+  server_host="${WG_SERVER_NET%/*}"   # drop CIDR suffix -> 172.16.15.1
+  net_prefix="${server_host%.*}"      # leading octets   -> 172.16.15
+  last_octet="${server_host##*.}"     # final octet      -> 1
+  first_client_ip="${net_prefix}.$((last_octet + 1))/32"
+
+  echo "Example client config (first peer):"
+  echo "-----------------------------------------------------------"
+  # Unquoted heredoc: only the ${...} tokens below expand. The <placeholder>
+  # tokens carry no '$', so they stay literal (the operator fills them in).
+  cat <<CLIENT_EOF
+[Interface]
+PrivateKey = <paste the client's private key here>
+Address = ${first_client_ip}
+DNS = ${WG_CLIENT_DNS}
+
+[Peer]
+PublicKey = ${SERVER_PUBLIC_KEY}
+Endpoint = <server-public-ip>:${WG_SERVER_PORT}
+# Full-tunnel (route all traffic). Split-tunnel alternative: route only the VPN
+# overlay, e.g. AllowedIPs = ${net_prefix}.0/24
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+CLIENT_EOF
+  echo "-----------------------------------------------------------"
+  # The server never holds the client's private key: generate the keypair off-host
+  # and register only the PUBLIC key (dashboard, or the WG_PEERS env on reinstall).
+  echo "Hint: generate the keypair off-host with 'wg genkey | tee privatekey | wg pubkey',"
+  echo "      then register the client's PUBLIC key via the dashboard or the WG_PEERS env."
+}
+
 echo "==========================================================="
 echo "WireGuard server is up."
 echo "  Server public key : ${SERVER_PUBLIC_KEY}"
@@ -453,3 +496,6 @@ if [ -n "${DASHBOARD_RELEASE_TAG:-}" ]; then
   echo "Dashboard URL     : http://${WG_SERVER_NET%/*}:${DASHBOARD_PORT}"
 fi
 echo "==========================================================="
+# Printed on BOTH the WG-only and dashboard paths — the server (and thus this
+# example) always exists regardless of whether the dashboard was installed.
+emit_example_client_config
