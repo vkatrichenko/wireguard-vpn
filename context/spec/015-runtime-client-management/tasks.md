@@ -42,9 +42,9 @@
 
 ### Slice 6 — Write endpoints + UI (add / edit / remove / export)
 
-- [ ] Add `dashboard/internal/server/handlers_clients_admin.go`: `POST /api/clients`, `PATCH /api/clients/{name}`, `DELETE /api/clients/{name}`, `GET /api/clients/export?format=hcl|tfvars` — webhook dual-path convention (`isHTMX` → fragment, else JSON; 200 on the htmx validation-failure path); register routes; append new service deps to `New()` (append-only). **[Agent: go-fullstack]**
-- [ ] Clients-tab htmx forms (add / edit / enable-disable / remove — fragments keep their own `id` for `outerHTML` swaps, per `webhook.html`), an export button, and the drift badge. **[Agent: go-fullstack]**
-- [ ] Verify: `server_test` over htmx (form-encoded) **and** JSON paths — add / edit / delete / export success + validation-failure fragments; assert the `wgsync` fake is invoked on success and **not** on rejection; export emits parseable HCL. `go test ./...` green. **[Agent: go-fullstack]**
+- [x] Add `handlers_clients_admin.go`: `POST /api/clients`, `PATCH /api/clients/{name}`, `DELETE /api/clients/{name}`, `GET /api/clients/export?format=hcl|tfvars` — webhook dual-path (`isHTMX` → `clients-card` fragment, else JSON; 200 on htmx validation-failure; 404 via new `clients.ErrNotFound` sentinel; 503 nil-service). **[Agent: go-fullstack]** _(export renderers `ExportHCL`/`ExportTFVars` in `internal/clients/export.go`.)_
+- [x] Clients-tab htmx forms (add / edit / enable-disable / remove — reusable `{{define "clients-card"}}` fragment keeps its own `id`; geo-map moved OUTSIDE the swap target so its JS markers survive), export links, drift badge; per-row controls `stopPropagation` to not trigger row-expand. **[Agent: go-fullstack]** _(`buildClientsTabData` shared by partial route + write handlers; `ClientRow` gained `Note`/`Enabled`.)_
+- [x] Verify: handler tests over htmx (form) **and** JSON — add/edit/delete/export success + validation-failure + 404 + 503; recording fake `Applier` asserts live-apply fires on success and **never** on rejection; HCL parses, tfvars valid JSON. Full `go test ./...` + static `linux/amd64` build green. **[Agent: go-fullstack]** _(verified 2026-06-30.)_
 
 ### Slice 7 — Owner-run end-to-end validation (cannot be done in-session)
 

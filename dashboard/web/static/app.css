@@ -846,6 +846,293 @@
   color: var(--text-muted);
 }
 
+/* 9c. Client management (spec 015, Slice 6) -------------------------------- */
+
+.client-message {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+}
+
+.client-message-success {
+  color: var(--state-active-fg);
+}
+
+.client-message-error {
+  color: var(--error-fg);
+}
+
+.client-message-info {
+  color: var(--text-muted);
+}
+
+.client-add-form {
+  margin: 0.25rem 0 1rem;
+}
+
+.client-add-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.client-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.client-field-submit {
+  flex: 0 0 auto;
+}
+
+.client-field label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.client-field-opt {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.client-field input[type="text"] {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.4rem var(--space-3);
+  border-radius: var(--radius);
+  border: var(--border-w) solid var(--card-border);
+  background: var(--card-bg-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  box-shadow: var(--inner-top);
+  min-width: 0;
+  box-sizing: border-box;
+  transition: border-color var(--dur-1) var(--ease-std),
+    box-shadow var(--dur-1) var(--ease-std);
+}
+
+.client-field input[type="text"]::placeholder {
+  color: var(--text-faint);
+}
+
+.client-field input[type="text"]:focus-visible {
+  outline: 0;
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-ring);
+}
+
+.client-add-form button[type="submit"] {
+  min-height: 44px;
+  padding: 0.4rem 1.1rem;
+  border-radius: var(--radius);
+  border: var(--border-w) solid color-mix(in srgb, var(--accent-strong) 60%, #000);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-strong) 92%, white),
+    var(--accent-strong)
+  );
+  color: var(--accent-fg);
+  font-family: var(--font-display);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: var(--elev-1);
+  transition: filter var(--dur-1) var(--ease-std),
+    box-shadow var(--dur-1) var(--ease-std),
+    transform var(--dur-1) var(--ease-out);
+}
+
+.client-add-form button[type="submit"]:hover {
+  filter: brightness(1.04);
+  box-shadow: var(--elev-2);
+}
+
+.client-add-form button[type="submit"]:active {
+  transform: translateY(1px);
+}
+
+.client-add-form button:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.client-export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+  font-size: var(--fs-small);
+}
+
+.client-export-label {
+  color: var(--text-muted);
+}
+
+.client-export-link {
+  color: var(--signal);
+  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+
+.client-export-link:hover {
+  text-decoration: underline;
+}
+
+/* Per-row management cell: small actions + the inline edit disclosure. */
+.client-manage {
+  white-space: nowrap;
+}
+
+.client-manage > * + * {
+  margin-left: 0.4rem;
+}
+
+.client-btn {
+  min-height: 32px;
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--radius);
+  border: var(--border-w) solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--fs-overline);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-std),
+    border-color var(--dur-1) var(--ease-std);
+}
+
+.client-btn:hover {
+  background: var(--btn-hover-bg);
+  border-color: var(--card-border-strong);
+}
+
+.client-btn:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.client-btn-danger {
+  color: var(--error-fg);
+  border-color: color-mix(in srgb, var(--error-fg) 40%, var(--btn-border));
+}
+
+.client-btn-danger:hover {
+  background: color-mix(in srgb, var(--error-fg) 12%, var(--btn-bg));
+  border-color: var(--error-fg);
+}
+
+.client-edit {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.client-edit > summary {
+  display: inline-block;
+  min-height: 32px;
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--radius);
+  border: var(--border-w) solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--fs-overline);
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+}
+
+.client-edit > summary::-webkit-details-marker {
+  display: none;
+}
+
+.client-edit > summary:hover {
+  background: var(--btn-hover-bg);
+  border-color: var(--card-border-strong);
+}
+
+.client-edit-form {
+  position: absolute;
+  z-index: 20;
+  margin-top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: var(--space-3);
+  min-width: 18rem;
+  border-radius: var(--radius);
+  border: var(--border-w) solid var(--card-border-strong);
+  background: var(--card-bg);
+  box-shadow: var(--elev-2);
+}
+
+.client-edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: var(--fs-overline);
+  color: var(--text-muted);
+  font-weight: 500;
+  text-transform: none;
+}
+
+.client-edit-form input[type="text"] {
+  min-height: 38px;
+  padding: 0.35rem var(--space-3);
+  border-radius: var(--radius);
+  border: var(--border-w) solid var(--card-border);
+  background: var(--card-bg-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  box-sizing: border-box;
+}
+
+.client-edit-form input[type="text"]:focus-visible {
+  outline: 0;
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-ring);
+}
+
+.client-edit-form button[type="submit"] {
+  align-self: flex-start;
+  min-height: 36px;
+  padding: 0.3rem 0.9rem;
+  border-radius: var(--radius);
+  border: var(--border-w) solid color-mix(in srgb, var(--accent-strong) 60%, #000);
+  background: var(--accent-strong);
+  color: var(--accent-fg);
+  font-family: var(--font-display);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* A disabled client stays in the list but is visually de-emphasised. */
+.client-row-disabled td {
+  opacity: 0.62;
+}
+
+.client-disabled-tag {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--fs-overline);
+  font-weight: 500;
+  background: var(--state-unknown-bg);
+  color: var(--state-unknown-fg);
+  border: var(--border-w) solid var(--state-unknown-border);
+}
+
 /* 10. Client table --------------------------------------------------------- */
 
 .client-table {

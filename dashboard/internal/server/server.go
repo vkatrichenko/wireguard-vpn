@@ -45,14 +45,14 @@ type server struct {
 	// client list, the config-download name lookup, and the drift computation
 	// all read from it (the DB). clientsfileSvc is retained ONLY as the
 	// first-boot seed source and the drift baseline.
-	clientsSvc *clients.Service
-	wgSvc      *wg.Service
-	procSvc        *proc.Service
-	metricsDB      *db.DB
-	geoipSvc       GeoResolver
-	diskSvc        *disk.Service
-	processesSvc   *processes.Service
-	netdevSvc      *netdev.Service
+	clientsSvc   *clients.Service
+	wgSvc        *wg.Service
+	procSvc      *proc.Service
+	metricsDB    *db.DB
+	geoipSvc     GeoResolver
+	diskSvc      *disk.Service
+	processesSvc *processes.Service
+	netdevSvc    *netdev.Service
 	// alertStatus is the read seam to the in-UI active-alerts view (spec 007,
 	// Slice 5). The poller writes it each tick; handlers read a deep copy via
 	// Snapshot. It is OPTIONAL: nil renders the disabled/empty view (Snapshot is
@@ -260,6 +260,10 @@ func New(
 	mux.HandleFunc("GET /api/server", s.handleGetServer)
 	mux.HandleFunc("GET /api/service", s.handleGetService)
 	mux.HandleFunc("GET /api/clients", s.handleGetClients)
+	mux.HandleFunc("POST /api/clients", s.handleAddClient)
+	mux.HandleFunc("GET /api/clients/export", s.handleExportClients)
+	mux.HandleFunc("PATCH /api/clients/{name}", s.handleUpdateClient)
+	mux.HandleFunc("DELETE /api/clients/{name}", s.handleDeleteClient)
 	mux.HandleFunc("GET /api/clients/{name}/config", s.handleGetClientConfig)
 	mux.HandleFunc("GET /api/clients/{name}/history", s.handleGetClientHistory)
 	mux.HandleFunc("GET /api/geo", s.handleGetGeo)
