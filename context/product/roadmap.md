@@ -85,9 +85,17 @@ _Alerting fan-out & external observability._
 
 ---
 
+### Phase 8
+
+_Portability — architecture choice & deployment beyond Terraform/AWS._
+
+- [x] **ARM64 / AMD64 Architecture Option (spec 013):** Make host CPU architecture a single toggle (`cpu_architecture`, owned by the `wireguard` module) that derives the AMI suffix, AMI `architecture` filter, and default instance type, with `arm64` (Graviton `t4g.micro`) as the default; a dual-arch dashboard release (`amd64` + `arm64` + one `SHA256SUMS`); and architecture-agnostic boot (runtime `uname -m` → matching AWS CLI + `wireguard-dashboard-$GOARCH`, checksum-verified, fail-hard on mismatch). _(Deployed & operator-verified 2026-06-29: `terraform apply` default stood up an arm64/t4g instance with tunnel + all dashboard tabs working.)_
+- [x] **Standalone Install Script (spec 014):** Extract the portable WireGuard + optional-dashboard bootstrap into a committed, env-driven, Ubuntu-only `scripts/install.sh` (fail-hard, shellcheck-clean), usable on any plain Ubuntu VPS via download-then-run; refactor the EC2 user-data into a thin AWS wrapper that fetches the same script from raw GitHub at a content-pinned (`sha256`) ref and runs it, so the AWS and VPS paths can't drift. _(EC2 path operator-verified 2026-06-29 via the arm64 deploy; standalone-VPS runtime branches code-complete + shellcheck-clean but not yet VPS-runtime-tested — see spec tasks.)_
+
+---
+
 ### Future / Under Consideration
 
 _Not yet specified; captured so the direction isn't lost._
 
 - **Repository open-sourcing — remaining work** — flip the repo to public; the optional git-history purge of the ~65 MB GeoLite2 blob (descoped from spec 011); the deferred `tfplan` / server-key history exposure; and CI + branch-protection so PR checks pass (the recurring `mergeable_state: blocked`).
-- **ARM option (Spec C)** — option to run the EC2 host on Graviton `arm64` (instance type/AMI + an arm64 dashboard build).

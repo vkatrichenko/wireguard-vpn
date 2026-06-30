@@ -53,14 +53,12 @@ module "wireguard" {
   # runs (spec 014). The repo MUST be public for the anonymous raw fetch to
   # resolve — a private repo 404s and aborts the boot (no `.ready`).
   install_script_repo   = "vkatrichenko/wireguard-vpn"
-  install_script_sha256 = "7be62a73b20c8845c8b9fd72c79f6d77b8ca6a2bb6e3d545e54ae5d67befd2cf"
-  # TODO(install_script_ref): BEFORE any `terraform apply`, set this to the commit
-  # SHA or tag on the PUBLIC default branch where this exact scripts/install.sh
-  # (matching install_script_sha256 above) lands. The placeholder below does NOT
-  # exist on GitHub yet — an instance would 404 on the raw fetch (or fail the
-  # checksum) and provisioning would abort. Update this AND re-run
-  # `sha256sum scripts/install.sh` whenever install.sh changes.
-  install_script_ref = "REPLACE_ME_WITH_PUBLIC_COMMIT_SHA_OR_TAG"
+  install_script_sha256 = "369447a856ae31893cd9305df8ab60771e026f1614f083259544decc26c474f7"
+  # Pinned to the public main commit that carries this exact scripts/install.sh
+  # (verified: raw fetch returns HTTP 200 and matches install_script_sha256). When
+  # install.sh changes, push it, then bump BOTH this ref and the sha256 above
+  # (`sha256sum scripts/install.sh`) in one reviewable commit.
+  # install_script_ref = "5d05d6a4ba53fd6ff1dad923fa857a3b866461f5"
 
   # Alert seed (spec 008 slice 5), wired-but-disabled. To enable: create the SSM
   # parameter out-of-band (e.g. `aws ssm put-parameter --type SecureString`) and

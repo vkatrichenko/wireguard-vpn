@@ -57,7 +57,7 @@ export DASHBOARD_DISCORD_WEBHOOK_URL="${dashboard_discord_webhook_url}"
 
 # Multi-line values (peer stanzas, clients JSON) are marshalled through a quoted
 # heredoc so embedded newlines survive intact. Terraform's templatefile() has
-# already substituted ${peers} / ${clients_json} at apply time; the quoted
+# already substituted $${peers} / $${clients_json} at apply time; the quoted
 # 'EOF' delimiter then stops bash from re-expanding anything in that literal
 # content (no second round of $-/backtick interpretation on the substituted
 # value). install.sh writes these verbatim into wg0.conf / clients.json.

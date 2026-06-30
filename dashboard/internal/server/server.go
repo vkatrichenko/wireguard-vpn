@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"wireguard-dashboard/internal/alerts"
+	"wireguard-dashboard/internal/clients"
 	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/disk"
@@ -40,7 +41,12 @@ type server struct {
 	serverinfoSvc  *serverinfo.Service
 	systemdSvc     *systemd.Service
 	clientsfileSvc *clientsfile.Service
-	wgSvc          *wg.Service
+	// clientsSvc is the runtime source of truth for peers (spec 015). The
+	// client list, the config-download name lookup, and the drift computation
+	// all read from it (the DB). clientsfileSvc is retained ONLY as the
+	// first-boot seed source and the drift baseline.
+	clientsSvc *clients.Service
+	wgSvc      *wg.Service
 	procSvc        *proc.Service
 	metricsDB      *db.DB
 	geoipSvc       GeoResolver
@@ -116,6 +122,11 @@ func (s *server) alertSnapshot() alerts.Status {
 type clientCountData struct {
 	Online int
 	Total  int
+	// Drift is the count of DB clients whose public key is absent from the
+	// boot clients.json baseline (spec 015) — i.e. runtime-added peers not yet
+	// reconciled back into Terraform. Rendered as a small badge on the
+	// client-count card; zero hides it.
+	Drift int
 }
 
 type pageData struct {
@@ -179,6 +190,7 @@ func New(
 	alertStatus *alerts.StatusHolder,
 	webhookCfg *notify.WebhookConfig,
 	metricsProvider MetricsProvider,
+	clientsSvc *clients.Service,
 ) (http.Handler, error) {
 	// Two globs because templates/*.html does not recurse into cards/. The
 	// cards/ directory holds named-template fragments ({{ define "..." }})
@@ -208,6 +220,7 @@ func New(
 		serverinfoSvc:   serverinfoSvc,
 		systemdSvc:      systemdSvc,
 		clientsfileSvc:  clientsfileSvc,
+		clientsSvc:      clientsSvc,
 		wgSvc:           wgSvc,
 		procSvc:         procSvc,
 		metricsDB:       metricsDB,
@@ -339,17 +352,19 @@ func (s *server) buildPageData(ctx context.Context) pageData {
 		data.ServiceStatus = status
 	}
 
-	// Manifest + live wg state are fetched as a pair: if either fails the
+	// DB client list + live wg state are fetched as a pair: if either fails the
 	// joined view is meaningless, so we surface the error and leave
 	// ClientRows nil rather than rendering a half-joined list. Per-card
-	// degradation is fine; partial-join inside one card is too confusing.
-	clients, clientsErr := s.clientsfileSvc.Load(ctx)
+	// degradation is fine; partial-join inside one card is too confusing. The
+	// list now comes from the runtime clients DB (spec 015); clients.json is
+	// only the drift baseline below.
+	dbClients, clientsErr := s.clientsSvc.List(ctx)
 	peers, peersErr := s.wgSvc.Show(ctx)
 	if joined := errors.Join(clientsErr, peersErr); joined != nil {
 		slog.Error("buildPageData: clients fetch failed", "err", joined)
 		data.ClientsError = joined.Error()
 	} else {
-		data.ClientRows = buildClientRows(clients, peers, time.Now(), s.geoipSvc)
+		data.ClientRows = buildClientRows(dbClients, peers, time.Now(), s.geoipSvc)
 		// ClientCount drives the Slice 12 summary card. Counted inline rather
 		// than in a helper because the loop is one line and threading a helper
 		// from another file would obscure the "same snapshot" guarantee.
@@ -359,6 +374,7 @@ func (s *server) buildPageData(ctx context.Context) pageData {
 				data.ClientCount.Online++
 			}
 		}
+		data.ClientCount.Drift = s.computeDrift(ctx, dbClients)
 	}
 
 	// proc.Sample feeds the system + network-rate cards. The sample is
@@ -381,6 +397,31 @@ func (s *server) buildPageData(ctx context.Context) pageData {
 	data.Alerts = s.alertSnapshot()
 
 	return data
+}
+
+// computeDrift counts DB clients whose public key is absent from the boot
+// clients.json baseline — the runtime-added peers an operator has not yet
+// reconciled back into Terraform (spec 015). A missing or unreadable
+// clients.json degrades gracefully to an empty baseline (every DB client counts
+// as drift) rather than 500-ing the page: the baseline is advisory, not
+// load-bearing for rendering the list.
+func (s *server) computeDrift(ctx context.Context, dbClients []db.Client) int {
+	seed, err := s.clientsfileSvc.Load(ctx)
+	if err != nil {
+		slog.Warn("computeDrift: clients.json baseline load failed; treating as empty", "err", err)
+		seed = nil
+	}
+	baseline := make(map[string]struct{}, len(seed))
+	for _, c := range seed {
+		baseline[c.PublicKey] = struct{}{}
+	}
+	drift := 0
+	for _, c := range dbClients {
+		if _, ok := baseline[c.PublicKey]; !ok {
+			drift++
+		}
+	}
+	return drift
 }
 
 // humanUptime formats time.Since(t) as a short human-readable duration like

@@ -96,8 +96,9 @@ func (s *server) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
 		defer wg.Done()
 		// The two sub-fetches run sequentially here — the join needs both,
 		// so parallelising inside this goroutine would only complicate the
-		// error joining without measurable wall-clock gain.
-		cs, cErr := s.clientsfileSvc.Load(ctx)
+		// error joining without measurable wall-clock gain. The client list
+		// is the runtime DB (spec 015), joined with live wg state.
+		cs, cErr := s.clientsSvc.List(ctx)
 		ps, pErr := s.wgSvc.Show(ctx)
 		if joined := errors.Join(cErr, pErr); joined != nil {
 			clientsErr = joined

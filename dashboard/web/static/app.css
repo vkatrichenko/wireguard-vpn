@@ -811,6 +811,24 @@
   border: var(--border-w) solid var(--state-unknown-border);
 }
 
+/* Drift badge (spec 015) — flags runtime-added clients absent from the
+   clients.json seed baseline. Borrows the webhook-badge pill shape; the
+   unknown/warning palette signals "needs reconciling", matching the same
+   "signals drift" intent the unknown-status border uses elsewhere. */
+.drift-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--fs-overline);
+  font-weight: 500;
+  vertical-align: middle;
+  background: var(--state-unknown-bg);
+  color: var(--state-unknown-fg);
+  border: var(--border-w) solid var(--state-unknown-border);
+}
+
 .webhook-message {
   margin: 0.6rem 0 0;
   font-size: 0.85rem;

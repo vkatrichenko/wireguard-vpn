@@ -6,7 +6,7 @@ It is NOT a copy-paste implementation guide.
 # Technical Specification: ARM64 / AMD64 Architecture Option
 
 - **Functional Specification:** [`functional-spec.md`](./functional-spec.md)
-- **Status:** Draft
+- **Status:** Completed
 - **Author(s):** Vladyslav Katrychenko
 
 ---

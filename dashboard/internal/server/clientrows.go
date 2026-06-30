@@ -4,7 +4,7 @@ import (
 	"net"
 	"time"
 
-	"wireguard-dashboard/internal/clientsfile"
+	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/geoip"
 	"wireguard-dashboard/internal/wg"
 )
@@ -93,20 +93,20 @@ type ClientRow struct {
 // only when the row has a non-empty endpoint and the endpoint parses as
 // host:port with a recognisable IP. All failure paths leave Geo as its
 // zero value, never blocking the row.
-func buildClientRows(clients []clientsfile.Client, peers []wg.Peer, now time.Time, geo GeoResolver) []ClientRow {
+func buildClientRows(dbClients []db.Client, peers []wg.Peer, now time.Time, geo GeoResolver) []ClientRow {
 	// Inline index — only one caller; not worth a helper in the wg package.
 	peerByKey := make(map[string]wg.Peer, len(peers))
 	for _, p := range peers {
 		peerByKey[p.PublicKey] = p
 	}
 
-	// Pre-allocate to len(clients)+len(peers) — the worst case is all
-	// manifest entries pending plus all live peers unknown (no overlap),
+	// Pre-allocate to len(dbClients)+len(peers) — the worst case is all
+	// DB entries pending plus all live peers unknown (no overlap),
 	// which would never happen in practice, but the capacity hint is cheap.
-	rows := make([]ClientRow, 0, len(clients)+len(peers))
-	seen := make(map[string]struct{}, len(clients))
+	rows := make([]ClientRow, 0, len(dbClients)+len(peers))
+	seen := make(map[string]struct{}, len(dbClients))
 
-	for _, c := range clients {
+	for _, c := range dbClients {
 		seen[c.PublicKey] = struct{}{}
 		row := ClientRow{
 			Name:      c.Name,

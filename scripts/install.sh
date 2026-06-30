@@ -230,9 +230,75 @@ if [ -n "${DASHBOARD_RELEASE_TAG:-}" ]; then
   install -d -o wireguard-dashboard -g wireguard-dashboard -m 0750 /var/lib/wireguard-dashboard
   install -d -o root -g root -m 0755 /etc/wireguard-dashboard
 
-  # 3. Drop sudoers file granting the wireguard-dashboard user NOPASSWD on the
-  #    narrow set of commands the Go service needs to read WG and systemd state
-  #    (wg show wg0 public-key/dump, systemctl is-active/show wg-quick@wg0).
+  # 3. Install the privileged peer-sync helper invoked by the dashboard. The Go
+  #    service stages a peers-only fragment (only [Peer] stanzas, no [Interface],
+  #    no PrivateKey) to /var/lib/wireguard-dashboard/peers.conf, then runs
+  #    `sudo /usr/local/sbin/wg-sync` (no args) to merge it into wg0.conf and
+  #    apply it live. The helper runs as root; it re-derives the [Interface]
+  #    block from the on-disk wg0.conf so the server private key never leaves
+  #    /etc/wireguard. Heredoc delimiter is quoted so nothing in the body is
+  #    expanded by this installer — the $VARS / $(...) / <(...) belong to the
+  #    helper at runtime. Shebang is bash because step 4 below uses process
+  #    substitution (<()), which is bash-only.
+  cat > /usr/local/sbin/wg-sync <<'WGSYNC_EOF'
+#!/usr/bin/env bash
+#
+# wg-sync — merge the dashboard-staged peers fragment into wg0.conf and apply it
+# live, without bouncing the interface. Invoked as: sudo /usr/local/sbin/wg-sync
+#
+set -euo pipefail
+
+STAGED=/var/lib/wireguard-dashboard/peers.conf
+CONF=/etc/wireguard/wg0.conf
+IFACE=wg0
+
+if [ ! -r "$STAGED" ]; then
+  echo "FATAL: staged peers file $STAGED is missing or unreadable" >&2
+  exit 1
+fi
+
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+
+# Re-derive the [Interface] block from the current on-disk conf: every line up
+# to but NOT including the first [Peer] line. This preserves Address/ListenPort/
+# PrivateKey/PostUp/PostDown verbatim — the private key is never read from, or
+# written by, the dashboard. Command substitution strips trailing newlines, so
+# any blank lines below the interface block are dropped; this keeps the merge
+# idempotent (re-running with the same staged peers converges to the same file
+# instead of accumulating blank lines). If the conf has no [Peer] line (zero
+# peers) the whole file becomes the interface block.
+INTERFACE_BLOCK="$(awk '/^\[Peer\]/{exit} {print}' "$CONF")"
+
+# Merge: interface block, one blank-line separator, then the staged peers.
+{
+  printf '%s\n' "$INTERFACE_BLOCK"
+  printf '\n'
+  cat "$STAGED"
+} > "$TMP"
+
+# Atomically replace wg0.conf, root-only (0600).
+install -m 0600 -o root -g root "$TMP" "$CONF"
+
+# Apply the new config to the running interface without tearing it down.
+# `wg-quick strip` emits a wg-native config (no wg-quick-only keys); process
+# substitution feeds it to `wg syncconf`, which diffs and applies peer changes
+# only. Existing tunnels with unchanged keys are left untouched.
+if ! wg syncconf "$IFACE" <(wg-quick strip "$IFACE"); then
+  echo "FATAL: wg syncconf failed for $IFACE" >&2
+  exit 1
+fi
+
+echo "wg-sync: applied staged peers to $IFACE"
+WGSYNC_EOF
+  chown root:root /usr/local/sbin/wg-sync
+  chmod 0755 /usr/local/sbin/wg-sync
+
+  # 4. Drop sudoers file granting the wireguard-dashboard user NOPASSWD on the
+  #    narrow set of commands the Go service needs: read WG and systemd state
+  #    (wg show wg0 public-key/dump, systemctl is-active/show wg-quick@wg0) plus
+  #    the single privileged write path — the wg-sync helper above (exact-match,
+  #    no arguments, so the argv must equal `sudo /usr/local/sbin/wg-sync`).
   #    Write to a staging path first, validate with visudo -c, then atomically
   #    move into /etc/sudoers.d/ — guarantees we never leave a malformed sudoers
   #    fragment that could lock everyone out of sudo.
@@ -241,13 +307,14 @@ wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/wg show wg0 public-key
 wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/wg show wg0 dump
 wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/systemctl is-active wg-quick@wg0.service
 wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/systemctl show -p ActiveEnterTimestamp wg-quick@wg0.service
+wireguard-dashboard ALL=(root) NOPASSWD: /usr/local/sbin/wg-sync
 SUDOERS_EOF
   chown root:root /etc/sudoers.d/wireguard-dashboard.tmp
   chmod 0440 /etc/sudoers.d/wireguard-dashboard.tmp
   visudo -c -f /etc/sudoers.d/wireguard-dashboard.tmp
   mv /etc/sudoers.d/wireguard-dashboard.tmp /etc/sudoers.d/wireguard-dashboard
 
-  # 4. Render the clients manifest the dashboard reads at runtime
+  # 5. Render the clients manifest the dashboard reads at runtime
   #    (CLIENTS_CONFIG_PATH=/etc/wireguard-dashboard/clients.json). printf '%s'
   #    writes the CLIENTS_JSON value verbatim — no second round of shell
   #    expansion — so any dollar-prefixed or shell-special tokens in the JSON
@@ -257,7 +324,7 @@ SUDOERS_EOF
   chown root:wireguard-dashboard /etc/wireguard-dashboard/clients.json
   chmod 0640 /etc/wireguard-dashboard/clients.json
 
-  # 4b. Render the alert environment file consumed by the dashboard's systemd
+  # 5b. Render the alert environment file consumed by the dashboard's systemd
   #     unit (EnvironmentFile=-/etc/wireguard-dashboard/alerts.env). Each line is
   #     emitted with printf '%s' so the values (the webhook URLs and bot tokens
   #     in particular are secrets and may contain shell-special characters) are
@@ -282,7 +349,7 @@ SUDOERS_EOF
   chown root:wireguard-dashboard /etc/wireguard-dashboard/alerts.env
   chmod 0640 /etc/wireguard-dashboard/alerts.env
 
-  # 5. Download the pinned release binary + its checksum over HTTPS and verify
+  # 6. Download the pinned release binary + its checksum over HTTPS and verify
   #    before installing. With set -e a bare failing curl already aborts, but we
   #    keep explicit FATAL messages (matching user-data) so a missing asset /
   #    private-repo 404 or a SHA256 mismatch produces a clear diagnostic instead
@@ -309,14 +376,14 @@ SUDOERS_EOF
     exit 1
   fi
 
-  # 6. Install the verified binary atomically with the executable bit set, then
+  # 7. Install the verified binary atomically with the executable bit set, then
   #    drop the temp dir. The arch suffix is dropped here: the installed path
   #    stays /opt/wireguard-dashboard/bin/wireguard-dashboard so the systemd
   #    unit's ExecStart needs no per-arch change.
   install -o root -g root -m 0755 "$DL_DIR/wireguard-dashboard-$GOARCH" /opt/wireguard-dashboard/bin/wireguard-dashboard
   rm -rf "$DL_DIR"
 
-  # 7. Drop the systemd unit. Bound to the WG tunnel IP via the derived
+  # 8. Drop the systemd unit. Bound to the WG tunnel IP via the derived
   #    LISTEN_ADDR; Requires/After wg-quick@wg0 ensures the tunnel address is
   #    bindable before start and that the dashboard restarts when WG bounces.
   #    Heredoc is unquoted so ${LISTEN_ADDR} interpolates — the rest of the unit
@@ -334,6 +401,7 @@ User=wireguard-dashboard
 Group=wireguard-dashboard
 ExecStart=/opt/wireguard-dashboard/bin/wireguard-dashboard
 Environment=LISTEN_ADDR=${LISTEN_ADDR}
+Environment=WG_SERVER_NET=${WG_SERVER_NET}
 # Leading '-' makes the file optional: the unit starts even if alerts.env is
 # absent, so alerting is strictly opt-in via the seeded knobs/webhook above.
 EnvironmentFile=-/etc/wireguard-dashboard/alerts.env
@@ -344,7 +412,7 @@ RestartSec=5s
 WantedBy=multi-user.target
 UNIT_EOF
 
-  # 8. Reload systemd and bring the unit up.
+  # 9. Reload systemd and bring the unit up.
   systemctl daemon-reload
   systemctl enable --now wireguard-dashboard.service
 fi

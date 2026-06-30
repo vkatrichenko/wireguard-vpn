@@ -58,6 +58,10 @@ func parseRangeParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 type clientsTabData struct {
 	Rows  []ClientRow
 	Error string
+	// Drift is the count of DB clients absent from the boot clients.json
+	// baseline (spec 015) — rendered as a small badge in the Clients-tab
+	// heading; zero hides it.
+	Drift int
 }
 
 // handleGetPartialOverview renders the cards fragment for the Overview tab.
@@ -88,13 +92,14 @@ func (s *server) handleGetPartialOverview(w http.ResponseWriter, r *http.Request
 func (s *server) handleGetPartialClients(w http.ResponseWriter, r *http.Request) {
 	data := clientsTabData{}
 
-	clients, clientsErr := s.clientsfileSvc.Load(r.Context())
+	dbClients, clientsErr := s.clientsSvc.List(r.Context())
 	peers, peersErr := s.wgSvc.Show(r.Context())
 	if joined := errors.Join(clientsErr, peersErr); joined != nil {
 		slog.Error("GET /partial/clients: clients fetch failed", "err", joined)
 		data.Error = joined.Error()
 	} else {
-		data.Rows = buildClientRows(clients, peers, time.Now(), s.geoipSvc)
+		data.Rows = buildClientRows(dbClients, peers, time.Now(), s.geoipSvc)
+		data.Drift = s.computeDrift(r.Context(), dbClients)
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
