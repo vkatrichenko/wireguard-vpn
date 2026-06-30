@@ -21,9 +21,9 @@
 
 ### Slice 3 — Inline client editing (req 2.2)
 
-- [ ] `web/templates/tabs/clients.html`: replace the `<details class="client-edit">` popover with a full-width `<tr class="client-edit-row hidden">` (colspan) holding the existing edit form (same fields, same `hx-patch="/api/clients/{name}"` / `hx-target="#clients"`); Edit button toggles it, mirroring the `detail-row hidden` pattern. **[Agent: go-fullstack]**
-- [ ] `web/static/app.css`: remove the absolute right-drawer rules; lay the edit fields out full-width/responsive. **[Agent: go-fullstack]**
-- [ ] Verify: handler/template test that the inline edit row renders the form with the correct PATCH target and fields; existing clients-card + PATCH tests stay green; full `go test ./...` + build green. **[Agent: go-fullstack]**
+- [x] `web/templates/tabs/clients.html`: replace the `<details class="client-edit">` popover with a full-width `<tr class="client-edit-row hidden">` (colspan) holding the existing edit form (same fields, same `hx-patch="/api/clients/{name}"` / `hx-target="#clients"`); Edit button toggles it, mirroring the `detail-row hidden` pattern. **[Agent: go-fullstack]** _(toggle via delegated handler in `web/static/tabs.js`; Cancel added.)_
+- [x] `web/static/app.css`: remove the absolute right-drawer rules; lay the edit fields out full-width/responsive. **[Agent: go-fullstack]**
+- [x] Verify: handler/template test that the inline edit row renders the form with the correct PATCH target and fields; existing clients-card + PATCH tests stay green; full `go test ./...` + build green. **[Agent: go-fullstack]** _(verified 2026-06-30: build/vet/test + static build green.)_
 
 ### Slice 4 — install.sh lifecycle: safe update + remove/purge (req 2.4)
 

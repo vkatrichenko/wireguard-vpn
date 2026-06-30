@@ -428,6 +428,40 @@ func TestAddClient_NilService503(t *testing.T) {
 
 // addOne is a helper that adds a client via the JSON endpoint and fails the test
 // if it doesn't succeed — used to set up edit/delete/export fixtures.
+// TestClientsFragment_InlineEditRow asserts spec 016 req 2.2: the Clients
+// fragment renders a full-width inline edit row (not the old right-side drawer)
+// carrying the edit form with the correct PATCH target and the same fields.
+func TestClientsFragment_InlineEditRow(t *testing.T) {
+	h, _, _ := newClientsAdminServer(t)
+
+	form := url.Values{"name": {"laptop"}, "public_key": {adminKeyA}}
+	code, body := doReq(t, h, http.MethodPost, "/api/clients", strings.NewReader(form.Encode()), formHeaders(true))
+	if code != http.StatusOK {
+		t.Fatalf("add htmx: want 200, got %d (%s)", code, body)
+	}
+
+	for _, want := range []string{
+		`class="client-edit-row`,
+		`hx-patch="/api/clients/laptop"`,
+		`name="name"`,
+		`name="public_key"`,
+		`name="address"`,
+		`name="note"`,
+		`class="client-btn client-edit-toggle"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("inline edit row fragment missing %q:\n%s", want, body)
+		}
+	}
+
+	// The old right-side drawer markup must be gone.
+	for _, gone := range []string{`<details class="client-edit"`, `<summary>Edit</summary>`} {
+		if strings.Contains(body, gone) {
+			t.Errorf("old edit drawer markup still present: %q", gone)
+		}
+	}
+}
+
 func addOne(t *testing.T, h http.Handler, name, key string) {
 	t.Helper()
 	payload, _ := json.Marshal(map[string]string{"name": name, "public_key": key})
