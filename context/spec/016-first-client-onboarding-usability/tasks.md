@@ -27,10 +27,10 @@
 
 ### Slice 4 — install.sh lifecycle: safe update + remove/purge (req 2.4)
 
-- [ ] `scripts/install.sh`: add arg parsing (`--uninstall`, `--purge`, `--dashboard-only`; no-args ⇒ install/update; unknown ⇒ usage error) resolving to `ACTION` + `PURGE`/`DASHBOARD_ONLY`; keep the EC2 no-arg invocation intact. **[Agent: linux-cloud-init]**
-- [ ] Safe-update path: when `wg0.conf` exists, rewrite only `[Interface]` and preserve on-disk `[Peer]` stanzas (awk-merge like `wg-sync`), apply via `wg syncconf` (no tunnel drop); fresh install (no `wg0.conf`) keeps today's `WG_PEERS` + `enable --now` behavior. **[Agent: linux-cloud-init]**
-- [ ] `remove()`: idempotent teardown — dashboard always (service/unit/`wg-sync`/sudoers/binary/user), `wg-quick@wg0` unless `--dashboard-only`; keep `/etc/wireguard` + DB unless `--purge` (which also deletes `wg0.conf`, `server.key`, DB dir, `/etc/wireguard-dashboard`). **[Agent: linux-cloud-init]**
-- [ ] Verify: `make shellcheck` exit 0 across default / `--uninstall` / `--purge` / `--dashboard-only`; static review of the merge + guards. Live behavior → Slice 5. **[Agent: linux-cloud-init]**
+- [x] `scripts/install.sh`: add arg parsing (`--uninstall`, `--purge`, `--dashboard-only`; no-args ⇒ install/update; unknown ⇒ usage error) resolving to `ACTION` + `PURGE`/`DASHBOARD_ONLY`; keep the EC2 no-arg invocation intact. **[Agent: linux-cloud-init]**
+- [x] Safe-update path: when `wg0.conf` exists, rewrite only `[Interface]` and preserve on-disk `[Peer]` stanzas (awk-merge like `wg-sync`), apply via `wg syncconf` (no tunnel drop); fresh install (no `wg0.conf`) keeps today's `WG_PEERS` + `enable --now` behavior. **[Agent: linux-cloud-init]**
+- [x] `remove()`: idempotent teardown — dashboard always (service/unit/`wg-sync`/sudoers/binary/user), `wg-quick@wg0` unless `--dashboard-only`; keep `/etc/wireguard` + DB unless `--purge` (which also deletes `wg0.conf`, `server.key`, DB dir, `/etc/wireguard-dashboard`). **[Agent: linux-cloud-init]**
+- [x] Verify: `make shellcheck` exit 0 across default / `--uninstall` / `--purge` / `--dashboard-only`; static review of the merge + guards. Live behavior → Slice 5. **[Agent: linux-cloud-init]** _(verified 2026-06-30: shellcheck exit 0; diff reviewed — dispatch, safe-update merge, remove/purge guards.)_
 
 ### Slice 5 — Owner-run end-to-end validation (cannot be done in-session)
 
