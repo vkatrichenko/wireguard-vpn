@@ -46,7 +46,7 @@ module "wireguard" {
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]
-  dashboard_release_tag = "v0.0.8"
+  dashboard_release_tag = "v0.0.10"
 
   # Single GitHub owner/name slug used BOTH for the raw scripts/install.sh fetch
   # and the dashboard release download (spec 014). The repo MUST be public for the
