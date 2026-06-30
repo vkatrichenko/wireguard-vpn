@@ -433,9 +433,15 @@ RestartSec=5s
 WantedBy=multi-user.target
 UNIT_EOF
 
-  # 10. Reload systemd and bring the unit up.
+  # 10. Reload systemd, enable at boot, and (re)start the unit. `restart` —
+  #     not `enable --now` — is deliberate: `--now` only *starts* an inactive
+  #     unit and is a no-op when it is already running, so a re-run that ships a
+  #     NEW binary would leave the OLD process live until a reboot. `restart`
+  #     starts it if stopped and swaps the process if running, so re-running the
+  #     installer always picks up the freshly downloaded binary.
   systemctl daemon-reload
-  systemctl enable --now wireguard-dashboard.service
+  systemctl enable wireguard-dashboard.service
+  systemctl restart wireguard-dashboard.service
 fi
 
 echo "==========================================================="
