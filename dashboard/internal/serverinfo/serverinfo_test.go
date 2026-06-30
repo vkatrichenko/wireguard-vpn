@@ -253,7 +253,7 @@ func TestServiceGet_ContextCancellation(t *testing.T) {
 func TestNew_DefaultsAreSet(t *testing.T) {
 	t.Parallel()
 
-	svc := New()
+	svc := New(Config{})
 	if svc == nil {
 		t.Fatal("New() returned nil")
 	}
@@ -268,6 +268,19 @@ func TestNew_DefaultsAreSet(t *testing.T) {
 	}
 	if svc.ReadFile == nil {
 		t.Error("New().ReadFile is nil; expected os.ReadFile")
+	}
+	if svc.Echo == nil {
+		t.Error("New().Echo is nil; expected default echo client")
+	}
+	if svc.EC2Probe == nil {
+		t.Error("New().EC2Probe is nil; expected default EC2 probe")
+	}
+	// Empty Config falls back to the package defaults.
+	if svc.ClientDNS != DefaultClientDNS {
+		t.Errorf("New().ClientDNS = %q, want default %q", svc.ClientDNS, DefaultClientDNS)
+	}
+	if svc.ServerNet == "" {
+		t.Error("New().ServerNet is empty; expected the wgconfig default")
 	}
 	// Intentionally do NOT invoke Get() — that would hit the real IMDS and
 	// shell out to sudo, neither of which is appropriate in a unit test.
@@ -463,5 +476,109 @@ func TestServiceVPCCIDR(t *testing.T) {
 	errSvc := &Service{IMDS: fakeIMDS{err: errors.New("imds down")}}
 	if _, err := errSvc.VPCCIDR(context.Background()); err == nil {
 		t.Fatal("VPCCIDR returned nil error, want non-nil on IMDS failure")
+	}
+}
+
+// notOnEC2Probe is an EC2Probe that always reports off-AWS, exercising the
+// short-circuit path without any network access.
+func notOnEC2Probe(_ context.Context) error { return ErrNotOnEC2 }
+
+// spyIMDS fails the test if ANY of its methods is invoked. Used to prove the
+// EC2-only Service methods short-circuit BEFORE touching IMDS off-AWS.
+type spyIMDS struct{ t *testing.T }
+
+func (s spyIMDS) PublicIP(context.Context) (string, error) {
+	s.t.Fatal("IMDS.PublicIP called off-AWS; expected short-circuit")
+	return "", nil
+}
+func (s spyIMDS) InstanceType(context.Context) (string, error) {
+	s.t.Fatal("IMDS.InstanceType called off-AWS; expected short-circuit")
+	return "", nil
+}
+func (s spyIMDS) AvailabilityZone(context.Context) (string, error) {
+	s.t.Fatal("IMDS.AvailabilityZone called off-AWS; expected short-circuit")
+	return "", nil
+}
+func (s spyIMDS) AMIID(context.Context) (string, error) {
+	s.t.Fatal("IMDS.AMIID called off-AWS; expected short-circuit")
+	return "", nil
+}
+func (s spyIMDS) VPCIPv4CIDR(context.Context) (string, error) {
+	s.t.Fatal("IMDS.VPCIPv4CIDR called off-AWS; expected short-circuit")
+	return "", nil
+}
+
+// TestEC2Methods_NotOnEC2ShortCircuit proves the four EC2-only methods (plus
+// EC2PublicIP and VPCCIDR) return ErrNotOnEC2 WITHOUT calling IMDS when the
+// host is off-AWS — the fix for the off-AWS metadata-timeout hang.
+func TestEC2Methods_NotOnEC2ShortCircuit(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{IMDS: spyIMDS{t: t}, EC2Probe: notOnEC2Probe}
+	ctx := context.Background()
+
+	calls := map[string]func() (string, error){
+		"InstanceType":     func() (string, error) { return svc.InstanceType(ctx) },
+		"AvailabilityZone": func() (string, error) { return svc.AvailabilityZone(ctx) },
+		"AMIID":            func() (string, error) { return svc.AMIID(ctx) },
+		"VPCCIDR":          func() (string, error) { return svc.VPCCIDR(ctx) },
+		"EC2PublicIP":      func() (string, error) { return svc.EC2PublicIP(ctx) },
+	}
+	for name, fn := range calls {
+		got, err := fn()
+		if !errors.Is(err, ErrNotOnEC2) {
+			t.Errorf("%s err = %v, want ErrNotOnEC2", name, err)
+		}
+		if got != "" {
+			t.Errorf("%s = %q, want empty off-AWS", name, got)
+		}
+	}
+}
+
+// TestServiceGet_PublicEndpointWins proves WG_PUBLIC_ENDPOINT is the
+// authoritative public IP: it beats both IMDS and the echo client, and a
+// "host:port" form is reduced to its host part.
+func TestServiceGet_PublicEndpointWins(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{
+		PublicEndpoint: "198.51.100.7:51820",
+		IMDS:           fakeIMDS{ip: "203.0.113.1"},
+		EC2Probe:       notOnEC2Probe,
+		Echo:           func(context.Context) (string, error) { return "192.0.2.50", nil },
+		Runner:         fakeRunner([]byte(validKey+"\n"), nil, 0),
+	}
+
+	got, err := svc.Get(context.Background())
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if got.PublicIP != "198.51.100.7" {
+		t.Errorf("PublicIP = %q, want %q (override host wins)", got.PublicIP, "198.51.100.7")
+	}
+}
+
+// TestServiceGet_EchoFallbackOffAWS proves that off-AWS (no override) Get
+// resolves the public IP via the echo client and still succeeds, given a valid
+// server key — the dashboard must work identically off-AWS.
+func TestServiceGet_EchoFallbackOffAWS(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{
+		IMDS:     spyIMDS{t: t}, // must not be touched off-AWS
+		EC2Probe: notOnEC2Probe,
+		Echo:     func(context.Context) (string, error) { return "192.0.2.50", nil },
+		Runner:   fakeRunner([]byte(validKey+"\n"), nil, 0),
+	}
+
+	got, err := svc.Get(context.Background())
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if got.PublicIP != "192.0.2.50" {
+		t.Errorf("PublicIP = %q, want echoed %q", got.PublicIP, "192.0.2.50")
+	}
+	if got.ServerPublicKey != validKey {
+		t.Errorf("ServerPublicKey = %q, want %q", got.ServerPublicKey, validKey)
 	}
 }

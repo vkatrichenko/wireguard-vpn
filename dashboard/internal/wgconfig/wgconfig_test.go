@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-// TestResolverFor pins the VPC-CIDR -> resolver derivation (network base + 2)
-// across several prefix lengths plus the error paths. The derivation must be
+// TestResolverForVPC pins the VPC-CIDR -> resolver derivation (network base +
+// 2) across several prefix lengths plus the error paths. The derivation must be
 // correct for any block size AWS permits, not just the /16 the current VPC
 // uses, because the whole point of deriving it is surviving a CIDR change.
-func TestResolverFor(t *testing.T) {
+func TestResolverForVPC(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -33,18 +33,18 @@ func TestResolverFor(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := resolverFor(tc.cidr)
+			got, err := ResolverForVPC(tc.cidr)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("resolverFor(%q) = %q, want error", tc.cidr, got)
+					t.Fatalf("ResolverForVPC(%q) = %q, want error", tc.cidr, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("resolverFor(%q) unexpected error: %v", tc.cidr, err)
+				t.Fatalf("ResolverForVPC(%q) unexpected error: %v", tc.cidr, err)
 			}
 			if got != tc.want {
-				t.Errorf("resolverFor(%q) = %q, want %q", tc.cidr, got, tc.want)
+				t.Errorf("ResolverForVPC(%q) = %q, want %q", tc.cidr, got, tc.want)
 			}
 		})
 	}
@@ -61,7 +61,8 @@ func TestBuild_Full(t *testing.T) {
 		ModeFull,
 		"SERVERPUBKEY0000000000000000000000000000000=",
 		"203.0.113.1:51820",
-		"10.23.0.0/16",
+		"10.23.0.2",
+		[]string{"172.16.15.0/24", "10.23.0.0/16"},
 	)
 	if err != nil {
 		t.Fatalf("Build returned unexpected error: %v", err)
@@ -88,19 +89,51 @@ func TestBuild_Full(t *testing.T) {
 	}
 }
 
-// TestBuild_InvalidVPCCIDR proves a bad VPC CIDR is surfaced as an error rather
-// than emitting a config with a blank/wrong DNS line.
-func TestBuild_InvalidVPCCIDR(t *testing.T) {
+// TestOverlaySubnet pins the server-host CIDR -> overlay network derivation
+// across the default /24, a non-.1 host, and a non-/24 prefix, plus the error
+// path. The handler derives the split-tunnel overlay from WG_SERVER_NET, so
+// this must be correct whatever subnet the operator chose.
+func TestOverlaySubnet(t *testing.T) {
 	t.Parallel()
 
-	if _, err := Build(Client{Address: "172.16.15.6/32"}, ModeFull, "k", "h:1", "nonsense"); err == nil {
-		t.Fatal("Build with invalid vpcCIDR returned nil error, want non-nil")
+	tests := []struct {
+		name      string
+		serverNet string
+		want      string
+		wantErr   bool
+	}{
+		{"default-slash24", "172.16.15.1/24", "172.16.15.0/24", false},
+		{"non-dot1-host", "172.16.15.5/24", "172.16.15.0/24", false},
+		{"slash22", "10.8.0.5/22", "10.8.0.0/22", false},
+		{"slash16", "10.0.4.1/16", "10.0.0.0/16", false},
+		{"empty", "", "", true},
+		{"garbage", "not-a-cidr", "", true},
+		{"missing-prefix", "172.16.15.1", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := OverlaySubnet(tc.serverNet)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("OverlaySubnet(%q) = %q, want error", tc.serverNet, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("OverlaySubnet(%q) unexpected error: %v", tc.serverNet, err)
+			}
+			if got != tc.want {
+				t.Errorf("OverlaySubnet(%q) = %q, want %q", tc.serverNet, got, tc.want)
+			}
+		})
 	}
 }
 
 // TestBuild_Split asserts the split-tunnel config and proves the ONLY
-// difference from the full-tunnel output is the AllowedIPs line: WG overlay
-// plus the VPC CIDR, derived from the same vpcCIDR input.
+// difference from the full-tunnel output is the AllowedIPs line: the
+// caller-supplied split routes (WG overlay plus the VPC CIDR), joined with
+// ", ".
 func TestBuild_Split(t *testing.T) {
 	t.Parallel()
 
@@ -108,10 +141,11 @@ func TestBuild_Split(t *testing.T) {
 	const (
 		key      = "SERVERPUBKEY0000000000000000000000000000000="
 		endpoint = "203.0.113.1:51820"
-		vpcCIDR  = "10.23.0.0/16"
+		dns      = "10.23.0.2"
 	)
+	splitRoutes := []string{"172.16.15.0/24", "10.23.0.0/16"}
 
-	split, err := Build(client, ModeSplit, key, endpoint, vpcCIDR)
+	split, err := Build(client, ModeSplit, key, endpoint, dns, splitRoutes)
 	if err != nil {
 		t.Fatalf("Build(split) unexpected error: %v", err)
 	}
@@ -120,7 +154,7 @@ func TestBuild_Split(t *testing.T) {
 	}
 
 	// Diff invariant: full and split differ only on the AllowedIPs line.
-	full, err := Build(client, ModeFull, key, endpoint, vpcCIDR)
+	full, err := Build(client, ModeFull, key, endpoint, dns, splitRoutes)
 	if err != nil {
 		t.Fatalf("Build(full) unexpected error: %v", err)
 	}
@@ -159,8 +193,35 @@ func TestParseMode(t *testing.T) {
 func TestBuild_UnsupportedMode(t *testing.T) {
 	t.Parallel()
 
-	if _, err := Build(Client{Address: "172.16.15.6/32"}, Mode("bogus"), "k", "h:1", "10.23.0.0/16"); err == nil {
+	if _, err := Build(Client{Address: "172.16.15.6/32"}, Mode("bogus"), "k", "h:1", "1.1.1.1", []string{"172.16.15.0/24"}); err == nil {
 		t.Fatal("Build with unsupported mode returned nil error, want non-nil")
+	}
+}
+
+// TestBuild_SplitOverlayOnly proves the off-AWS shape: a single overlay route
+// (no VPC) plus the WG_CLIENT_DNS resolver passed through verbatim.
+func TestBuild_SplitOverlayOnly(t *testing.T) {
+	t.Parallel()
+
+	got, err := Build(
+		Client{Name: "bob", Address: "172.16.15.7/32"},
+		ModeSplit,
+		"SERVERPUBKEY0000000000000000000000000000000=",
+		"198.51.100.9:51820",
+		"1.1.1.1",
+		[]string{"172.16.15.0/24"},
+	)
+	if err != nil {
+		t.Fatalf("Build returned unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "DNS = 1.1.1.1\n") {
+		t.Errorf("output missing the off-AWS DNS line:\n%s", got)
+	}
+	if !strings.Contains(got, "AllowedIPs = 172.16.15.0/24\n") {
+		t.Errorf("output missing the overlay-only AllowedIPs line:\n%s", got)
+	}
+	if strings.Contains(got, "10.23.0.0/16") {
+		t.Errorf("overlay-only split unexpectedly contains a VPC CIDR:\n%s", got)
 	}
 }
 

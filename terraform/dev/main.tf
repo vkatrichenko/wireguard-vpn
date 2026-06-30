@@ -38,9 +38,9 @@ module "wireguard" {
       public_key = "OVtCVOCizGvTVq2vhlymbEOmVnzfZaQKxXgUk+5eYwM="
     },
     {
-      name       = "test"
+      name       = "test1"
       address    = "172.16.15.7/32"
-      public_key = "pe3YV5lUvF01ow559PXk7W+mLsuGggRh6v57J1ywKU0="
+      public_key = "WuF+51NTLZllDf1U5RSdtPT5xUVuezwCm9ypuOy22io="
     },
   ]
   # additional_security_group_ids = [

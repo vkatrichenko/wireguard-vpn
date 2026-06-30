@@ -412,6 +412,11 @@ type aboutEC2CardData struct {
 	AvailabilityZone string
 	AMIID            string
 	Error            string
+	// NotOnEC2 is the calm off-AWS state: the IMDS probe reported the host is
+	// not on EC2, so the four metadata methods short-circuited with
+	// ErrNotOnEC2. The template renders "—" rows plus a "Not running on EC2"
+	// note rather than a red error box, and the handler does NOT slog.Error it.
+	NotOnEC2 bool
 }
 
 // aboutBinaryCardData is the view-model for cards/about-binary.html. All
@@ -475,17 +480,24 @@ func (s *server) handleGetPartialAbout(w http.ResponseWriter, r *http.Request) {
 	)
 
 	wg.Add(5)
-	go func() { defer wg.Done(); ip, ipErr = s.serverinfoSvc.IMDS.PublicIP(ctx) }()
-	go func() { defer wg.Done(); instanceType, typeErr = s.serverinfoSvc.IMDS.InstanceType(ctx) }()
-	go func() { defer wg.Done(); az, azErr = s.serverinfoSvc.IMDS.AvailabilityZone(ctx) }()
-	go func() { defer wg.Done(); ami, amiErr = s.serverinfoSvc.IMDS.AMIID(ctx) }()
+	go func() { defer wg.Done(); ip, ipErr = s.serverinfoSvc.EC2PublicIP(ctx) }()
+	go func() { defer wg.Done(); instanceType, typeErr = s.serverinfoSvc.InstanceType(ctx) }()
+	go func() { defer wg.Done(); az, azErr = s.serverinfoSvc.AvailabilityZone(ctx) }()
+	go func() { defer wg.Done(); ami, amiErr = s.serverinfoSvc.AMIID(ctx) }()
 	go func() { defer wg.Done(); info, infoErr = s.serverinfoSvc.Get(ctx) }()
 	wg.Wait()
 
-	if joined := errors.Join(ipErr, typeErr, azErr, amiErr); joined != nil {
+	// The four EC2-only reads share one outcome: onEC2 is cached, so off-AWS
+	// they all return ErrNotOnEC2 (calm "not on EC2" state, no log noise);
+	// on EC2 a genuine IMDS failure surfaces as a red error box.
+	joined := errors.Join(ipErr, typeErr, azErr, amiErr)
+	switch {
+	case errors.Is(joined, serverinfo.ErrNotOnEC2):
+		data.EC2.NotOnEC2 = true
+	case joined != nil:
 		slog.Error("GET /partial/about: EC2 metadata fetch failed", "err", joined)
 		data.EC2.Error = joined.Error()
-	} else {
+	default:
 		data.EC2 = aboutEC2CardData{
 			PublicIP:         ip,
 			InstanceType:     instanceType,

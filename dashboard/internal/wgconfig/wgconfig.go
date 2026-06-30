@@ -28,15 +28,11 @@ import (
 const (
 	// DefaultServerNet is the WG_SERVER_NET fallback (server-host form:
 	// host + prefix) used when the environment supplies none. It is the single
-	// source of truth for the fallback overlay; wgTunnelSubnet below is the /24
-	// derived from it. Mirrors `wg_server_net` in terraform/modules/wireguard;
-	// if that ever changes, this constant must move with it.
+	// source of truth for the fallback overlay; the split-tunnel overlay /24 is
+	// derived from it via OverlaySubnet. Mirrors `wg_server_net` in
+	// terraform/modules/wireguard; if that ever changes, this constant must
+	// move with it.
 	DefaultServerNet = "172.16.15.1/24"
-
-	// wgTunnelSubnet is the WireGuard overlay network the peers share. It is
-	// the /24 derived from DefaultServerNet (172.16.15.1/24). Used as the first
-	// AllowedIPs entry in split-tunnel mode (added in a later slice).
-	wgTunnelSubnet = "172.16.15.0/24"
 
 	// privateKeyPlaceholder is the literal value emitted on the Interface's
 	// PrivateKey line. It is intentionally NOT a valid key, so a config shipped
@@ -91,27 +87,28 @@ type Client struct {
 
 // Build renders the wg-quick client config for the given client and routing
 // mode. serverPubKey is the server's WireGuard public key, endpoint is the
-// reachable "host:port" the client dials, and vpcCIDR is the VPC's primary
-// IPv4 CIDR used to derive the DNS resolver.
+// reachable "host:port" the client dials, dns is the resolver written verbatim
+// onto the DNS line, and splitRoutes are the AllowedIPs entries for ModeSplit.
+//
+// The caller computes dns and splitRoutes per environment: on AWS, dns is the
+// VPC-derived resolver (ResolverForVPC) and splitRoutes is [overlay, vpcCIDR];
+// off-AWS, dns is WG_CLIENT_DNS and splitRoutes is [overlay] only. Keeping
+// those decisions in the handler is what lets this package stay pure and
+// AWS-agnostic.
 //
 // The function is pure and deterministic: identical inputs always yield an
-// identical, byte-stable string. It returns an error only when vpcCIDR cannot
-// be parsed or the mode is unsupported — never for empty server inputs, which
-// the caller is expected to have validated (and to surface as a 503).
-func Build(client Client, mode Mode, serverPubKey, endpoint, vpcCIDR string) (string, error) {
-	dns, err := resolverFor(vpcCIDR)
-	if err != nil {
-		return "", err
-	}
-
+// identical, byte-stable string. It returns an error only when the mode is
+// unsupported — never for empty server inputs, which the caller is expected to
+// have validated (and to surface as a 503).
+func Build(client Client, mode Mode, serverPubKey, endpoint, dns string, splitRoutes []string) (string, error) {
 	var allowedIPs string
 	switch mode {
 	case ModeFull:
 		allowedIPs = fullTunnelAllowedIPs
 	case ModeSplit:
-		// WireGuard overlay first, then the VPC CIDR so the client routes
-		// private AWS resources and the VPC DNS resolver through the tunnel.
-		allowedIPs = wgTunnelSubnet + ", " + vpcCIDR
+		// Caller-supplied routes (overlay first, then any private nets such as
+		// the AWS VPC CIDR), joined as one AllowedIPs line.
+		allowedIPs = strings.Join(splitRoutes, ", ")
 	default:
 		return "", fmt.Errorf("wgconfig: unsupported mode %q", mode)
 	}
@@ -130,16 +127,17 @@ func Build(client Client, mode Mode, serverPubKey, endpoint, vpcCIDR string) (st
 	return b.String(), nil
 }
 
-// resolverFor derives the AWS VPC DNS resolver address from a VPC CIDR. The
+// ResolverForVPC derives the AWS VPC DNS resolver address from a VPC CIDR. The
 // Amazon-provided resolver always lives at the VPC's network base address plus
 // two (e.g. 10.23.0.0/16 -> 10.23.0.2). Deriving it — rather than hardcoding a
 // single value — keeps the generated config correct if the VPC CIDR ever
-// changes.
+// changes. The config handler calls this on the AWS path; off-AWS it uses
+// WG_CLIENT_DNS instead and never reaches here.
 //
 // Only IPv4 VPC CIDRs are supported; an unparseable or non-IPv4 input returns
-// an error so the caller can surface a 503 rather than emit a config with a
-// wrong DNS line.
-func resolverFor(vpcCIDR string) (string, error) {
+// an error so the caller can fall back rather than emit a config with a wrong
+// DNS line.
+func ResolverForVPC(vpcCIDR string) (string, error) {
 	_, ipNet, err := net.ParseCIDR(vpcCIDR)
 	if err != nil {
 		return "", fmt.Errorf("wgconfig: parse vpc cidr %q: %w", vpcCIDR, err)
@@ -152,6 +150,19 @@ func resolverFor(vpcCIDR string) (string, error) {
 	copy(resolver, base)
 	addToIP(resolver, 2)
 	return resolver.String(), nil
+}
+
+// OverlaySubnet returns the network address + prefix of the WireGuard overlay
+// for a server-host CIDR — e.g. "172.16.15.1/24" -> "172.16.15.0/24". It is
+// the first AllowedIPs entry in split-tunnel mode, derived from WG_SERVER_NET
+// so the overlay is correct whatever subnet the operator chose. An unparseable
+// input returns an error so the caller can fall back to the default.
+func OverlaySubnet(serverNet string) (string, error) {
+	_, ipNet, err := net.ParseCIDR(serverNet)
+	if err != nil {
+		return "", fmt.Errorf("wgconfig: parse server net %q: %w", serverNet, err)
+	}
+	return ipNet.String(), nil
 }
 
 // ServerPeer carries the per-client facts needed to render one [Peer] stanza
