@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -62,6 +63,34 @@ type clientsTabData struct {
 	// baseline (spec 015) — rendered as a small badge in the Clients-tab
 	// heading; zero hides it.
 	Drift int
+	// Message / MessageKind carry the optional outcome line swapped in after an
+	// add/edit/remove mutation (spec 015, Slice 6). Both are empty on the
+	// tab-tick render so the card shows the bare list + controls; the write
+	// handlers populate them on the outerHTML re-render of the clients-card
+	// fragment. MessageKind ∈ "" | "success" | "error" | "info" — mirrors the
+	// webhook-card outcome convention.
+	Message     string
+	MessageKind string
+}
+
+// buildClientsTabData performs the DB-clients + live-wg join that both the
+// Clients-tab partial route and the Slice-6 write handlers render from. The
+// join failing is NOT a hard error: it populates Error so the fragment can
+// render an inline message rather than 500-ing (which htmx would swallow,
+// leaving stale content). Extracted so the partial render and every
+// post-mutation re-render stay in lock-step — one place computes rows + drift.
+func (s *server) buildClientsTabData(ctx context.Context) clientsTabData {
+	data := clientsTabData{}
+	dbClients, clientsErr := s.clientsSvc.List(ctx)
+	peers, peersErr := s.wgSvc.Show(ctx)
+	if joined := errors.Join(clientsErr, peersErr); joined != nil {
+		slog.Error("clients tab: clients fetch failed", "err", joined)
+		data.Error = joined.Error()
+	} else {
+		data.Rows = buildClientRows(dbClients, peers, time.Now(), s.geoipSvc)
+		data.Drift = s.computeDrift(ctx, dbClients)
+	}
+	return data
 }
 
 // handleGetPartialOverview renders the cards fragment for the Overview tab.
@@ -90,17 +119,7 @@ func (s *server) handleGetPartialOverview(w http.ResponseWriter, r *http.Request
 // render an inline error message — a 500 would leave the previous tab
 // body intact in htmx, which hides the failure from the operator.
 func (s *server) handleGetPartialClients(w http.ResponseWriter, r *http.Request) {
-	data := clientsTabData{}
-
-	dbClients, clientsErr := s.clientsSvc.List(r.Context())
-	peers, peersErr := s.wgSvc.Show(r.Context())
-	if joined := errors.Join(clientsErr, peersErr); joined != nil {
-		slog.Error("GET /partial/clients: clients fetch failed", "err", joined)
-		data.Error = joined.Error()
-	} else {
-		data.Rows = buildClientRows(dbClients, peers, time.Now(), s.geoipSvc)
-		data.Drift = s.computeDrift(r.Context(), dbClients)
-	}
+	data := s.buildClientsTabData(r.Context())
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tmpl.ExecuteTemplate(w, "clients", data); err != nil {

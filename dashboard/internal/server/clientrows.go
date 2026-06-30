@@ -63,6 +63,14 @@ type ClientRow struct {
 	TransferTx      int64     `json:"transfer_tx"`
 	Endpoint        string    `json:"endpoint,omitempty"`
 	Geo             Geo       `json:"geo,omitempty"` // see Geo's doc — `omitempty` on a struct value does not drop the empty object
+	// Note and Enabled mirror the DB-backed runtime columns (spec 015) so the
+	// Clients-tab edit form can pre-fill the note and render the correct
+	// enable/disable control. They are populated only for rows that have a DB
+	// row (named clients); out-of-band "unknown" peers leave them at the zero
+	// value (Enabled=false, Note=""), which is correct — there is nothing to
+	// edit for a peer that isn't in the DB.
+	Note    string `json:"note,omitempty"`
+	Enabled bool   `json:"enabled"`
 }
 
 // buildClientRows performs the manifest+wg outer-join and returns rows in
@@ -112,6 +120,8 @@ func buildClientRows(dbClients []db.Client, peers []wg.Peer, now time.Time, geo 
 			Name:      c.Name,
 			Address:   c.Address,
 			PublicKey: c.PublicKey,
+			Note:      c.Note.String,
+			Enabled:   c.Enabled,
 		}
 		if p, ok := peerByKey[c.PublicKey]; ok {
 			row.LatestHandshake = p.LatestHandshake

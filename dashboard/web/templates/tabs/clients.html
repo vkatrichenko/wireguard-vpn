@@ -1,50 +1,5 @@
 {{ define "clients" }}
-<section class="card" id="clients">
-  <h2>Clients{{ if .Drift }} <span class="drift-badge" id="clients-drift" title="Clients present in the dashboard DB but absent from the Terraform clients.json baseline — export and reconcile to make them survive an instance rebuild.">{{ .Drift }} not in clients.json</span>{{ end }}</h2>
-  {{ if .Error }}
-  <p class="error">Failed to load clients: {{ .Error }}</p>
-  {{ else if .Rows }}
-  <p class="hint">Download a client's config, then replace <code>PrivateKey</code> with that client's private key before use — the server never holds it.</p>
-  <table class="client-table">
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>WG IP</th>
-        <th>Status</th>
-        <th>Last handshake</th>
-        <th>Rx</th>
-        <th>Tx</th>
-        <th>Endpoint</th>
-        <th>Geo</th>
-        <th>Config</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{ range .Rows }}
-      <tr class="client-row status-{{ .Status }}" hx-get="/partial/clients/{{ .PublicKey | urlquery }}/detail" hx-target="[id='detail-{{ .PublicKey }}']" hx-swap="innerHTML">
-        <td>{{ if .Name }}{{ .Name }}{{ else }}<em>(unknown)</em>{{ end }}</td>
-        <td>{{ if .Address }}{{ .Address }}{{ else }}—{{ end }}</td>
-        <td><span class="status-pill status-{{ .Status }}">{{ .Status }}</span></td>
-        <td>{{ if .LatestHandshake.IsZero }}never{{ else }}{{ humanAgo .LatestHandshake }}{{ end }}</td>
-        <td>{{ humanBytes .TransferRx }}</td>
-        <td>{{ humanBytes .TransferTx }}</td>
-        <td>{{ if .Endpoint }}{{ .Endpoint }}{{ else }}—{{ end }}</td>
-        <td>{{ with .Geo }}{{ if .Country }}{{ if .City }}{{ .City }}, {{ .Country }}{{ else }}{{ .Country }}{{ end }}{{ else }}—{{ end }}{{ end }}</td>
-        <td class="config-actions">
-          {{ if .Name }}
-          <a href="/api/clients/{{ .Name | urlquery }}/config?mode=full" download onclick="event.stopPropagation()">Full</a>
-          <a href="/api/clients/{{ .Name | urlquery }}/config?mode=split" download onclick="event.stopPropagation()">Split</a>
-          {{ else }}—{{ end }}
-        </td>
-      </tr>
-      <tr id="detail-{{ .PublicKey }}" class="detail-row hidden"></tr>
-      {{ end }}
-    </tbody>
-  </table>
-  {{ else }}
-  <p class="empty">No clients configured. Add via <code>terraform/dev/main.tf</code>.</p>
-  {{ end }}
-</section>
+{{ template "clients-card" . }}
 
 {{/* Geo map card (spec 006 Slice 4). The shell renders server-side once; the
      base map is the embedded /static/world.svg outline, and world-map.js fills
@@ -53,7 +8,12 @@
      marker data) keeps this consistent with the rest of the JS-driven cards
      and avoids re-deriving the mappable set in the template. The card always
      renders — even with no clients configured — so the empty state ("No
-     mappable peers.") is the cold-load default until JS hydrates. */}}
+     mappable peers.") is the cold-load default until JS hydrates.
+
+     It lives OUTSIDE the clients-card fragment on purpose: the add/edit/remove
+     controls swap #clients via outerHTML, and the geo map must survive that
+     swap rather than be re-rendered (and its JS-managed markers destroyed) on
+     every mutation. */}}
 <section class="card" id="geo-map">
   <h2>Peer locations</h2>
   {{/* spec 010 Slice 2: the basemap + markers live inside a transformable
@@ -81,5 +41,118 @@
     <span class="geo-legend-item"><span class="geo-swatch offline"></span>Offline</span>
     <span class="geo-caption" id="geo-not-mappable" hidden></span>
   </div>
+</section>
+{{ end }}
+
+{{/* clients-card is the runtime client-management fragment (spec 015). It keeps
+     id="clients" so every add/edit/remove control can re-target it for an
+     outerHTML swap (the webhook-card idiom). Rendered by BOTH the /partial/clients
+     route (inside the `clients` tab body) AND the write handlers after a
+     mutation, so the same markup drives the cold load and every live update. */}}
+{{ define "clients-card" }}
+<section class="card" id="clients">
+  <h2>Clients{{ if .Drift }} <span class="drift-badge" id="clients-drift" title="Clients present in the dashboard DB but absent from the Terraform clients.json baseline — export and reconcile to make them survive an instance rebuild.">{{ .Drift }} not in clients.json</span>{{ end }}</h2>
+
+  {{ if .Message }}
+  <p class="client-message client-message-{{ if .MessageKind }}{{ .MessageKind }}{{ else }}info{{ end }}" role="status">{{ .Message }}</p>
+  {{ end }}
+
+  {{/* Add-client form. The IP is auto-allocated when Address is left blank; an
+       explicit /32 is validated as an override. Posts to #clients via outerHTML
+       so a success (or an inline validation error) re-renders this whole card. */}}
+  <form class="client-add-form" hx-post="/api/clients" hx-target="#clients" hx-swap="outerHTML">
+    <div class="client-add-fields">
+      <div class="client-field">
+        <label for="add-name">Name</label>
+        <input id="add-name" name="name" type="text" autocomplete="off" required
+               placeholder="laptop" pattern="[A-Za-z0-9._-]+">
+      </div>
+      <div class="client-field">
+        <label for="add-public-key">Public key</label>
+        <input id="add-public-key" name="public_key" type="text" autocomplete="off" required
+               placeholder="44-char base64 (wg pubkey)">
+      </div>
+      <div class="client-field">
+        <label for="add-address">Tunnel IP <span class="client-field-opt">(optional)</span></label>
+        <input id="add-address" name="address" type="text" autocomplete="off"
+               placeholder="auto — next free /32">
+      </div>
+      <div class="client-field client-field-submit">
+        <button type="submit">Add client</button>
+      </div>
+    </div>
+    <p class="hint">Generate the keypair off-host with <code>wg genkey | tee privatekey | wg pubkey</code> and paste the public key — the server never holds the private key.</p>
+  </form>
+
+  <div class="client-export">
+    <span class="client-export-label">Reconcile to Terraform:</span>
+    <a class="client-export-link" href="/api/clients/export?format=hcl" download>Export HCL</a>
+    <a class="client-export-link" href="/api/clients/export?format=tfvars" download>Export tfvars</a>
+  </div>
+
+  {{ if .Error }}
+  <p class="error">Failed to load clients: {{ .Error }}</p>
+  {{ else if .Rows }}
+  <p class="hint">Download a client's config, then replace <code>PrivateKey</code> with that client's private key before use — the server never holds it.</p>
+  <table class="client-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>WG IP</th>
+        <th>Status</th>
+        <th>Last handshake</th>
+        <th>Rx</th>
+        <th>Tx</th>
+        <th>Endpoint</th>
+        <th>Geo</th>
+        <th>Config</th>
+        <th>Manage</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .Rows }}
+      <tr class="client-row status-{{ .Status }}{{ if and .Name (not .Enabled) }} client-row-disabled{{ end }}" hx-get="/partial/clients/{{ .PublicKey | urlquery }}/detail" hx-target="[id='detail-{{ .PublicKey }}']" hx-swap="innerHTML">
+        <td>{{ if .Name }}{{ .Name }}{{ if not .Enabled }} <span class="client-disabled-tag" title="Disabled — retained but omitted from the live tunnel.">disabled</span>{{ end }}{{ else }}<em>(unknown)</em>{{ end }}</td>
+        <td>{{ if .Address }}{{ .Address }}{{ else }}—{{ end }}</td>
+        <td><span class="status-pill status-{{ .Status }}">{{ .Status }}</span></td>
+        <td>{{ if .LatestHandshake.IsZero }}never{{ else }}{{ humanAgo .LatestHandshake }}{{ end }}</td>
+        <td>{{ humanBytes .TransferRx }}</td>
+        <td>{{ humanBytes .TransferTx }}</td>
+        <td>{{ if .Endpoint }}{{ .Endpoint }}{{ else }}—{{ end }}</td>
+        <td>{{ with .Geo }}{{ if .Country }}{{ if .City }}{{ .City }}, {{ .Country }}{{ else }}{{ .Country }}{{ end }}{{ else }}—{{ end }}{{ end }}</td>
+        <td class="config-actions">
+          {{ if .Name }}
+          <a href="/api/clients/{{ .Name | urlquery }}/config?mode=full" download onclick="event.stopPropagation()">Full</a>
+          <a href="/api/clients/{{ .Name | urlquery }}/config?mode=split" download onclick="event.stopPropagation()">Split</a>
+          {{ else }}—{{ end }}
+        </td>
+        <td class="client-manage" onclick="event.stopPropagation()">
+          {{ if .Name }}
+          <details class="client-edit">
+            <summary>Edit</summary>
+            <form class="client-edit-form" hx-patch="/api/clients/{{ .Name | urlquery }}" hx-target="#clients" hx-swap="outerHTML">
+              <label>Name <input name="name" type="text" autocomplete="off" value="{{ .Name }}" pattern="[A-Za-z0-9._-]+"></label>
+              <label>Public key <input name="public_key" type="text" autocomplete="off" value="{{ .PublicKey }}"></label>
+              <label>Tunnel IP <input name="address" type="text" autocomplete="off" value="{{ .Address }}"></label>
+              <label>Note <input name="note" type="text" autocomplete="off" value="{{ .Note }}" placeholder="optional"></label>
+              <button type="submit">Save</button>
+            </form>
+          </details>
+          {{ if .Enabled }}
+          <button type="button" class="client-btn" hx-patch="/api/clients/{{ .Name | urlquery }}" hx-vals='{"enabled":"false"}' hx-target="#clients" hx-swap="outerHTML">Disable</button>
+          {{ else }}
+          <button type="button" class="client-btn" hx-patch="/api/clients/{{ .Name | urlquery }}" hx-vals='{"enabled":"true"}' hx-target="#clients" hx-swap="outerHTML">Enable</button>
+          {{ end }}
+          <button type="button" class="client-btn client-btn-danger" hx-delete="/api/clients/{{ .Name | urlquery }}" hx-target="#clients" hx-swap="outerHTML" hx-confirm="Remove client {{ .Name }}? This revokes its access immediately.">Remove</button>
+          {{ else }}—{{ end }}
+        </td>
+      </tr>
+      <tr id="detail-{{ .PublicKey }}" class="detail-row hidden"></tr>
+      {{ end }}
+    </tbody>
+  </table>
+  {{ else }}
+  <p class="empty">No clients configured yet — add one with the form above.</p>
+  {{ end }}
 </section>
 {{ end }}

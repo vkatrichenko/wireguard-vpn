@@ -3,6 +3,7 @@ package clients
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -11,6 +12,12 @@ import (
 	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
 )
+
+// ErrNotFound is returned by Update when no client matches the supplied name.
+// It is a sentinel (rather than a bare fmt.Errorf) so the HTTP layer can map a
+// missing-client edit to a 404 via errors.Is without string-matching. Delete
+// stays idempotent and never returns this — a missing name is a no-op there.
+var ErrNotFound = errors.New("clients: client not found")
 
 // Applier is the seam for the live wg-apply step. Add/Update/Delete call it
 // AFTER the DB write, still holding the service mutex, with the full current
@@ -216,7 +223,7 @@ func (s *Service) Update(ctx context.Context, name string, p UpdateParams) (db.C
 		}
 	}
 	if idx < 0 {
-		return db.Client{}, fmt.Errorf("clients: no client named %q", name)
+		return db.Client{}, fmt.Errorf("%w: %q", ErrNotFound, name)
 	}
 	updated := existing[idx]
 
