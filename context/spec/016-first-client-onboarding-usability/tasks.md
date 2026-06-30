@@ -34,7 +34,7 @@
 
 ### Slice 5 — Owner-run end-to-end validation (cannot be done in-session)
 
-- [ ] **Owner-run** on a real Ubuntu VPS: fresh install prints the example config; add a client via the UI (inline edit works; handshakes show the name, one row per peer); rerun-update preserves peers, doesn't drop the tunnel, runs the new binary; `--uninstall` removes services but keeps data; reinstall keeps the same server identity; `--purge` wipes; `--dashboard-only` leaves the VPN up. EC2: confirm the rendered user-data path is behavior-unchanged. **(owner)**
+- [x] **Owner-run** on a real Ubuntu VPS: fresh install prints the example config; add a client via the UI (inline edit works; handshakes show the name, one row per peer); rerun-update preserves peers, doesn't drop the tunnel, runs the new binary; `--uninstall` removes services but keeps data; reinstall keeps the same server identity; `--purge` wipes; `--dashboard-only` leaves the VPN up. EC2: confirm the rendered user-data path is behavior-unchanged. **(owner)** _(owner-verified deployed & all functionality working 2026-06-30; required the post-v0.0.10 fixes — capture-phase edit toggle + server-key persistence, PR #48.)_
 
 ---
 
