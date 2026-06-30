@@ -250,8 +250,13 @@ esac
 export ARCH GOARCH
 
 # --- Server private key -----------------------------------------------------
-# If provided via env, use it as-is. Otherwise generate one and persist it to a
-# root-only file so it survives across re-runs / reboots.
+# Resolve the key from (in priority): the env var, the persisted server.key, or
+# a freshly generated one. Then ALWAYS persist it to a root-only server.key if
+# it isn't there yet — including an env-provided key. This is load-bearing for
+# safe reruns: without it, a first install that passed WG_SERVER_PRIVATE_KEY
+# would never write server.key, so a later rerun WITHOUT the env var would find
+# no file and mint a NEW key — changing the server identity and breaking every
+# existing client config.
 mkdir -p "$WG_DIR"
 chmod 0700 "$WG_DIR"
 if [ -z "$WG_SERVER_PRIVATE_KEY" ]; then
@@ -261,9 +266,13 @@ if [ -z "$WG_SERVER_PRIVATE_KEY" ]; then
   else
     echo "Generating server private key -> $WG_KEY_FILE"
     WG_SERVER_PRIVATE_KEY="$(wg genkey)"
-    ( umask 077; printf '%s\n' "$WG_SERVER_PRIVATE_KEY" > "$WG_KEY_FILE" )
-    chmod 0600 "$WG_KEY_FILE"
   fi
+fi
+# Persist whatever we resolved (env-provided or generated) so reruns reuse the
+# same identity. Skip when server.key already holds it (the reuse path above).
+if [ ! -s "$WG_KEY_FILE" ]; then
+  ( umask 077; printf '%s\n' "$WG_SERVER_PRIVATE_KEY" > "$WG_KEY_FILE" )
+  chmod 0600 "$WG_KEY_FILE"
 fi
 
 # --- Detect the egress interface -------------------------------------------
