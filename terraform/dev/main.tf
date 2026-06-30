@@ -46,18 +46,17 @@ module "wireguard" {
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]
-  dashboard_release_tag  = "v0.0.7"
-  dashboard_release_repo = "vkatrichenko/wireguard-vpn"
+  dashboard_release_tag = "v0.0.8"
 
-  # Portable installer fetched at boot from raw GitHub, SHA256-verified before it
-  # runs (spec 014). The repo MUST be public for the anonymous raw fetch to
-  # resolve — a private repo 404s and aborts the boot (no `.ready`).
-  install_script_repo   = "vkatrichenko/wireguard-vpn"
-  install_script_sha256 = "369447a856ae31893cd9305df8ab60771e026f1614f083259544decc26c474f7"
-  # Pinned to the public main commit that carries this exact scripts/install.sh
-  # (verified: raw fetch returns HTTP 200 and matches install_script_sha256). When
-  # install.sh changes, push it, then bump BOTH this ref and the sha256 above
-  # (`sha256sum scripts/install.sh`) in one reviewable commit.
+  # Single GitHub owner/name slug used BOTH for the raw scripts/install.sh fetch
+  # and the dashboard release download (spec 014). The repo MUST be public for the
+  # anonymous raw fetch / release download to resolve — a private repo 404s and
+  # aborts the boot (no `.ready`). No checksum: the portable installer is fetched
+  # at boot from github_repo at install_script_ref (module default `main`).
+  github_repo = "vkatrichenko/wireguard-vpn"
+  # install_script_ref pins the exact scripts/install.sh commit/tag fetched at
+  # boot. Left commented so the module default `main` applies; uncomment and pin
+  # to a commit SHA to freeze the installer version.
   # install_script_ref = "5d05d6a4ba53fd6ff1dad923fa857a3b866461f5"
 
   # Alert seed (spec 008 slice 5), wired-but-disabled. To enable: create the SSM

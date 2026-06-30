@@ -198,9 +198,9 @@ SERVER_PUBLIC_KEY="$(printf '%s' "$WG_SERVER_PRIVATE_KEY" | wg pubkey)"
 # Provisioned only when DASHBOARD_RELEASE_TAG is non-empty. Reached only after
 # the WG success gate above, so the dashboard's systemd unit (Requires=
 # wg-quick@wg0) has a confirmed-active tunnel to bind to. The binary is fetched
-# from a public GitHub Release over HTTPS and verified against its published
-# SHA256SUMS before install — no S3, no AWS specifics (those stay in the EC2
-# wrapper). When the tag is empty this whole block is skipped (WG-only box).
+# from a public GitHub Release over HTTPS — no S3, no AWS specifics (those stay
+# in the EC2 wrapper). When the tag is empty this whole block is skipped
+# (WG-only box).
 if [ -n "${DASHBOARD_RELEASE_TAG:-}" ]; then
   # The repo is mandatory once a tag is pinned — without it there's nowhere to
   # fetch the release from. Fail hard with a clear message rather than building
@@ -212,7 +212,6 @@ if [ -n "${DASHBOARD_RELEASE_TAG:-}" ]; then
 
   # curl is required for the release download. Slice 1 deliberately omitted it
   # (the server-only path needs no HTTP), so install it here if missing.
-  # sha256sum is coreutils (always present); no unzip is needed.
   if ! command -v curl >/dev/null 2>&1; then
     apt-get install -y curl
   fi
@@ -349,11 +348,11 @@ SUDOERS_EOF
   chown root:wireguard-dashboard /etc/wireguard-dashboard/alerts.env
   chmod 0640 /etc/wireguard-dashboard/alerts.env
 
-  # 6. Download the pinned release binary + its checksum over HTTPS and verify
-  #    before installing. With set -e a bare failing curl already aborts, but we
-  #    keep explicit FATAL messages (matching user-data) so a missing asset /
-  #    private-repo 404 or a SHA256 mismatch produces a clear diagnostic instead
-  #    of a cryptic abort, and a wrong/partial binary never goes live.
+  # 6. Download the pinned release binary over HTTPS. With set -e a bare failing
+  #    curl already aborts, but we keep an explicit FATAL message (matching
+  #    user-data) so a missing asset / private-repo 404 produces a clear
+  #    diagnostic instead of a cryptic abort. No checksum verification: release
+  #    artifacts are trusted (admin-gated repo + CI/CD-built binaries).
   RELEASE_URL="https://github.com/${DASHBOARD_RELEASE_REPO}/releases/download/${DASHBOARD_RELEASE_TAG}"
   DL_DIR="$(mktemp -d)"
   # The release ships one binary per architecture (wireguard-dashboard-amd64 /
@@ -362,21 +361,8 @@ SUDOERS_EOF
     echo "FATAL: failed to download dashboard binary from $RELEASE_URL" >&2
     exit 1
   fi
-  if ! curl -fsSL "$RELEASE_URL/SHA256SUMS" -o "$DL_DIR/SHA256SUMS"; then
-    echo "FATAL: failed to download SHA256SUMS from $RELEASE_URL" >&2
-    exit 1
-  fi
-  # SHA256SUMS lists both arch binaries under their bare filenames
-  # (wireguard-dashboard-amd64 / wireguard-dashboard-arm64), so verify from
-  # within DL_DIR using the same arch-suffixed name we downloaded.
-  # --ignore-missing makes sha256sum check only the file we actually fetched and
-  # skip the other arch's entry (and any future assets) instead of failing.
-  if ! ( cd "$DL_DIR" && sha256sum -c --ignore-missing SHA256SUMS ); then
-    echo "FATAL: dashboard binary failed SHA256 verification" >&2
-    exit 1
-  fi
 
-  # 7. Install the verified binary atomically with the executable bit set, then
+  # 7. Install the binary atomically with the executable bit set, then
   #    drop the temp dir. The arch suffix is dropped here: the installed path
   #    stays /opt/wireguard-dashboard/bin/wireguard-dashboard so the systemd
   #    unit's ExecStart needs no per-arch change.

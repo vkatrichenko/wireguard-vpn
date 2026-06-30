@@ -116,42 +116,21 @@ variable "dashboard_release_tag" {
   }
 }
 
-variable "dashboard_release_repo" {
-  description = "GitHub repository slug (owner/name) the dashboard release is fetched from. Combined with dashboard_release_tag into the public asset base URL https://github.com/<repo>/releases/download/<tag>/. Anonymous download requires the repo to be public."
+variable "github_repo" {
+  description = "GitHub repository slug (owner/name) used BOTH for the raw scripts/install.sh fetch and the dashboard release download at first boot. For install.sh it is combined with install_script_ref into the raw-content URL https://raw.githubusercontent.com/<repo>/<ref>/scripts/install.sh; for the dashboard it is combined with dashboard_release_tag into the public asset base URL https://github.com/<repo>/releases/download/<tag>/. Anonymous fetch/download requires the repo to be public."
   type        = string
   default     = "vkatrichenko/wireguard-vpn"
 
   validation {
-    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.dashboard_release_repo))
-    error_message = "dashboard_release_repo must be a GitHub 'owner/name' slug."
-  }
-}
-
-variable "install_script_repo" {
-  description = "GitHub repository slug (owner/name) the portable installer scripts/install.sh is fetched from at first boot. Combined with install_script_ref into the raw-content URL https://raw.githubusercontent.com/<repo>/<ref>/scripts/install.sh. Anonymous fetch requires the repo to be public."
-  type        = string
-  default     = "vkatrichenko/wireguard-vpn"
-
-  validation {
-    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.install_script_repo))
-    error_message = "install_script_repo must be a GitHub 'owner/name' slug."
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repo))
+    error_message = "github_repo must be a GitHub 'owner/name' slug."
   }
 }
 
 variable "install_script_ref" {
-  description = "A commit SHA or tag pinning the exact scripts/install.sh version fetched at boot from install_script_repo. Must point at a ref on the PUBLIC default branch where the install.sh matching install_script_sha256 exists, otherwise the raw fetch 404s and boot aborts. Bumping this re-renders user-data, rolls a new launch-template version, and replaces the instance."
+  description = "A commit SHA or tag pinning the exact scripts/install.sh version fetched at boot from github_repo. Must point at a ref on the PUBLIC default branch where the install.sh exists, otherwise the raw fetch 404s and boot aborts. Bumping this re-renders user-data, rolls a new launch-template version, and replaces the instance."
   type        = string
   default     = "main"
-}
-
-variable "install_script_sha256" {
-  description = "Expected 64-hex SHA256 digest of scripts/install.sh at install_script_ref. The wrapper verifies the fetched script against this with `sha256sum -c -` before running it as root; a mismatch aborts the boot. Compute with `sha256sum scripts/install.sh` and update as an explicit reviewable commit whenever install.sh changes."
-  type        = string
-
-  validation {
-    condition     = can(regex("^[a-f0-9]{64}$", var.install_script_sha256))
-    error_message = "install_script_sha256 must be a 64-character lowercase hex SHA256 digest."
-  }
 }
 
 variable "dashboard_webhook_url_param" {
