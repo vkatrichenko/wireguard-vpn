@@ -569,6 +569,55 @@ func (d *DB) QueryHandshakeEvents(ctx context.Context, from, to time.Time, limit
 	return out, nil
 }
 
+// QueryLatestHandshakePerPeer returns at most one HandshakeEvent per
+// public_key — each peer's most-recent handshake (MAX(ts)) within [from, to]
+// inclusive — ordered newest-first. If limit > 0, returns at most that many
+// peers; if limit <= 0, returns all matching peers.
+//
+// This backs the "Recent handshakes" panel (spec 016, 2.3): the operator
+// wants "who was last seen, once per peer", not the full per-handshake history
+// QueryHandshakeEvents returns. GROUP BY public_key collapses a peer's
+// repeated rows; SQLite's documented min/max bare-column rule makes the
+// selected name come from the same row that supplied MAX(ts). Ordering is ts
+// DESC, public_key DESC — the same deterministic tiebreaker as
+// QueryHandshakeEvents, so two peers whose latest handshake landed in the same
+// second order stably.
+func (d *DB) QueryLatestHandshakePerPeer(ctx context.Context, from, to time.Time, limit int) ([]HandshakeEvent, error) {
+	q := `SELECT MAX(ts) AS ts, public_key, name FROM handshake_events WHERE ts BETWEEN ? AND ? GROUP BY public_key ORDER BY ts DESC, public_key DESC`
+	args := []any{from.Unix(), to.Unix()}
+	if limit > 0 {
+		q += ` LIMIT ?`
+		args = append(args, limit)
+	}
+
+	rows, err := d.sql.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query latest handshake per peer: %w", err)
+	}
+	defer rows.Close()
+
+	var out []HandshakeEvent
+	for rows.Next() {
+		var (
+			ts        int64
+			publicKey string
+			name      string
+		)
+		if err := rows.Scan(&ts, &publicKey, &name); err != nil {
+			return nil, fmt.Errorf("scan latest handshake per peer: %w", err)
+		}
+		out = append(out, HandshakeEvent{
+			TS:        time.Unix(ts, 0).UTC(),
+			PublicKey: publicKey,
+			Name:      name,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate latest handshake per peer: %w", err)
+	}
+	return out, nil
+}
+
 // QueryHandshakeEventsByKey returns handshake_events for a single peer with
 // ts in [from, to] inclusive, ordered ASC by ts. The query reuses
 // idx_handshake_events_ts to narrow the ts range, then filters on

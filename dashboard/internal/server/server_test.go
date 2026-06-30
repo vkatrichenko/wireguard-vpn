@@ -1755,12 +1755,15 @@ func TestHandleGetMetricsSystem_7dRangeWindowFilters(t *testing.T) {
 }
 
 // TestHandleGetPartialEvents_RendersSeededRows seeds 55 handshake_events
-// rows at strictly increasing timestamps with distinct peer names ("peer-00"
-// through "peer-54"), hits /partial/events, and asserts the rendered fragment
-// (a) contains the events card heading, (b) renders the newest event's name
-// (peer-54), (c) does NOT contain the oldest seeded row's name (peer-00 ..
-// peer-04 — the five rows that fall outside the LIMIT 50 cut). Pins the
-// "50 newest" cap raised in Slice 10 from the Overview card's 10.
+// rows at strictly increasing timestamps with distinct public keys ("key-00"
+// through "key-54"), hits /partial/events with an empty client set, and
+// asserts the rendered fragment (a) contains the events card heading, (b)
+// renders the newest peer as a shortened-key "unknown" row (key-54), (c) does
+// NOT contain the oldest seeded rows (key-00 .. key-04 — the five that fall
+// outside the LIMIT 50 cut). Pins the "50 newest" cap (Slice 10) under the
+// spec-016 render-time resolution: with no matching client, every peer falls
+// back to its shortened key. The stored name ("peer-NN") is now display-
+// irrelevant — resolution moved to render time.
 func TestHandleGetPartialEvents_RendersSeededRows(t *testing.T) {
 	infoSvc := &serverinfo.Service{
 		IMDS: fakeIMDS{ip: "203.0.113.1"},
@@ -1771,9 +1774,10 @@ func TestHandleGetPartialEvents_RendersSeededRows(t *testing.T) {
 	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
 
 	testDB := newTestDB(t)
-	// Seed 55 events: peer-00 is the oldest (now-55min), peer-54 is the
-	// newest (now-1min). QueryHandshakeEvents orders ts DESC LIMIT 50, so
-	// peer-54..peer-05 come back; peer-04..peer-00 are filtered by the cap.
+	// Seed 55 events: key-00 is the oldest (now-55min), key-54 is the
+	// newest (now-1min). QueryLatestHandshakePerPeer orders ts DESC LIMIT 50
+	// (one row per distinct key), so key-54..key-05 come back; key-04..key-00
+	// are filtered by the cap.
 	now := time.Now()
 	events := make([]db.HandshakeEvent, 0, 55)
 	for i := 0; i < 55; i++ {
@@ -1812,17 +1816,24 @@ func TestHandleGetPartialEvents_RendersSeededRows(t *testing.T) {
 	for _, want := range []string{
 		`id="events"`,
 		"<h2>Recent handshakes</h2>",
-		// peer-54 is the newest seeded row — must render.
-		"peer-54",
-		// peer-05 is the 50th newest (still inside the LIMIT 50 cut).
-		"peer-05",
+		// key-54 is the newest seeded row — must render (as its shortened key,
+		// unresolved since the client set is empty).
+		"key-54",
+		// key-05 is the 50th newest (still inside the LIMIT 50 cut).
+		"key-05",
+		// Unmatched keys carry the unknown marker.
+		"unknown",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)
 		}
 	}
-	// peer-00..peer-04 are the 5 oldest rows — beyond the 50-row cap.
-	for _, dont := range []string{"peer-00", "peer-01", "peer-02", "peer-03", "peer-04"} {
+	// The stored name is display-irrelevant now — peer-NN must never render.
+	if strings.Contains(body, "peer-") {
+		t.Errorf("stored name should not render; resolution moved to render time:\n%s", body)
+	}
+	// key-00..key-04 are the 5 oldest rows — beyond the 50-row cap.
+	for _, dont := range []string{"key-00", "key-01", "key-02", "key-03", "key-04"} {
 		if strings.Contains(body, dont) {
 			t.Errorf("body unexpectedly contains %q (should be filtered by LIMIT 50):\n%s", dont, body)
 		}

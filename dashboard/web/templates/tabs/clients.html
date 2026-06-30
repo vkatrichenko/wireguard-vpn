@@ -128,16 +128,12 @@
         </td>
         <td class="client-manage" onclick="event.stopPropagation()">
           {{ if .Name }}
-          <details class="client-edit">
-            <summary>Edit</summary>
-            <form class="client-edit-form" hx-patch="/api/clients/{{ .Name | urlquery }}" hx-target="#clients" hx-swap="outerHTML">
-              <label>Name <input name="name" type="text" autocomplete="off" value="{{ .Name }}" pattern="[A-Za-z0-9._-]+"></label>
-              <label>Public key <input name="public_key" type="text" autocomplete="off" value="{{ .PublicKey }}"></label>
-              <label>Tunnel IP <input name="address" type="text" autocomplete="off" value="{{ .Address }}"></label>
-              <label>Note <input name="note" type="text" autocomplete="off" value="{{ .Note }}" placeholder="optional"></label>
-              <button type="submit">Save</button>
-            </form>
-          </details>
+          {{/* Edit toggles the full-width edit row below (spec 016 req 2.2);
+               the form itself lives in that row so fields lay out across the
+               table width instead of a cramped right-side drawer. The cell's
+               onclick stopPropagation keeps this click off the row's
+               detail-expand hx-get; tabs.js does the .hidden toggle. */}}
+          <button type="button" class="client-btn client-edit-toggle" data-edit-target="edit-{{ .PublicKey }}">Edit</button>
           {{ if .Enabled }}
           <button type="button" class="client-btn" hx-patch="/api/clients/{{ .Name | urlquery }}" hx-vals='{"enabled":"false"}' hx-target="#clients" hx-swap="outerHTML">Disable</button>
           {{ else }}
@@ -147,6 +143,27 @@
           {{ else }}—{{ end }}
         </td>
       </tr>
+      {{/* Full-width inline edit row — spans every column so the edit fields
+           line up under the client they belong to. Hidden until Edit toggles
+           it; re-rendered (and re-hidden) on every #clients outerHTML swap, so
+           a successful Save collapses back to the read view for free. The td's
+           onclick stopPropagation keeps clicks here off any row hx-get. */}}
+      {{ if .Name }}
+      <tr id="edit-{{ .PublicKey }}" class="client-edit-row hidden">
+        <td colspan="10" onclick="event.stopPropagation()">
+          <form class="client-edit-form" hx-patch="/api/clients/{{ .Name | urlquery }}" hx-target="#clients" hx-swap="outerHTML">
+            <label>Name <input name="name" type="text" autocomplete="off" value="{{ .Name }}" pattern="[A-Za-z0-9._-]+"></label>
+            <label>Public key <input name="public_key" type="text" autocomplete="off" value="{{ .PublicKey }}"></label>
+            <label>Tunnel IP <input name="address" type="text" autocomplete="off" value="{{ .Address }}"></label>
+            <label>Note <input name="note" type="text" autocomplete="off" value="{{ .Note }}" placeholder="optional"></label>
+            <div class="client-edit-actions">
+              <button type="submit">Save</button>
+              <button type="button" class="client-btn client-edit-toggle" data-edit-target="edit-{{ .PublicKey }}">Cancel</button>
+            </div>
+          </form>
+        </td>
+      </tr>
+      {{ end }}
       <tr id="detail-{{ .PublicKey }}" class="detail-row hidden"></tr>
       {{ end }}
     </tbody>

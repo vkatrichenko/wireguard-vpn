@@ -336,14 +336,28 @@ const eventsWindow = 30 * 24 * time.Hour
 // is fixed above.
 const eventsLimit = 50
 
-// eventsTabData is the view-model for the Events tab. Handshakes is the existing
-// 50-newest handshake_events surface; Alerts is the in-memory ring of recent
-// alert fire/recovery transitions from the status holder (spec 007, Slice 5),
-// newest-first. Each surface branches on its own emptiness so one being empty
-// doesn't blank the other.
+// eventsTabData is the view-model for the Events tab. Handshakes is the
+// one-row-per-peer handshake surface with names resolved at render time
+// (spec 016, 2.3); Alerts is the in-memory ring of recent alert fire/recovery
+// transitions from the status holder (spec 007, Slice 5), newest-first. Each
+// surface branches on its own emptiness so one being empty doesn't blank the
+// other.
 type eventsTabData struct {
-	Handshakes []db.HandshakeEvent
+	Handshakes []handshakeRow
 	Alerts     []alerts.LogEntry
+}
+
+// handshakeRow is the resolved Events-tab view of one peer's most-recent
+// handshake. Name is the live client name resolved from the public key at
+// render time (spec 016, 2.3) — NOT the stored handshake_events.name, which the
+// poller stamps from the legacy clients.json and which is empty/stale for
+// DB-added clients (spec 015). Unknown is set when the peer's public key isn't
+// in the current client set; Name then carries a shortened-key fallback so the
+// template can mark the row "unknown" rather than hide it.
+type handshakeRow struct {
+	TS      time.Time
+	Name    string
+	Unknown bool
 }
 
 // handleGetPartialEvents renders the Events tab body — the 50 newest
@@ -355,14 +369,14 @@ type eventsTabData struct {
 // via slog so the operator still sees the actual cause in journald.
 func (s *server) handleGetPartialEvents(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
-	events, err := s.metricsDB.QueryHandshakeEvents(r.Context(), now.Add(-eventsWindow), now, eventsLimit)
+	events, err := s.metricsDB.QueryLatestHandshakePerPeer(r.Context(), now.Add(-eventsWindow), now, eventsLimit)
 	if err != nil {
 		slog.Error("GET /partial/events: handshake events query failed", "err", err)
 		events = nil
 	}
 
 	data := eventsTabData{
-		Handshakes: events,
+		Handshakes: s.resolveHandshakeRows(r.Context(), events),
 		Alerts:     s.alertSnapshot().Recent,
 	}
 
@@ -372,6 +386,47 @@ func (s *server) handleGetPartialEvents(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "template render failed", http.StatusInternalServerError)
 		return
 	}
+}
+
+// resolveHandshakeRows maps raw handshake_events rows to the Events-tab view,
+// resolving each peer's display name from the live client set (spec 016, 2.3)
+// rather than the stale stored name. A key absent from the current clients
+// degrades to a shortened-key "unknown" row rather than being hidden. If
+// clientsSvc is nil or its List errors, every row falls back to the
+// shortened-key form — no 500, matching the events handler's no-500 posture.
+func (s *server) resolveHandshakeRows(ctx context.Context, events []db.HandshakeEvent) []handshakeRow {
+	var byKey map[string]string
+	if s.clientsSvc != nil {
+		if cs, err := s.clientsSvc.List(ctx); err != nil {
+			slog.Error("GET /partial/events: clients list failed", "err", err)
+		} else {
+			byKey = make(map[string]string, len(cs))
+			for _, c := range cs {
+				byKey[c.PublicKey] = c.Name
+			}
+		}
+	}
+
+	rows := make([]handshakeRow, 0, len(events))
+	for _, e := range events {
+		if name, ok := byKey[e.PublicKey]; ok {
+			rows = append(rows, handshakeRow{TS: e.TS, Name: name})
+		} else {
+			rows = append(rows, handshakeRow{TS: e.TS, Name: shortenKey(e.PublicKey), Unknown: true})
+		}
+	}
+	return rows
+}
+
+// shortenKey truncates a 44-char base64 WireGuard public key to a glanceable
+// prefix for the "unknown peer" handshake fallback — the full key is unreadable
+// in a list but its first chars still distinguish one peer from another.
+func shortenKey(key string) string {
+	const n = 10
+	if len(key) <= n {
+		return key
+	}
+	return key[:n] + "…"
 }
 
 // aboutTabData is the view-model for the About tab. Four cards: EC2 metadata

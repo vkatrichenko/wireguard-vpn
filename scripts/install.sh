@@ -47,7 +47,11 @@
 #   DASHBOARD_DISCORD_WEBHOOK_URL.
 #
 # Usage:
-#   sudo bash install.sh
+#   sudo bash install.sh                       # install or update (default)
+#   sudo bash install.sh --uninstall           # remove stack, KEEP data
+#   sudo bash install.sh --purge               # remove stack AND wipe data
+#   sudo bash install.sh --dashboard-only      # restrict remove to the dashboard
+#   sudo bash install.sh --dashboard-only --purge   # wipe only dashboard data
 #
 set -euo pipefail
 
@@ -56,6 +60,42 @@ if [ "$(id -u)" -ne 0 ]; then
   echo "FATAL: install.sh must run as root (try: sudo bash install.sh)" >&2
   exit 1
 fi
+
+# --- Action dispatch: parse args into an action + modifiers -----------------
+# No args        -> install/update (the default). The EC2 user-data wrapper
+#                   invokes `bash install.sh` with NO args, so this path must
+#                   stay byte-for-byte the install/update flow.
+# --uninstall    -> remove the stack but KEEP data (server key, wg0.conf, DB).
+# --purge        -> remove the stack AND wipe data (implies remove).
+# --dashboard-only -> modifier for remove: tear down only the dashboard and
+#                   leave the WireGuard tunnel running.
+# Unknown flag   -> usage on stderr, non-zero exit.
+# All vars defaulted up-front so the rest of the script is set -u safe.
+ACTION=install
+PURGE=0
+DASHBOARD_ONLY=0
+usage() {
+  cat >&2 <<'USAGE_EOF'
+Usage: install.sh [--uninstall | --purge] [--dashboard-only]
+  (no args)         install or update WireGuard (+ dashboard when pinned)
+  --uninstall       stop services and remove artifacts; KEEP data
+  --purge           --uninstall and also wipe data (server key, wg0.conf, DB)
+  --dashboard-only  restrict remove/purge to the dashboard; leave WireGuard up
+USAGE_EOF
+}
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --uninstall) ACTION=remove ;;
+    --purge) ACTION=remove; PURGE=1 ;;
+    --dashboard-only) DASHBOARD_ONLY=1 ;;
+    *)
+      echo "FATAL: unknown argument: $1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+  shift
+done
 
 # --- Env contract: read from environment, apply defaults -------------------
 WG_SERVER_NET="${WG_SERVER_NET:-172.16.15.1/24}"
@@ -94,6 +134,82 @@ DASHBOARD_DISCORD_WEBHOOK_URL="${DASHBOARD_DISCORD_WEBHOOK_URL:-}"
 WG_DIR=/etc/wireguard
 WG_CONF="$WG_DIR/wg0.conf"
 WG_KEY_FILE="$WG_DIR/server.key"
+
+# --- remove(): idempotent teardown -----------------------------------------
+# Stop/disable services and delete installed artifacts. Every step is guarded
+# (existence checks / `|| true`) so it never hard-fails on already-absent units
+# or files — safe to re-run and safe on a partially-installed host. Data is KEPT
+# by default (server key, wg0.conf, dashboard client DB) so a later reinstall
+# keeps the same server identity; --purge additionally wipes it. --dashboard-only
+# restricts teardown to the dashboard and leaves the WireGuard tunnel running.
+# Ends with a daemon-reload so systemd forgets the removed units.
+remove() {
+  echo "Removing WireGuard stack (purge=${PURGE}, dashboard-only=${DASHBOARD_ONLY})..."
+
+  # Dashboard teardown (always — there is no WG-only flavour of remove). Every
+  # step is guarded, so a host that never had the dashboard installed is fine.
+  systemctl disable --now wireguard-dashboard.service 2>/dev/null || true
+  systemctl reset-failed wireguard-dashboard.service 2>/dev/null || true
+  rm -f /etc/systemd/system/wireguard-dashboard.service
+  rm -f /usr/local/sbin/wg-sync
+  rm -f /etc/sudoers.d/wireguard-dashboard
+  rm -rf /opt/wireguard-dashboard
+  if id -u wireguard-dashboard >/dev/null 2>&1; then
+    userdel wireguard-dashboard 2>/dev/null || true
+  fi
+
+  # WireGuard teardown — skipped under --dashboard-only so the tunnel keeps
+  # running while only the dashboard is removed.
+  if [ "$DASHBOARD_ONLY" -eq 0 ]; then
+    systemctl disable --now wg-quick@wg0.service 2>/dev/null || true
+  fi
+
+  # Data: KEEP by default. --purge wipes it.
+  if [ "$PURGE" -eq 1 ]; then
+    # Dashboard data (client DB + rendered clients.json / alerts.env) — always
+    # purged when --purge, regardless of --dashboard-only.
+    rm -rf /var/lib/wireguard-dashboard
+    rm -rf /etc/wireguard-dashboard
+    # WireGuard identity (server key + conf) — purged only when NOT
+    # --dashboard-only, so `--dashboard-only --purge` keeps the WG key/conf.
+    if [ "$DASHBOARD_ONLY" -eq 0 ]; then
+      rm -f "$WG_CONF" "$WG_KEY_FILE"
+    fi
+  fi
+
+  systemctl daemon-reload
+
+  # Summary: what was removed vs kept.
+  echo "==========================================================="
+  if [ "$DASHBOARD_ONLY" -eq 1 ]; then
+    echo "Removed: dashboard (service, unit, wg-sync, sudoers, /opt, user)."
+    echo "Kept:    WireGuard tunnel left running."
+  else
+    echo "Removed: dashboard + WireGuard service and installed artifacts."
+  fi
+  if [ "$PURGE" -eq 1 ]; then
+    if [ "$DASHBOARD_ONLY" -eq 1 ]; then
+      echo "Purged:  dashboard data (/var/lib/wireguard-dashboard, /etc/wireguard-dashboard)."
+      echo "Kept:    WireGuard identity (${WG_CONF}, ${WG_KEY_FILE})."
+    else
+      echo "Purged:  dashboard data + WireGuard identity (server key + wg0.conf)."
+      echo "Kept:    nothing — full wipe. A reinstall mints a new server key."
+    fi
+  else
+    echo "Kept:    /etc/wireguard (server key + wg0.conf) and"
+    echo "         /var/lib/wireguard-dashboard (client DB) — reinstall keeps identity."
+  fi
+  echo "==========================================================="
+}
+
+# --- Dispatch: remove actions run here and exit before the install body -----
+# The root check above already gated us; remove still requires root. The
+# install/update body (package install, wg0.conf, dashboard, success summary)
+# is reached only when ACTION=install (the no-arg default).
+if [ "$ACTION" = "remove" ]; then
+  remove
+  exit 0
+fi
 
 # --- Wait for the apt/dpkg lock (unattended-upgrades on fresh boots) --------
 echo "Waiting for apt lock..."
@@ -163,7 +279,28 @@ echo "Egress interface: $ENI"
 # --- Write /etc/wireguard/wg0.conf -----------------------------------------
 # NAT + forwarding rules are carried over verbatim from the EC2 user-data; only
 # the interface name (ENI) and the UDP dport (WG_SERVER_PORT) are substituted.
-cat > "$WG_CONF" <<WG_EOF
+#
+# Fresh-vs-update is keyed on whether wg0.conf already exists. The peer set is
+# re-seeded from WG_PEERS ONLY on a fresh install; on an update the on-disk
+# [Peer] stanzas (dashboard-managed or otherwise) are preserved so a rerun never
+# clobbers the live peer set with the (possibly empty) WG_PEERS env. Server-key
+# reuse is already handled above (env -> persisted server.key -> generate) and
+# is unchanged here.
+
+# Capture the existing peer set BEFORE overwriting the conf (update path only):
+# the first [Peer] line to EOF — the same merge the wg-sync helper performs. A
+# zero-peer conf yields an empty capture, which is valid.
+IS_UPDATE=0
+EXISTING_PEERS=""
+if [ -f "$WG_CONF" ]; then
+  IS_UPDATE=1
+  EXISTING_PEERS="$(awk '/^\[Peer\]/{p=1} p' "$WG_CONF")"
+fi
+
+# Render the new [Interface] block from the current env. Command substitution
+# strips trailing newlines, so re-runs converge to the same file (no blank-line
+# accumulation), exactly as the wg-sync helper relies on.
+NEW_INTERFACE="$(cat <<WG_EOF
 [Interface]
 Address = ${WG_SERVER_NET}
 PrivateKey = ${WG_SERVER_PRIVATE_KEY}
@@ -181,13 +318,27 @@ PostDown = iptables -t nat -D POSTROUTING -o ${ENI} -j MASQUERADE
 PostDown = ip6tables -D FORWARD -i wg0 -j ACCEPT
 PostDown = ip6tables -t nat -D POSTROUTING -o ${ENI} -j MASQUERADE
 WG_EOF
+)"
 
-# Append peer stanzas verbatim (empty is valid: zero-peer server). Written
-# separately from the heredoc so nothing in WG_PEERS is shell-expanded.
-{
-  printf '\n'
-  printf '%s\n' "$WG_PEERS"
-} >> "$WG_CONF"
+if [ "$IS_UPDATE" -eq 1 ]; then
+  # Update: write the re-rendered [Interface] + a blank-line separator + the
+  # PRESERVED on-disk peers. WG_PEERS is intentionally NOT re-applied here — the
+  # live/dashboard-managed peer set wins on a rerun.
+  {
+    printf '%s\n' "$NEW_INTERFACE"
+    printf '\n'
+    printf '%s\n' "$EXISTING_PEERS"
+  } > "$WG_CONF"
+else
+  # Fresh install: write [Interface] + a blank-line separator + the WG_PEERS
+  # stanzas verbatim (empty is valid: zero-peer server). Written via printf so
+  # nothing in WG_PEERS is shell-expanded — today's behaviour, unchanged.
+  {
+    printf '%s\n' "$NEW_INTERFACE"
+    printf '\n'
+    printf '%s\n' "$WG_PEERS"
+  } > "$WG_CONF"
+fi
 
 chmod 0600 "$WG_CONF"
 
@@ -197,8 +348,18 @@ if ! grep -q '^net.ipv4.ip_forward=1' /etc/sysctl.conf; then
 fi
 sysctl -p
 
-# --- Start WireGuard --------------------------------------------------------
-systemctl enable --now wg-quick@wg0.service
+# --- Start / apply WireGuard ------------------------------------------------
+# Fresh install: enable + start the unit. Update: if the tunnel is already
+# active, apply the new config in place with `wg syncconf` (fed a wg-native
+# config via `wg-quick strip`) so existing tunnels are NOT dropped — the same
+# live-apply the wg-sync helper performs. If it's an update but the unit isn't
+# active (e.g. a rerun after a reboot before wg came up), fall back to enable
+# --now so the tunnel still starts.
+if [ "$IS_UPDATE" -eq 1 ] && systemctl is-active --quiet wg-quick@wg0.service; then
+  wg syncconf wg0 <(wg-quick strip wg0)
+else
+  systemctl enable --now wg-quick@wg0.service
+fi
 
 # --- Success gate -----------------------------------------------------------
 if ! systemctl is-active --quiet wg-quick@wg0.service; then
@@ -433,10 +594,59 @@ RestartSec=5s
 WantedBy=multi-user.target
 UNIT_EOF
 
-  # 10. Reload systemd and bring the unit up.
+  # 10. Reload systemd, enable at boot, and (re)start the unit. `restart` —
+  #     not `enable --now` — is deliberate: `--now` only *starts* an inactive
+  #     unit and is a no-op when it is already running, so a re-run that ships a
+  #     NEW binary would leave the OLD process live until a reboot. `restart`
+  #     starts it if stopped and swaps the process if running, so re-running the
+  #     installer always picks up the freshly downloaded binary.
   systemctl daemon-reload
-  systemctl enable --now wireguard-dashboard.service
+  systemctl enable wireguard-dashboard.service
+  systemctl restart wireguard-dashboard.service
 fi
+
+# --- Example first-client config (template only) ----------------------------
+# Print an illustrative wg-quick client config to stdout so the operator can
+# connect the FIRST client straight from the install output — the chicken-and-egg
+# case, since the dashboard is VPN-gated (you can't reach it until you're already
+# a peer). This is a TEMPLATE only: no keypair is generated and no private key is
+# ever created or stored on the server. Reuses values already computed above
+# (SERVER_PUBLIC_KEY, WG_SERVER_PORT, WG_CLIENT_DNS, WG_SERVER_NET).
+#
+# First-client IP: assume the server holds the first host of WG_SERVER_NET (the
+# conventional `.1`), so the first client takes the next address (`.1` -> `.2`).
+# For the default 172.16.15.1/24 this yields 172.16.15.2/32.
+emit_example_client_config() {
+  local server_host net_prefix last_octet first_client_ip
+  server_host="${WG_SERVER_NET%/*}"   # drop CIDR suffix -> 172.16.15.1
+  net_prefix="${server_host%.*}"      # leading octets   -> 172.16.15
+  last_octet="${server_host##*.}"     # final octet      -> 1
+  first_client_ip="${net_prefix}.$((last_octet + 1))/32"
+
+  echo "Example client config (first peer):"
+  echo "-----------------------------------------------------------"
+  # Unquoted heredoc: only the ${...} tokens below expand. The <placeholder>
+  # tokens carry no '$', so they stay literal (the operator fills them in).
+  cat <<CLIENT_EOF
+[Interface]
+PrivateKey = <paste the client's private key here>
+Address = ${first_client_ip}
+DNS = ${WG_CLIENT_DNS}
+
+[Peer]
+PublicKey = ${SERVER_PUBLIC_KEY}
+Endpoint = <server-public-ip>:${WG_SERVER_PORT}
+# Full-tunnel (route all traffic). Split-tunnel alternative: route only the VPN
+# overlay, e.g. AllowedIPs = ${net_prefix}.0/24
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+CLIENT_EOF
+  echo "-----------------------------------------------------------"
+  # The server never holds the client's private key: generate the keypair off-host
+  # and register only the PUBLIC key (dashboard, or the WG_PEERS env on reinstall).
+  echo "Hint: generate the keypair off-host with 'wg genkey | tee privatekey | wg pubkey',"
+  echo "      then register the client's PUBLIC key via the dashboard or the WG_PEERS env."
+}
 
 echo "==========================================================="
 echo "WireGuard server is up."
@@ -447,3 +657,6 @@ if [ -n "${DASHBOARD_RELEASE_TAG:-}" ]; then
   echo "Dashboard URL     : http://${WG_SERVER_NET%/*}:${DASHBOARD_PORT}"
 fi
 echo "==========================================================="
+# Printed on BOTH the WG-only and dashboard paths — the server (and thus this
+# example) always exists regardless of whether the dashboard was installed.
+emit_example_client_config

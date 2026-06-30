@@ -144,6 +144,19 @@
     });
   });
 
+  // Inline client-edit toggle (spec 016 req 2.2): Edit / Cancel reveal or hide
+  // the full-width edit row beneath a client. The form is server-rendered in
+  // the #clients fragment and re-rendered on every swap, so this only flips
+  // visibility — no fetch. The Edit button sits in .client-manage (which
+  // stopPropagations), so toggling never trips the row's detail-expand hx-get.
+  document.body.addEventListener('click', function (event) {
+    var toggle = event.target.closest('.client-edit-toggle');
+    if (!toggle) return;
+    var target = document.getElementById(toggle.dataset.editTarget);
+    if (!target) return;
+    target.classList.toggle('hidden');
+  });
+
   // Client-detail reveal: drop the .hidden class once htmx swaps the fragment
   // in so the detail row becomes visible.
   document.body.addEventListener('htmx:afterSwap', function (event) {
