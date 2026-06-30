@@ -2,13 +2,12 @@
 #
 # EC2 user-data — thin AWS wrapper around the shared, portable installer at
 # scripts/install.sh, which is fetched at boot from raw GitHub at a pinned ref
-# and SHA256-verified before it runs (the script is NOT embedded — that blew
-# past EC2's 16 KB user-data cap). All the WireGuard server + dashboard
-# provisioning logic lives in that script; this wrapper only handles the
-# AWS-specific glue: IMDSv2 metadata, mapping the Terraform-substituted values
-# onto the script's env contract, fetching + verifying + running the script as
-# an isolated subprocess, installing the AWS CLI, and signalling readiness to S3
-# for the health check.
+# (the script is NOT embedded — that blew past EC2's 16 KB user-data cap). All
+# the WireGuard server + dashboard provisioning logic lives in that script; this
+# wrapper only handles the AWS-specific glue: IMDSv2 metadata, mapping the
+# Terraform-substituted values onto the script's env contract, fetching + running
+# the script as an isolated subprocess, installing the AWS CLI, and signalling
+# readiness to S3 for the health check.
 
 # Wait for background updates to finish (unattended-upgrades) before our own
 # apt work below. The fetched install.sh waits again internally before its
@@ -42,7 +41,7 @@ export WG_SERVER_NET="${wg_server_net}"
 export WG_SERVER_PORT="${wg_server_port}"
 export WG_SERVER_PRIVATE_KEY="${wg_server_private_key}"
 export DASHBOARD_RELEASE_TAG="${dashboard_release_tag}"
-export DASHBOARD_RELEASE_REPO="${dashboard_release_repo}"
+export DASHBOARD_RELEASE_REPO="${github_repo}"
 export DASHBOARD_HOST_LABEL="${dashboard_host_label}"
 export DASHBOARD_ALERT_DISK_PCT="${dashboard_alert_disk_pct}"
 export DASHBOARD_ALERT_CPU_PCT="${dashboard_alert_cpu_pct}"
@@ -73,22 +72,19 @@ CLIENTS_EOF
 )"
 export CLIENTS_JSON
 
-# --- Fetch, verify, and run the shared installer as a subprocess -----------
+# --- Fetch and run the shared installer as a subprocess ---------------------
 # install.sh is pulled from raw GitHub at the Terraform-pinned repo + ref
-# (install_script_repo / install_script_ref are templatefile substitutions, so a
-# single-brace interpolation is correct), then checked against the pinned digest
-# before it runs. `sha256sum -c -` reads the expected "<digest>  <path>" line
-# from stdin; a download failure or checksum mismatch aborts the boot so a
-# tampered or wrong-ref script never runs as root. Running it with `bash <file>`
-# (not sourced) isolates its `set -euo pipefail` from this wrapper, while the
-# `|| { ...; exit 1; }` propagates a hard failure so the .ready signal below is
-# never emitted on a failed install.
+# (github_repo / install_script_ref are templatefile substitutions, so a
+# single-brace interpolation is correct). A download failure aborts the boot so
+# a missing or wrong-ref script never reaches the run step. Running it with
+# `bash <file>` (not sourced) isolates its `set -euo pipefail` from this wrapper,
+# while the `|| { ...; exit 1; }` propagates a hard failure so the .ready signal
+# below is never emitted on a failed install.
 mkdir -p /opt/wg-install
-if ! curl -fsSL "https://raw.githubusercontent.com/${install_script_repo}/${install_script_ref}/scripts/install.sh" -o /opt/wg-install/install.sh; then
+if ! curl -fsSL "https://raw.githubusercontent.com/${github_repo}/${install_script_ref}/scripts/install.sh" -o /opt/wg-install/install.sh; then
   echo "FATAL: failed to download install.sh" >&2
   exit 1
 fi
-echo "${install_script_sha256}  /opt/wg-install/install.sh" | sha256sum -c - || { echo "FATAL: install.sh checksum mismatch" >&2; exit 1; }
 bash /opt/wg-install/install.sh || { echo "FATAL: install.sh failed" >&2; exit 1; }
 
 # --- AWS CLI (arch-aware: AWS publishes one installer per `uname -m` value) --
