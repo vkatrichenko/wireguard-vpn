@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"wireguard-dashboard/internal/db"
+	"wireguard-dashboard/internal/serverinfo"
 	"wireguard-dashboard/internal/wgconfig"
 )
 
@@ -25,9 +26,11 @@ import (
 //     must not render a config against nothing.
 //   - 500 — the manifest read failed (we can't confirm or deny the name) or
 //     config assembly failed unexpectedly.
-//   - 503 — a server-derived input is unavailable (public IP, server public
-//     key, or VPC CIDR). We refuse to emit a config with a blank/wrong field
-//     rather than hand the operator a silently-broken file.
+//   - 503 — a server-derived input is unavailable (public IP or server public
+//     key). We refuse to emit a config with a blank/wrong field rather than
+//     hand the operator a silently-broken file. The DNS line is NOT a 503
+//     gate: on AWS it is the VPC-derived resolver, off-AWS it falls back to
+//     WG_CLIENT_DNS, so a missing VPC CIDR degrades rather than fails.
 func (s *server) handleGetClientConfig(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
@@ -71,14 +74,42 @@ func (s *server) handleGetClientConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The VPC CIDR drives the derived DNS resolver. A read failure or empty
-	// value is a 503 for the same reason — a wrong/blank DNS line is worse than
-	// no file.
-	vpcCIDR, err := s.serverinfoSvc.VPCCIDR(r.Context())
-	if err != nil || vpcCIDR == "" {
-		slog.Error("GET /api/clients/{name}/config: vpc cidr unavailable", "err", err)
-		http.Error(w, "vpc cidr unavailable", http.StatusServiceUnavailable)
-		return
+	// Compute the DNS line and split-tunnel routes per environment. The overlay
+	// /24 is always derived from WG_SERVER_NET (falling back to the package
+	// default if the Service carries none or an unparseable value).
+	serverNet := s.serverinfoSvc.ServerNet
+	if serverNet == "" {
+		serverNet = wgconfig.DefaultServerNet
+	}
+	overlay, err := wgconfig.OverlaySubnet(serverNet)
+	if err != nil {
+		// Only reachable if WG_SERVER_NET is malformed; fall back to the
+		// default overlay rather than fail the download.
+		slog.Warn("GET /api/clients/{name}/config: bad server net, using default overlay",
+			"server_net", serverNet, "err", err)
+		overlay, _ = wgconfig.OverlaySubnet(wgconfig.DefaultServerNet)
+	}
+
+	// On AWS the VPC CIDR yields the derived resolver and a [overlay, vpc]
+	// split route. Off-AWS, VPCCIDR short-circuits with ErrNotOnEC2 (or returns
+	// empty), and we fall back to WG_CLIENT_DNS with an overlay-only split.
+	var dns string
+	var splitRoutes []string
+	if vpcCIDR, vpcErr := s.serverinfoSvc.VPCCIDR(r.Context()); vpcErr == nil && vpcCIDR != "" {
+		resolver, resErr := wgconfig.ResolverForVPC(vpcCIDR)
+		if resErr != nil {
+			slog.Error("GET /api/clients/{name}/config: vpc resolver derivation failed", "err", resErr)
+			http.Error(w, resErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		dns = resolver
+		splitRoutes = []string{overlay, vpcCIDR}
+	} else {
+		dns = s.serverinfoSvc.ClientDNS
+		if dns == "" {
+			dns = serverinfo.DefaultClientDNS
+		}
+		splitRoutes = []string{overlay}
 	}
 
 	endpoint := net.JoinHostPort(info.PublicIP, strconv.Itoa(info.Port))
@@ -88,7 +119,8 @@ func (s *server) handleGetClientConfig(w http.ResponseWriter, r *http.Request) {
 		mode,
 		info.ServerPublicKey,
 		endpoint,
-		vpcCIDR,
+		dns,
+		splitRoutes,
 	)
 	if err != nil {
 		slog.Error("GET /api/clients/{name}/config: build failed", "err", err)

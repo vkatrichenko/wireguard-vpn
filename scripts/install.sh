@@ -30,6 +30,14 @@
 #   DASHBOARD_PORT         dashboard bind port           (default 8080)
 #   CLIENTS_JSON           clients manifest written to   (default [])
 #                          /etc/wireguard-dashboard/clients.json
+#   WG_CLIENT_DNS          DNS for generated client cfgs (default 1.1.1.1; always
+#                          emitted into the dashboard unit)
+#   WG_PUBLIC_ENDPOINT     public host/IP for the server (default empty -> not
+#                          -endpoint card + client configs   emitted; dashboard
+#                          falls back to its own discovery)
+#   WG_PUBLIC_IP_ECHO_URL  override for the public-IP echo (default empty -> not
+#                          service                           emitted; Go binary
+#                          defaults to https://api.ipify.org)
 #   Alert knobs / transport secrets (all optional; each written to alerts.env
 #   only when set): DASHBOARD_HOST_LABEL, DASHBOARD_ALERT_DISK_PCT,
 #   DASHBOARD_ALERT_CPU_PCT, DASHBOARD_ALERT_CPU_SUSTAIN,
@@ -62,6 +70,13 @@ DASHBOARD_RELEASE_TAG="${DASHBOARD_RELEASE_TAG:-}"
 DASHBOARD_RELEASE_REPO="${DASHBOARD_RELEASE_REPO:-}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8080}"
 CLIENTS_JSON="${CLIENTS_JSON:-[]}"
+# Off-AWS discovery for the dashboard — only consulted when the dashboard is
+# installed (harmless reads otherwise). WG_CLIENT_DNS has a default and is always
+# emitted into the unit; the other two have no default and are emitted only when
+# non-empty (empty -> the Go binary falls back to its own discovery / defaults).
+WG_CLIENT_DNS="${WG_CLIENT_DNS:-1.1.1.1}"
+WG_PUBLIC_ENDPOINT="${WG_PUBLIC_ENDPOINT:-}"
+WG_PUBLIC_IP_ECHO_URL="${WG_PUBLIC_IP_ECHO_URL:-}"
 # Alert knobs / transport secrets — all optional; each is written to alerts.env
 # only when non-empty (runtime equivalent of user-data's `%{ if … ~}` gates).
 DASHBOARD_HOST_LABEL="${DASHBOARD_HOST_LABEL:-}"
@@ -369,11 +384,30 @@ SUDOERS_EOF
   install -o root -g root -m 0755 "$DL_DIR/wireguard-dashboard-$GOARCH" /opt/wireguard-dashboard/bin/wireguard-dashboard
   rm -rf "$DL_DIR"
 
-  # 8. Drop the systemd unit. Bound to the WG tunnel IP via the derived
+  # 8. Pre-render the optional discovery Environment= lines. WG_PUBLIC_ENDPOINT
+  #    and WG_PUBLIC_IP_ECHO_URL have no defaults, so each emits a line only when
+  #    set (unset -> the Go binary falls back to its own discovery). The unit
+  #    heredoc below is a single unquoted heredoc and can't host a bash `if`, so
+  #    we build the lines into a variable here (empty when both are unset) and
+  #    interpolate it inline — the runtime form of the alerts.env gating above.
+  #    Each rendered line carries its own trailing newline; an empty variable
+  #    leaves no blank Environment= line.
+  DASHBOARD_OPTIONAL_ENV=""
+  if [ -n "$WG_PUBLIC_ENDPOINT" ]; then
+    DASHBOARD_OPTIONAL_ENV="${DASHBOARD_OPTIONAL_ENV}Environment=WG_PUBLIC_ENDPOINT=${WG_PUBLIC_ENDPOINT}
+"
+  fi
+  if [ -n "$WG_PUBLIC_IP_ECHO_URL" ]; then
+    DASHBOARD_OPTIONAL_ENV="${DASHBOARD_OPTIONAL_ENV}Environment=WG_PUBLIC_IP_ECHO_URL=${WG_PUBLIC_IP_ECHO_URL}
+"
+  fi
+
+  # 9. Drop the systemd unit. Bound to the WG tunnel IP via the derived
   #    LISTEN_ADDR; Requires/After wg-quick@wg0 ensures the tunnel address is
   #    bindable before start and that the dashboard restarts when WG bounces.
-  #    Heredoc is unquoted so ${LISTEN_ADDR} interpolates — the rest of the unit
-  #    body contains no other shell-special tokens.
+  #    Heredoc is unquoted so ${LISTEN_ADDR}, ${WG_SERVER_NET}, ${WG_CLIENT_DNS}
+  #    and the pre-rendered ${DASHBOARD_OPTIONAL_ENV} interpolate — the rest of
+  #    the unit body contains no other shell-special tokens.
   cat > /etc/systemd/system/wireguard-dashboard.service <<UNIT_EOF
 [Unit]
 Description=WireGuard VPN dashboard
@@ -388,7 +422,8 @@ Group=wireguard-dashboard
 ExecStart=/opt/wireguard-dashboard/bin/wireguard-dashboard
 Environment=LISTEN_ADDR=${LISTEN_ADDR}
 Environment=WG_SERVER_NET=${WG_SERVER_NET}
-# Leading '-' makes the file optional: the unit starts even if alerts.env is
+Environment=WG_CLIENT_DNS=${WG_CLIENT_DNS}
+${DASHBOARD_OPTIONAL_ENV}# Leading '-' makes the file optional: the unit starts even if alerts.env is
 # absent, so alerting is strictly opt-in via the seeded knobs/webhook above.
 EnvironmentFile=-/etc/wireguard-dashboard/alerts.env
 Restart=on-failure
@@ -398,7 +433,7 @@ RestartSec=5s
 WantedBy=multi-user.target
 UNIT_EOF
 
-  # 9. Reload systemd and bring the unit up.
+  # 10. Reload systemd and bring the unit up.
   systemctl daemon-reload
   systemctl enable --now wireguard-dashboard.service
 fi

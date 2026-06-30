@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -31,12 +32,45 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"wireguard-dashboard/internal/wgconfig"
 )
 
 // Port is the UDP port WireGuard listens on. Hardcoded to match the value
 // baked into the cloud-init user-data and the EC2 security-group rule; if
 // either of those ever changes, this constant must move with them.
 const Port = 51820
+
+// ErrNotOnEC2 is returned by the EC2-only metadata methods (InstanceType,
+// AvailabilityZone, AMIID, VPCCIDR) when the host is not running on EC2 — the
+// IMDSv2 token probe (onEC2) came back negative. It is a SENTINEL the
+// handlers test for with errors.Is so they can render a calm "Not on EC2"
+// state instead of a red error box (and skip slog.Error), distinguishing the
+// expected off-AWS case from a genuine IMDS failure on EC2. The methods
+// return it WITHOUT attempting the HTTP call, so the 2s metadata hang never
+// happens off-AWS.
+var ErrNotOnEC2 = errors.New("serverinfo: not running on EC2")
+
+// Public-IP and EC2-detection defaults. DefaultEchoURL is the external
+// echo endpoint used to discover the host's public IP off-AWS (WG_PUBLIC_IP_ECHO_URL);
+// DefaultClientDNS is the resolver written into generated client configs when
+// there is no VPC to derive one from (WG_CLIENT_DNS). Both are exported so
+// main.go can seed its getenv defaults from the single source of truth.
+const (
+	DefaultEchoURL   = "https://api.ipify.org"
+	DefaultClientDNS = "1.1.1.1"
+
+	// echoTimeout caps the external public-IP echo request. Slightly more
+	// generous than the IMDS timeout because the echo endpoint is a real
+	// internet round-trip, not a link-local call.
+	echoTimeout = 3 * time.Second
+
+	// ec2ProbeTimeout caps the single IMDSv2 token PUT used to detect EC2.
+	// Kept short (1s, vs httpTimeout's 2s) because off-AWS this endpoint is a
+	// black hole — the probe runs at most once (cached via sync.Once), but a
+	// tight bound keeps even that one detection fast.
+	ec2ProbeTimeout = 1 * time.Second
+)
 
 const (
 	imdsBaseURL  = "http://169.254.169.254/latest"
@@ -121,6 +155,19 @@ type imdsClient interface {
 	VPCIPv4CIDR(ctx context.Context) (string, error)
 }
 
+// echoFunc fetches the host's public IP from an external echo endpoint. The
+// production implementation (newEchoClient) GETs WG_PUBLIC_IP_ECHO_URL, trims
+// the body, and validates it parses as a net.IP. Injectable as a field on
+// Service (mirroring runFunc) so tests can return canned values without an
+// outbound HTTP call.
+type echoFunc func(ctx context.Context) (string, error)
+
+// ec2ProbeFunc performs ONE IMDSv2 token PUT to detect whether the host is on
+// EC2. A nil error means yes. Injectable (an exported Service field) so tests
+// can force the off-AWS path — returning ErrNotOnEC2 — without touching the
+// network. The result is cached by onEC2 via sync.Once.
+type ec2ProbeFunc func(ctx context.Context) error
+
 // runFunc executes an external command and returns its stdout. Mirrors the
 // signature of exec.CommandContext(...).Output() closely enough that the
 // production wiring is a one-liner, while leaving tests free to substitute
@@ -157,8 +204,40 @@ type BuildInfo struct {
 // literal with fakes; production code should use New() to get the real
 // implementations.
 type Service struct {
-	// IMDS-backed readers (public IP, instance type, AZ, AMI id).
+	// IMDS-backed readers (public IP, instance type, AZ, AMI id). Only used
+	// when onEC2 reports true; off-AWS the EC2-only methods short-circuit.
 	IMDS imdsClient
+
+	// Echo discovers the host's public IP off-AWS via an external echo
+	// endpoint. Nil is tolerated (resolvePublicIP errors only if it is the
+	// last resort and unwired); New() always wires it.
+	Echo echoFunc
+
+	// EC2Probe performs the cached IMDSv2 token PUT behind onEC2. A nil probe
+	// (a bare Service{} test literal) is treated as "on EC2" so IMDS-driven
+	// tests resolve via the EC2 branch; New() wires the real probe.
+	EC2Probe ec2ProbeFunc
+
+	// ec2Once/ec2OK cache the EC2-detection result so the (off-AWS) token-PUT
+	// hang happens at most once per process.
+	ec2Once sync.Once
+	ec2OK   bool
+
+	// PublicEndpoint is the operator-set authoritative public host/IP
+	// (WG_PUBLIC_ENDPOINT). When non-empty it wins over IMDS and the echo
+	// fallback. A bare host or a "host:port" are both accepted — only the host
+	// part is used for the IP value (see publicEndpointHost).
+	PublicEndpoint string
+
+	// ClientDNS is the resolver written into generated client configs when no
+	// VPC CIDR is available to derive one (WG_CLIENT_DNS). Read by the config
+	// handler's off-AWS branch.
+	ClientDNS string
+
+	// ServerNet is the WireGuard server-host CIDR (WG_SERVER_NET, e.g.
+	// "172.16.15.1/24"). The config handler derives the split-tunnel overlay
+	// /24 from it via wgconfig.OverlaySubnet.
+	ServerNet string
 
 	// Sudo-gated command runner used to fetch the WireGuard public key.
 	Runner runFunc
@@ -172,15 +251,45 @@ type Service struct {
 	Build BuildInfo
 }
 
+// Config carries the operator-tunable, env-seeded knobs New() wires onto the
+// Service. Every field is optional — New() applies a production default for any
+// left empty — so main.go can pass raw getenv values without pre-defaulting.
+type Config struct {
+	PublicEndpoint string // WG_PUBLIC_ENDPOINT
+	EchoURL        string // WG_PUBLIC_IP_ECHO_URL
+	ClientDNS      string // WG_CLIENT_DNS
+	ServerNet      string // WG_SERVER_NET
+}
+
 // New returns a Service wired with the production defaults: an httpIMDS
 // hitting the real link-local metadata endpoint, an exec.CommandContext-based
-// Runner, the real unix.Uname syscall, and os.ReadFile for /etc/os-release.
-func New() *Service {
+// Runner, the real unix.Uname syscall, os.ReadFile for /etc/os-release, the
+// real public-IP echo client, and the real IMDSv2 EC2 probe. The Config knobs
+// fall back to the package defaults when empty so an unset environment behaves
+// exactly as the EC2 deployment always has.
+func New(cfg Config) *Service {
+	echoURL := cfg.EchoURL
+	if echoURL == "" {
+		echoURL = DefaultEchoURL
+	}
+	clientDNS := cfg.ClientDNS
+	if clientDNS == "" {
+		clientDNS = DefaultClientDNS
+	}
+	serverNet := cfg.ServerNet
+	if serverNet == "" {
+		serverNet = wgconfig.DefaultServerNet
+	}
 	return &Service{
-		IMDS:     newHTTPIMDS(),
-		Runner:   defaultRunner,
-		Uname:    unix.Uname,
-		ReadFile: os.ReadFile,
+		IMDS:           newHTTPIMDS(),
+		Echo:           newEchoClient(echoURL),
+		EC2Probe:       defaultEC2Probe,
+		PublicEndpoint: cfg.PublicEndpoint,
+		ClientDNS:      clientDNS,
+		ServerNet:      serverNet,
+		Runner:         defaultRunner,
+		Uname:          unix.Uname,
+		ReadFile:       os.ReadFile,
 	}
 }
 
@@ -189,6 +298,12 @@ func New() *Service {
 // the call — partial results would silently mislead the operator (e.g. an
 // empty public IP looks like a bug rather than a fetch failure), so we
 // surface the first error we see.
+//
+// The public IP is resolved via resolvePublicIP, NOT hard-wired to IMDS: an
+// operator override (WG_PUBLIC_ENDPOINT) wins, then IMDS on EC2, then the
+// external echo endpoint off-AWS. So Get no longer fails just because the
+// metadata service is absent — but the server public key (via `wg show`)
+// remains required.
 func (s *Service) Get(ctx context.Context) (ServerInfo, error) {
 	var (
 		wg        sync.WaitGroup
@@ -201,7 +316,7 @@ func (s *Service) Get(ctx context.Context) (ServerInfo, error) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		publicIP, ipErr = s.IMDS.PublicIP(ctx)
+		publicIP, ipErr = s.resolvePublicIP(ctx)
 	}()
 	go func() {
 		defer wg.Done()
@@ -219,13 +334,107 @@ func (s *Service) Get(ctx context.Context) (ServerInfo, error) {
 	}, nil
 }
 
+// resolvePublicIP determines the server's reachable public IP, in priority
+// order: (a) the operator's WG_PUBLIC_ENDPOINT host, if set; (b) the IMDS
+// public-IPv4 when running on EC2; (c) the external echo endpoint otherwise.
+// Off-AWS with no echo wired it errors — the caller (Get) treats an empty/
+// errored public IP as fatal, since a config or card with a blank endpoint is
+// worse than a loud failure.
+func (s *Service) resolvePublicIP(ctx context.Context) (string, error) {
+	if host := s.publicEndpointHost(); host != "" {
+		return host, nil
+	}
+	if s.onEC2(ctx) {
+		return s.IMDS.PublicIP(ctx)
+	}
+	if s.Echo != nil {
+		return s.Echo(ctx)
+	}
+	return "", errors.New("serverinfo: no public IP source (not on EC2, WG_PUBLIC_ENDPOINT unset, no echo client)")
+}
+
+// publicEndpointHost returns the host portion of the WG_PUBLIC_ENDPOINT
+// override, or "" when unset. A bare host/IP is returned as-is; a "host:port"
+// is split so only the host is used (the port is the fixed WireGuard 51820).
+func (s *Service) publicEndpointHost() string {
+	ep := strings.TrimSpace(s.PublicEndpoint)
+	if ep == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(ep); err == nil {
+		return host
+	}
+	return ep
+}
+
+// onEC2 reports whether the host is running on EC2, caching the result via
+// sync.Once so the IMDSv2 token PUT (a 2s black-hole off-AWS) is attempted at
+// most once per process. A nil EC2Probe (a bare Service{} test literal) is
+// treated as on-EC2 so IMDS-driven unit tests resolve through the EC2 branch
+// without wiring a probe; New() always wires the real probe.
+func (s *Service) onEC2(ctx context.Context) bool {
+	s.ec2Once.Do(func() {
+		if s.EC2Probe == nil {
+			s.ec2OK = true
+			return
+		}
+		s.ec2OK = s.EC2Probe(ctx) == nil
+	})
+	return s.ec2OK
+}
+
 // VPCCIDR returns the instance's primary VPC IPv4 CIDR (e.g. "10.23.0.0/16")
 // via IMDSv2. It is a separate call from Get (rather than a ServerInfo field)
 // because only the config-download path needs it: folding it into Get would
 // add a metadata round-trip — and a new failure mode — to every server-info
 // card render that doesn't care about the VPC CIDR.
+//
+// Off-AWS it short-circuits with ErrNotOnEC2 BEFORE any HTTP call, so the
+// config handler's "no VPC" branch (WG_CLIENT_DNS + overlay-only) is reached
+// instantly rather than after the metadata timeout.
 func (s *Service) VPCCIDR(ctx context.Context) (string, error) {
+	if !s.onEC2(ctx) {
+		return "", ErrNotOnEC2
+	}
 	return s.IMDS.VPCIPv4CIDR(ctx)
+}
+
+// EC2PublicIP returns the IMDS public-IPv4 for the About tab's EC2 card. It is
+// distinct from resolvePublicIP (which honours the WG_PUBLIC_ENDPOINT override
+// and the echo fallback): the EC2 card reports EC2 facts specifically, so off
+// AWS it short-circuits with ErrNotOnEC2 rather than substituting the echoed IP.
+func (s *Service) EC2PublicIP(ctx context.Context) (string, error) {
+	if !s.onEC2(ctx) {
+		return "", ErrNotOnEC2
+	}
+	return s.IMDS.PublicIP(ctx)
+}
+
+// InstanceType returns the EC2 instance type via IMDSv2, short-circuiting with
+// ErrNotOnEC2 off-AWS (no HTTP attempt — avoids the metadata hang).
+func (s *Service) InstanceType(ctx context.Context) (string, error) {
+	if !s.onEC2(ctx) {
+		return "", ErrNotOnEC2
+	}
+	return s.IMDS.InstanceType(ctx)
+}
+
+// AvailabilityZone returns the EC2 AZ via IMDSv2, short-circuiting with
+// ErrNotOnEC2 off-AWS.
+func (s *Service) AvailabilityZone(ctx context.Context) (string, error) {
+	if !s.onEC2(ctx) {
+		return "", ErrNotOnEC2
+	}
+	return s.IMDS.AvailabilityZone(ctx)
+}
+
+// AMIID returns the EC2 AMI id via IMDSv2, short-circuiting with ErrNotOnEC2
+// off-AWS.
+func (s *Service) AMIID(ctx context.Context) (string, error) {
+	if !s.onEC2(ctx) {
+		return "", ErrNotOnEC2
+	}
+	return s.IMDS.AMIID(ctx)
 }
 
 // Kernel reports the running kernel triple via unix.Uname. The C strings
@@ -330,6 +539,66 @@ func (s *Service) fetchServerPublicKey(ctx context.Context) (string, error) {
 // stderr via *exec.ExitError on a non-zero exit.
 func defaultRunner(ctx context.Context, name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).Output()
+}
+
+// newEchoClient returns the production echoFunc: a GET against the configured
+// echo URL that trims the body and validates it parses as a net.IP. A non-2xx
+// status, a body that isn't an IP, or a transport error all yield an error so
+// the caller never returns a bogus "public IP". The response is length-limited
+// (a well-behaved echo returns a short address; the cap guards against a
+// hostile or misconfigured endpoint streaming megabytes).
+func newEchoClient(url string) echoFunc {
+	client := &http.Client{Timeout: echoTimeout}
+	return func(ctx context.Context) (string, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return "", fmt.Errorf("public-ip echo %s: %w", url, err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("public-ip echo %s: %w", url, err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 256))
+		if err != nil {
+			return "", fmt.Errorf("public-ip echo %s: read body: %w", url, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("public-ip echo %s: status %d: %s", url, resp.StatusCode, bytes.TrimSpace(body))
+		}
+		value := strings.TrimSpace(string(body))
+		if net.ParseIP(value) == nil {
+			return "", fmt.Errorf("public-ip echo %s: %q is not an IP address", url, value)
+		}
+		return value, nil
+	}
+}
+
+// defaultEC2Probe is the production ec2ProbeFunc: a single IMDSv2 token PUT
+// with a tight (ec2ProbeTimeout) deadline. A nil return means the host is on
+// EC2; any error is wrapped with ErrNotOnEC2 so onEC2 treats it as off-AWS.
+// The short deadline keeps the off-AWS black-hole detection fast (and it runs
+// at most once, behind onEC2's sync.Once).
+func defaultEC2Probe(ctx context.Context) error {
+	pctx, cancel := context.WithTimeout(ctx, ec2ProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(pctx, http.MethodPut, imdsTokenURL, nil)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrNotOnEC2, err)
+	}
+	req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", imdsTokenTTL)
+
+	client := &http.Client{Timeout: ec2ProbeTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrNotOnEC2, err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%w: imds token status %d", ErrNotOnEC2, resp.StatusCode)
+	}
+	return nil
 }
 
 // httpIMDS is the production imdsClient. It performs the IMDSv2 two-step:

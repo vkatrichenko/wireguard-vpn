@@ -183,16 +183,68 @@ func TestHandleGetClientConfig_503MissingServerInfo(t *testing.T) {
 	}
 }
 
-// TestHandleGetClientConfig_503MissingVPCCIDR proves an empty VPC CIDR (IMDS up
-// but no CIDR) yields 503, since the DNS resolver can't be derived.
-func TestHandleGetClientConfig_503MissingVPCCIDR(t *testing.T) {
+// TestHandleGetClientConfig_NoVPCFallsBackToClientDNS proves an empty VPC CIDR
+// no longer 503s: the DNS line falls back to WG_CLIENT_DNS and the split route
+// is overlay-only. (Pre-fix this returned 503; the dashboard must now build a
+// usable config without a VPC.)
+func TestHandleGetClientConfig_NoVPCFallsBackToClientDNS(t *testing.T) {
 	handler := newConfigHandler(t, cfgIP, "", nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/clients/"+cfgName+"/config", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/clients/"+cfgName+"/config?mode=split", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "DNS = "+serverinfo.DefaultClientDNS) {
+		t.Errorf("body missing fallback DNS %q\n--- body ---\n%s", serverinfo.DefaultClientDNS, body)
+	}
+	if !strings.Contains(body, "AllowedIPs = 172.16.15.0/24\n") {
+		t.Errorf("split body missing overlay-only AllowedIPs\n--- body ---\n%s", body)
+	}
+}
+
+// TestHandleGetClientConfig_OffAWS proves a standalone (non-EC2) host builds a
+// config: the public IP comes from the echo client, the DNS from WG_CLIENT_DNS,
+// and the split route is overlay-only — no IMDS, no 503.
+func TestHandleGetClientConfig_OffAWS(t *testing.T) {
+	const offAWSDNS = "9.9.9.9"
+	infoSvc := &serverinfo.Service{
+		IMDS:      fakeIMDS{err: io.ErrUnexpectedEOF}, // must not be reached off-AWS
+		EC2Probe:  func(context.Context) error { return serverinfo.ErrNotOnEC2 },
+		Echo:      func(context.Context) (string, error) { return cfgIP, nil },
+		ClientDNS: offAWSDNS,
+		Runner: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+			return []byte(cfgKey + "\n"), nil
+		},
+	}
+	systemdSvc := systemdRunnerActive(time.Now().Add(-time.Hour))
+	clientsSvc := seededClientsfileSvc(cfgName, cfgAddress, cfgPeerPubKey)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: cfgName, Address: cfgAddress, PublicKey: cfgPeerPubKey}))
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/clients/"+cfgName+"/config?mode=split", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"Endpoint = " + cfgIP + ":51820",
+		"DNS = " + offAWSDNS,
+		"AllowedIPs = 172.16.15.0/24\n",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("off-AWS body missing %q\n--- body ---\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, cfgVPCCIDR) {
+		t.Errorf("off-AWS body unexpectedly contains a VPC CIDR\n--- body ---\n%s", body)
 	}
 }

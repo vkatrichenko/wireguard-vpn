@@ -78,11 +78,18 @@ var (
 func main() {
 	addr := getenv("LISTEN_ADDR", defaultListenAddr)
 
-	// Production defaults are correct: real IMDSv2 endpoint + os/exec runner.
-	// No env-var configuration of the IMDS URL or `wg` path is exposed yet —
-	// add it later only if there's a concrete need (test rigs, alternate WG
-	// interface name, etc.).
-	serverinfoSvc := serverinfo.New()
+	// serverinfo now works on EC2 AND on a standalone VPS. The four optional
+	// env knobs (all defaulted) control public-IP resolution and client-config
+	// DNS off-AWS; an unset environment behaves exactly as the EC2 deployment
+	// always has (IMDS public IP + VPC-derived DNS). WG_PUBLIC_ENDPOINT, when
+	// set, is the authoritative public host/IP. WG_SERVER_NET also drives the
+	// split-tunnel overlay /24. The `wg` path / IMDS URL stay non-configurable.
+	serverinfoSvc := serverinfo.New(serverinfo.Config{
+		PublicEndpoint: os.Getenv("WG_PUBLIC_ENDPOINT"),
+		EchoURL:        getenv("WG_PUBLIC_IP_ECHO_URL", serverinfo.DefaultEchoURL),
+		ClientDNS:      getenv("WG_CLIENT_DNS", serverinfo.DefaultClientDNS),
+		ServerNet:      getenv("WG_SERVER_NET", ""),
+	})
 	// Wire the build-time metadata (populated via -ldflags -X) onto the
 	// Service so the About-tab handler can render the Binary card. Defaults
 	// are the sentinel "unknown" values declared above, so a `go run` (no
