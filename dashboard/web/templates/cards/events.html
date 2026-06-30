@@ -30,7 +30,8 @@
     {{ range . }}
     <li class="event-item">
       <time class="event-time" datetime="{{ .TS.Format "2006-01-02T15:04:05Z" }}">{{ humanAgo .TS }}</time>
-      <span class="event-name">{{ .Name }}</span>
+      <span class="event-name{{ if .Unknown }} event-name-mono{{ end }}">{{ .Name }}</span>
+      {{ if .Unknown }}<span class="event-unknown">unknown</span>{{ end }}
     </li>
     {{ end }}
   </ul>

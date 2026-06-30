@@ -1205,6 +1205,28 @@
   word-break: break-word;
 }
 
+/* Unknown-peer handshakes (spec 016, 2.3): the resolver renders a shortened
+   public key when the key isn't a current client, monospaced so it reads as a
+   key, plus a muted "unknown" pill so the operator can tell it apart from a
+   named peer at a glance. */
+.event-name-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+}
+
+.event-unknown {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-overline);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--card-bg-2);
+  border: var(--border-w) solid var(--hairline);
+}
+
 /* 12. Empty states --------------------------------------------------------- */
 
 .empty {

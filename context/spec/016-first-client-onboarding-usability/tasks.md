@@ -8,16 +8,16 @@
 
 ### Slice 1 — Example client config in install output (req 2.1)
 
-- [ ] Add `emit_example_client_config()` to `scripts/install.sh`: derive the first-client IP from `WG_SERVER_NET` (server host + 1 → `/32`) and print a `wg-quick` `[Interface]`/`[Peer]` template using `SERVER_PUBLIC_KEY`, `WG_SERVER_PORT`, `${WG_CLIENT_DNS}`, an `<server-public-ip>:port` endpoint placeholder, full-tunnel `AllowedIPs` (split noted inline), and a `PrivateKey` placeholder + off-host keygen/register hint. No keys generated. **[Agent: linux-cloud-init]**
-- [ ] Call it from the success summary on **both** WG-only and dashboard paths, after the "WireGuard server is up" block. **[Agent: linux-cloud-init]**
-- [ ] Verify: `make shellcheck` exit 0; render the helper output for the default subnet (e.g. invoke under a stub shell or grep the emitted block) and confirm `172.16.15.2/32` + real server pubkey appear; confirm a custom `WG_SERVER_NET` yields the right first IP. Live install print → Slice 5. **[Agent: linux-cloud-init]**
+- [x] Add `emit_example_client_config()` to `scripts/install.sh`: derive the first-client IP from `WG_SERVER_NET` (server host + 1 → `/32`) and print a `wg-quick` `[Interface]`/`[Peer]` template using `SERVER_PUBLIC_KEY`, `WG_SERVER_PORT`, `${WG_CLIENT_DNS}`, an `<server-public-ip>:port` endpoint placeholder, full-tunnel `AllowedIPs` (split noted inline), and a `PrivateKey` placeholder + off-host keygen/register hint. No keys generated. **[Agent: linux-cloud-init]**
+- [x] Call it from the success summary on **both** WG-only and dashboard paths, after the "WireGuard server is up" block. **[Agent: linux-cloud-init]**
+- [x] Verify: `make shellcheck` exit 0; render the helper output for the default subnet (e.g. invoke under a stub shell or grep the emitted block) and confirm `172.16.15.2/32` + real server pubkey appear; confirm a custom `WG_SERVER_NET` yields the right first IP. Live install print → Slice 5. **[Agent: linux-cloud-init]** _(verified 2026-06-30: shellcheck exit 0; renders 172.16.15.2/32 for default, 10.8.0.2/32 for custom subnet.)_
 
 ### Slice 2 — Handshakes: real names, one row per peer (req 2.3)
 
-- [ ] `internal/db/db.go`: add `QueryLatestHandshakePerPeer(ctx, from, to, limit)` → one `HandshakeEvent` per `public_key` (`MAX(ts)`), newest-first. **[Agent: go-fullstack]**
-- [ ] `internal/server/handlers_partial_tabs.go` (events handler): resolve each row's display name via a `public_key→name` map from `clientsSvc.List(ctx)`; unmatched key → shortened key + "unknown". View-model row carries `{TS, Name, Unknown}`; switch the query to the per-peer one. **[Agent: go-fullstack]**
-- [ ] `web/templates/cards/events.html`: render the resolved name (optional styling for the unknown case). **[Agent: go-fullstack]**
-- [ ] Verify: `db` test (dedupe to one row per peer + newest-first ordering, in-memory); events-handler test (seeded clients DB → names; unmatched → "unknown"; deduped). Full `go test ./...` + build green. **[Agent: go-fullstack]**
+- [x] `internal/db/db.go`: add `QueryLatestHandshakePerPeer(ctx, from, to, limit)` → one `HandshakeEvent` per `public_key` (`MAX(ts)`), newest-first. **[Agent: go-fullstack]**
+- [x] `internal/server/handlers_partial_tabs.go` (events handler): resolve each row's display name via a `public_key→name` map from `clientsSvc.List(ctx)`; unmatched key → shortened key + "unknown". View-model row carries `{TS, Name, Unknown}`; switch the query to the per-peer one. **[Agent: go-fullstack]**
+- [x] `web/templates/cards/events.html`: render the resolved name (optional styling for the unknown case). **[Agent: go-fullstack]**
+- [x] Verify: `db` test (dedupe to one row per peer + newest-first ordering, in-memory); events-handler test (seeded clients DB → names; unmatched → "unknown"; deduped). Full `go test ./...` + build green. **[Agent: go-fullstack]** _(verified 2026-06-30: build/vet/test + static build green.)_
 
 ### Slice 3 — Inline client editing (req 2.2)
 

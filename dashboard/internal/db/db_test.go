@@ -549,6 +549,72 @@ func TestQueryHandshakeEvents_LimitAndDescOrder(t *testing.T) {
 	}
 }
 
+// TestQueryLatestHandshakePerPeer pins the spec 016 (2.3) contract: one row
+// per peer (the peer's MAX(ts)), peers ordered newest-first, and the limit
+// honoured. Seeds two peers with multiple handshakes each (interleaved in time)
+// plus a third single-handshake peer, then asserts the collapse, the per-peer
+// latest ts, and the cross-peer ordering.
+func TestQueryLatestHandshakePerPeer(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	// pk-a: handshakes at t0+0s and t0+30s (latest 30s).
+	// pk-b: handshakes at t0+10s and t0+40s (latest 40s — newest overall).
+	// pk-c: a single handshake at t0+20s.
+	events := []HandshakeEvent{
+		{TS: t0.Add(0 * time.Second), PublicKey: "pk-a", Name: "alice"},
+		{TS: t0.Add(30 * time.Second), PublicKey: "pk-a", Name: "alice"},
+		{TS: t0.Add(10 * time.Second), PublicKey: "pk-b", Name: "bob"},
+		{TS: t0.Add(40 * time.Second), PublicKey: "pk-b", Name: "bob"},
+		{TS: t0.Add(20 * time.Second), PublicKey: "pk-c", Name: "carol"},
+	}
+	if err := d.InsertHandshakeEvents(ctx, events); err != nil {
+		t.Fatalf("InsertHandshakeEvents: %v", err)
+	}
+
+	longAgo := t0.Add(-365 * 24 * time.Hour)
+	faraway := t0.Add(365 * 24 * time.Hour)
+
+	got, err := d.QueryLatestHandshakePerPeer(ctx, longAgo, faraway, 0)
+	if err != nil {
+		t.Fatalf("QueryLatestHandshakePerPeer: %v", err)
+	}
+
+	// One row per peer (three peers despite five handshakes), newest-first:
+	// pk-b (40s), then pk-a (30s), then pk-c (20s).
+	want := []HandshakeEvent{
+		{TS: t0.Add(40 * time.Second), PublicKey: "pk-b", Name: "bob"},
+		{TS: t0.Add(30 * time.Second), PublicKey: "pk-a", Name: "alice"},
+		{TS: t0.Add(20 * time.Second), PublicKey: "pk-c", Name: "carol"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len(got) = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i, row := range want {
+		if !got[i].TS.Equal(row.TS) {
+			t.Errorf("row %d TS: want %v, got %v", i, row.TS, got[i].TS)
+		}
+		if got[i].PublicKey != row.PublicKey {
+			t.Errorf("row %d PublicKey: want %q, got %q", i, row.PublicKey, got[i].PublicKey)
+		}
+		if got[i].Name != row.Name {
+			t.Errorf("row %d Name: want %q, got %q", i, row.Name, got[i].Name)
+		}
+	}
+
+	// limit caps the peer count (still newest-first).
+	limited, err := d.QueryLatestHandshakePerPeer(ctx, longAgo, faraway, 2)
+	if err != nil {
+		t.Fatalf("QueryLatestHandshakePerPeer (limit): %v", err)
+	}
+	if len(limited) != 2 {
+		t.Fatalf("len(limited) = %d, want 2", len(limited))
+	}
+	if limited[0].PublicKey != "pk-b" || limited[1].PublicKey != "pk-a" {
+		t.Errorf("limited peers = [%q %q], want [pk-b pk-a]", limited[0].PublicKey, limited[1].PublicKey)
+	}
+}
+
 // TestInsertClient_RoundTrip writes two clients and reads them back via
 // ListClients, asserting every column survives the unix-seconds timestamp
 // encoding and the bool<->0/1 / nullable-note conversions. It also pins the
