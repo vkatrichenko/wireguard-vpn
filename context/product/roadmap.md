@@ -94,6 +94,15 @@ _Portability — architecture choice & deployment beyond Terraform/AWS._
 
 ---
 
+### Phase 9
+
+_Runtime client management & first-client onboarding — manage peers live and make the standalone path operable end-to-end._
+
+- [x] **Runtime Client Management (spec 015):** Make the dashboard's on-box SQLite the runtime source of truth for peers — add/remove/edit clients live from the UI (paste-public-key), applied with `wg syncconf` (no instance replacement, no tunnel drop), with Terraform `clients_config` demoted to a first-boot seed plus an export + drift indicator for git reconciliation; identical on EC2 and standalone VPS. _(Deployed & operator-verified.)_
+- [x] **First-Client Onboarding & Dashboard Usability Fixes (spec 016):** Print an example client config in `install.sh`'s success output (bootstraps the first peer); inline full-width client editing (replacing the cramped drawer); a human-readable handshakes panel (names resolved from the live client DB, one row per peer); and a full `install.sh` install / update / remove / purge lifecycle with safe no-clobber updates (preserve peers + server key). _(Deployed & operator-verified 2026-06-30; the live edit button + stable reruns required the post-v0.0.10 follow-ups — capture-phase toggle + server-key persistence, PR #48.)_
+
+---
+
 ### Future / Under Consideration
 
 _Not yet specified; captured so the direction isn't lost._
