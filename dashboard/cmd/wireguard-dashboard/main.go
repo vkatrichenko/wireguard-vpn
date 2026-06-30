@@ -22,6 +22,7 @@ import (
 
 	dashboard "wireguard-dashboard"
 	"wireguard-dashboard/internal/alerts"
+	"wireguard-dashboard/internal/clients"
 	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/disk"
@@ -35,6 +36,7 @@ import (
 	"wireguard-dashboard/internal/serverinfo"
 	"wireguard-dashboard/internal/systemd"
 	"wireguard-dashboard/internal/wg"
+	"wireguard-dashboard/internal/wgsync"
 )
 
 const (
@@ -291,7 +293,41 @@ func main() {
 	pollerSvc := poller.New(metricsDB, procSvc, wgSvc, clientsfileSvc, systemdSvc, diskSvc, alertEvaluator, notifier, alertStatus)
 	go pollerSvc.Run(ctx)
 
-	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc, alertStatus, webhookCfg, pollerSvc)
+	// Runtime client management (spec 015). The DB is now the source of truth
+	// for peers; clients.json (clientsfileSvc) is demoted to the first-boot seed
+	// and the drift baseline. WG_SERVER_NET drives IP allocation — an empty or
+	// malformed value falls back to wgconfig.DefaultServerNet inside NewService.
+	// Seeding imports the manifest only when the clients table is empty, so a
+	// restart never re-imports or clobbers runtime-added clients; a manifest
+	// read failure is non-fatal (start with an empty table rather than refuse to
+	// boot).
+	clientsSvc := clients.NewService(metricsDB, getenv("WG_SERVER_NET", ""))
+
+	// Live-apply hook (spec 015, Slice 4). The applier stages a PEERS-ONLY
+	// fragment (no [Interface], no private key — the dashboard runs unprivileged
+	// and cannot read 0600-root wg0.conf) and invokes the sudo wg-sync helper to
+	// merge-and-syncconf. Injected before Seed/Reconcile so the first apply path
+	// uses the real applier, not the no-op default.
+	clientsSvc.SetApplier(wgsync.New())
+
+	seed, err := clientsfileSvc.Load(ctx)
+	if err != nil {
+		slog.Warn("clients: seed manifest load failed; starting with empty client table", "err", err)
+		seed = nil
+	}
+	if err := clientsSvc.Seed(ctx, seed); err != nil {
+		slog.Error("clients: seed failed; continuing with current table", "err", err)
+	}
+
+	// Idempotent startup convergence: re-apply the current DB clients once so the
+	// live wg0.conf matches the DB on boot. Non-fatal — in dev (or before the
+	// Slice 5 helper/sudoers exist) the helper invocation fails; we log and keep
+	// serving rather than crash over an absent live-apply path.
+	if err := clientsSvc.Reconcile(ctx); err != nil {
+		slog.Warn("clients: startup reconcile failed; live config may lag DB until next change", "err", err)
+	}
+
+	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc, alertStatus, webhookCfg, pollerSvc, clientsSvc)
 	if err != nil {
 		log.Fatalf("server init failed: %v", err)
 	}

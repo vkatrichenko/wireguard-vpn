@@ -195,7 +195,7 @@ func doGeoRequest(
 ) geoResponseJSON {
 	t.Helper()
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

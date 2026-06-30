@@ -96,9 +96,9 @@ type clientHistoryResponse struct {
 // (file read, ctx reserved) and wg.Show (exec.CommandContext) honor the
 // parent http.Server's deadlines.
 func (s *server) handleGetClients(w http.ResponseWriter, r *http.Request) {
-	clients, err := s.clientsfileSvc.Load(r.Context())
+	dbClients, err := s.clientsSvc.List(r.Context())
 	if err != nil {
-		slog.Error("GET /api/clients: clientsfile load failed", "err", err)
+		slog.Error("GET /api/clients: clients list failed", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -110,7 +110,7 @@ func (s *server) handleGetClients(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows := buildClientRows(clients, peers, time.Now(), s.geoipSvc)
+	rows := buildClientRows(dbClients, peers, time.Now(), s.geoipSvc)
 
 	// json.Marshal of a nil slice emits "null"; an empty `[]ClientRow{}`
 	// emits "[]". buildClientRows always returns a non-nil slice (it

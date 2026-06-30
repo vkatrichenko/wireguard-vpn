@@ -21,15 +21,21 @@ package wgconfig
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 )
 
 const (
+	// DefaultServerNet is the WG_SERVER_NET fallback (server-host form:
+	// host + prefix) used when the environment supplies none. It is the single
+	// source of truth for the fallback overlay; wgTunnelSubnet below is the /24
+	// derived from it. Mirrors `wg_server_net` in terraform/modules/wireguard;
+	// if that ever changes, this constant must move with it.
+	DefaultServerNet = "172.16.15.1/24"
+
 	// wgTunnelSubnet is the WireGuard overlay network the peers share. It is
-	// the /24 derived from `wg_server_net` (172.16.15.1/24) in
-	// terraform/modules/wireguard; if that ever changes, this constant must
-	// move with it. Used as the first AllowedIPs entry in split-tunnel mode
-	// (added in a later slice).
+	// the /24 derived from DefaultServerNet (172.16.15.1/24). Used as the first
+	// AllowedIPs entry in split-tunnel mode (added in a later slice).
 	wgTunnelSubnet = "172.16.15.0/24"
 
 	// privateKeyPlaceholder is the literal value emitted on the Interface's
@@ -146,6 +152,140 @@ func resolverFor(vpcCIDR string) (string, error) {
 	copy(resolver, base)
 	addToIP(resolver, 2)
 	return resolver.String(), nil
+}
+
+// ServerPeer carries the per-client facts needed to render one [Peer] stanza
+// in the server's wg0.conf. It is a narrow value type (not db.Client) so
+// wgconfig stays a leaf package; the orchestration layer maps at the boundary.
+//
+// Enabled is honoured by BuildServerConf, which omits disabled peers entirely
+// (the client is retained in the DB but not in the live config). Name is
+// emitted only as a leading comment for operator readability and never affects
+// the peer's identity.
+type ServerPeer struct {
+	Name      string
+	PublicKey string
+	Address   string // the client's /32, e.g. "172.16.15.6/32"
+	Enabled   bool
+}
+
+// ServerInterface carries the [Interface] facts for the server's wg0.conf.
+//
+// PostUp/PostDown are caller-supplied because the NAT/forwarding rules depend
+// on the host's egress interface name, which wgconfig cannot know purely. The
+// host helper (a later slice) gathers them and passes them in, keeping this
+// package free of any I/O or environment reads. Each entry renders as its own
+// PostUp =/PostDown = line in order.
+type ServerInterface struct {
+	Address    string // server's tunnel address, e.g. "172.16.15.1/24"
+	ListenPort int
+	PrivateKey string
+	PostUp     []string
+	PostDown   []string
+}
+
+// BuildServerPeer renders a single [Peer] block for the server's wg0.conf. It
+// is pure and byte-stable. The Name, when non-empty, is emitted as a leading
+// "# name" comment above the stanza.
+func BuildServerPeer(p ServerPeer) string {
+	var b strings.Builder
+	if p.Name != "" {
+		fmt.Fprintf(&b, "# %s\n", p.Name)
+	}
+	b.WriteString("[Peer]\n")
+	fmt.Fprintf(&b, "PublicKey = %s\n", p.PublicKey)
+	fmt.Fprintf(&b, "AllowedIPs = %s\n", p.Address)
+	fmt.Fprintf(&b, "PersistentKeepalive = %d\n", persistentKeepalive)
+	return b.String()
+}
+
+// BuildServerConf renders the full /etc/wireguard/wg0.conf from the server
+// interface facts and the set of clients. Only enabled peers are rendered, in
+// deterministic order (ascending by tunnel address) so identical inputs always
+// yield a byte-stable file — which is what makes the downstream `wg syncconf`
+// diff stable and the renderer trivially table-testable.
+//
+// The function is pure: every host-specific input (private key, listen port,
+// PostUp/PostDown NAT lines) is passed in by the caller.
+func BuildServerConf(iface ServerInterface, peers []ServerPeer) string {
+	var b strings.Builder
+	b.WriteString("[Interface]\n")
+	fmt.Fprintf(&b, "Address = %s\n", iface.Address)
+	fmt.Fprintf(&b, "ListenPort = %d\n", iface.ListenPort)
+	fmt.Fprintf(&b, "PrivateKey = %s\n", iface.PrivateKey)
+	for _, line := range iface.PostUp {
+		fmt.Fprintf(&b, "PostUp = %s\n", line)
+	}
+	for _, line := range iface.PostDown {
+		fmt.Fprintf(&b, "PostDown = %s\n", line)
+	}
+
+	for _, p := range enabledSortedByAddress(peers) {
+		b.WriteString("\n")
+		b.WriteString(BuildServerPeer(p))
+	}
+	return b.String()
+}
+
+// BuildServerPeers renders ONLY the [Peer] stanzas — no [Interface] block — for
+// the enabled clients, in the same deterministic ascending-address order as
+// BuildServerConf (stanzas separated by a blank line, byte-stable for identical
+// input). It exists for the unprivileged live-apply path (internal/wgsync):
+// that process runs as the dashboard user, cannot read the 0600-root wg0.conf,
+// and therefore must NEVER hold the server private key. It stages this
+// peers-only fragment and lets the root wg-sync helper merge it with the
+// on-disk [Interface] block. Use BuildServerConf only where the private key is
+// legitimately available (it embeds it); use this everywhere it is not.
+func BuildServerPeers(peers []ServerPeer) string {
+	var b strings.Builder
+	for i, p := range enabledSortedByAddress(peers) {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(BuildServerPeer(p))
+	}
+	return b.String()
+}
+
+// enabledSortedByAddress filters to enabled peers and returns them sorted by
+// tunnel address. Sorting on the parsed IP (not the string) keeps .2 before
+// .10; unparseable addresses sort last by raw string so a malformed entry
+// never panics the renderer.
+func enabledSortedByAddress(peers []ServerPeer) []ServerPeer {
+	out := make([]ServerPeer, 0, len(peers))
+	for _, p := range peers {
+		if p.Enabled {
+			out = append(out, p)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return addrLess(out[i].Address, out[j].Address)
+	})
+	return out
+}
+
+func addrLess(a, b string) bool {
+	ai, aok := addrSortKey(a)
+	bi, bok := addrSortKey(b)
+	if aok != bok {
+		return aok // parseable addresses sort before unparseable ones
+	}
+	if !aok {
+		return a < b
+	}
+	return ai < bi
+}
+
+func addrSortKey(s string) (uint32, bool) {
+	host := s
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		host = s[:i]
+	}
+	ip := net.ParseIP(host).To4()
+	if ip == nil {
+		return 0, false
+	}
+	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3]), true
 }
 
 // addToIP adds n to the integer value of ip in place, propagating carry from

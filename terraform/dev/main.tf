@@ -53,7 +53,7 @@ module "wireguard" {
   # runs (spec 014). The repo MUST be public for the anonymous raw fetch to
   # resolve — a private repo 404s and aborts the boot (no `.ready`).
   install_script_repo   = "vkatrichenko/wireguard-vpn"
-  install_script_sha256 = "7be62a73b20c8845c8b9fd72c79f6d77b8ca6a2bb6e3d545e54ae5d67befd2cf"
+  install_script_sha256 = "369447a856ae31893cd9305df8ab60771e026f1614f083259544decc26c474f7"
   # Pinned to the public main commit that carries this exact scripts/install.sh
   # (verified: raw fetch returns HTTP 200 and matches install_script_sha256). When
   # install.sh changes, push it, then bump BOTH this ref and the sha256 above

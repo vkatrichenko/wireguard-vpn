@@ -35,6 +35,7 @@ func newAlertServer(t *testing.T, holder *alerts.StatusHolder) http.Handler {
 		holder,
 		nil,
 		nil,
+		emptyClientsSvc(t),
 	)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

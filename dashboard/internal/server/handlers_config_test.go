@@ -10,6 +10,7 @@ import (
 	"time"
 
 	dashboard "wireguard-dashboard"
+	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/server"
 	"wireguard-dashboard/internal/serverinfo"
 )
@@ -41,7 +42,7 @@ func newConfigHandler(t *testing.T, ip, vpcCIDR string, imdsErr error) http.Hand
 	systemdSvc := systemdRunnerActive(time.Now().Add(-time.Hour))
 	clientsSvc := seededClientsfileSvc(cfgName, cfgAddress, cfgPeerPubKey)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: cfgName, Address: cfgAddress, PublicKey: cfgPeerPubKey}))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

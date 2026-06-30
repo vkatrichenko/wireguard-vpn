@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"wireguard-dashboard/internal/clientsfile"
+	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/wgconfig"
 )
 
@@ -35,14 +35,22 @@ func (s *server) handleGetClientConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clients, err := s.clientsfileSvc.Load(r.Context())
+	dbClients, err := s.clientsSvc.List(r.Context())
 	if err != nil {
-		slog.Error("GET /api/clients/{name}/config: clientsfile load failed", "err", err)
+		slog.Error("GET /api/clients/{name}/config: clients list failed", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	client, ok := clientsfile.ByName(clients)[name]
-	if !ok {
+	var client db.Client
+	found := false
+	for _, c := range dbClients {
+		if c.Name == name {
+			client = c
+			found = true
+			break
+		}
+	}
+	if !found {
 		http.NotFound(w, r)
 		return
 	}

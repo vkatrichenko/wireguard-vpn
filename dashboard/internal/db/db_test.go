@@ -22,6 +22,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -545,6 +546,279 @@ func TestQueryHandshakeEvents_LimitAndDescOrder(t *testing.T) {
 	}
 	if len(all) != 15 {
 		t.Errorf("len(all) = %d, want 15", len(all))
+	}
+}
+
+// TestInsertClient_RoundTrip writes two clients and reads them back via
+// ListClients, asserting every column survives the unix-seconds timestamp
+// encoding and the bool<->0/1 / nullable-note conversions. It also pins the
+// deterministic ORDER BY address ordering (10.0.0.2 before 10.0.0.3,
+// regardless of insertion order).
+func TestInsertClient_RoundTrip(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	// Insert the higher address first so a missing ORDER BY would be caught.
+	bob := Client{
+		Name:      "bob",
+		PublicKey: "pk-bob",
+		Address:   "10.0.0.3/32",
+		Enabled:   false,
+		Note:      sql.NullString{}, // NULL note
+		CreatedAt: t0,
+		UpdatedAt: t0,
+	}
+	alice := Client{
+		Name:      "alice",
+		PublicKey: "pk-alice",
+		Address:   "10.0.0.2/32",
+		Enabled:   true,
+		Note:      sql.NullString{String: "laptop", Valid: true},
+		CreatedAt: t0.Add(time.Second),
+		UpdatedAt: t0.Add(2 * time.Second),
+	}
+	if err := d.InsertClient(ctx, bob); err != nil {
+		t.Fatalf("InsertClient(bob): %v", err)
+	}
+	if err := d.InsertClient(ctx, alice); err != nil {
+		t.Fatalf("InsertClient(alice): %v", err)
+	}
+
+	got, err := d.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 clients, got %d", len(got))
+	}
+
+	// ORDER BY address ASC: alice (.2) before bob (.3).
+	gotAlice, gotBob := got[0], got[1]
+	if gotAlice.Name != "alice" || gotBob.Name != "bob" {
+		t.Fatalf("ordering: want [alice bob], got [%s %s]", gotAlice.Name, gotBob.Name)
+	}
+
+	if gotAlice.ID == 0 {
+		t.Errorf("alice ID: want non-zero autoincrement id, got 0")
+	}
+	if gotAlice.PublicKey != alice.PublicKey {
+		t.Errorf("alice PublicKey: want %q, got %q", alice.PublicKey, gotAlice.PublicKey)
+	}
+	if gotAlice.Address != alice.Address {
+		t.Errorf("alice Address: want %q, got %q", alice.Address, gotAlice.Address)
+	}
+	if gotAlice.Enabled != true {
+		t.Errorf("alice Enabled: want true, got %v", gotAlice.Enabled)
+	}
+	if !gotAlice.Note.Valid || gotAlice.Note.String != "laptop" {
+		t.Errorf("alice Note: want {laptop true}, got %+v", gotAlice.Note)
+	}
+	if !gotAlice.CreatedAt.Equal(alice.CreatedAt) {
+		t.Errorf("alice CreatedAt: want %v, got %v", alice.CreatedAt, gotAlice.CreatedAt)
+	}
+	if !gotAlice.UpdatedAt.Equal(alice.UpdatedAt) {
+		t.Errorf("alice UpdatedAt: want %v, got %v", alice.UpdatedAt, gotAlice.UpdatedAt)
+	}
+
+	// bob: disabled + NULL note must round-trip as Valid=false.
+	if gotBob.Enabled != false {
+		t.Errorf("bob Enabled: want false, got %v", gotBob.Enabled)
+	}
+	if gotBob.Note.Valid {
+		t.Errorf("bob Note: want NULL (Valid=false), got %+v", gotBob.Note)
+	}
+}
+
+// TestListClients_EmptyTable confirms a fresh table yields zero rows and no
+// error (nil slice is acceptable; len is what callers check).
+func TestListClients_EmptyTable(t *testing.T) {
+	d := newTestDB(t)
+
+	got, err := d.ListClients(context.Background())
+	if err != nil {
+		t.Fatalf("ListClients on fresh db: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("want 0 clients on fresh db, got %d", len(got))
+	}
+}
+
+// TestCountClients tracks the row count across inserts and a delete.
+func TestCountClients(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	if n, err := d.CountClients(ctx); err != nil || n != 0 {
+		t.Fatalf("CountClients on fresh db: got (%d, %v), want (0, nil)", n, err)
+	}
+
+	clients := []Client{
+		{Name: "a", PublicKey: "pk-a", Address: "10.0.0.2/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+		{Name: "b", PublicKey: "pk-b", Address: "10.0.0.3/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+	}
+	for _, c := range clients {
+		if err := d.InsertClient(ctx, c); err != nil {
+			t.Fatalf("InsertClient(%s): %v", c.Name, err)
+		}
+	}
+
+	if n, err := d.CountClients(ctx); err != nil || n != 2 {
+		t.Fatalf("CountClients after 2 inserts: got (%d, %v), want (2, nil)", n, err)
+	}
+
+	if err := d.DeleteClient(ctx, "a"); err != nil {
+		t.Fatalf("DeleteClient(a): %v", err)
+	}
+	if n, err := d.CountClients(ctx); err != nil || n != 1 {
+		t.Fatalf("CountClients after delete: got (%d, %v), want (1, nil)", n, err)
+	}
+}
+
+// TestUpdateClient_ChangesFieldsAndBumpsUpdatedAt verifies that UpdateClient
+// rewrites the mutable columns by id, persists a bumped updated_at, and
+// leaves created_at untouched.
+func TestUpdateClient_ChangesFieldsAndBumpsUpdatedAt(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	orig := Client{
+		Name:      "alice",
+		PublicKey: "pk-alice",
+		Address:   "10.0.0.2/32",
+		Enabled:   true,
+		Note:      sql.NullString{String: "laptop", Valid: true},
+		CreatedAt: t0,
+		UpdatedAt: t0,
+	}
+	if err := d.InsertClient(ctx, orig); err != nil {
+		t.Fatalf("InsertClient: %v", err)
+	}
+
+	list, err := d.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("want 1 client, got %d", len(list))
+	}
+	c := list[0]
+
+	// Mutate every editable field and bump updated_at by an hour.
+	c.Name = "alice-renamed"
+	c.PublicKey = "pk-alice-2"
+	c.Address = "10.0.0.5/32"
+	c.Enabled = false
+	c.Note = sql.NullString{String: "phone", Valid: true}
+	c.UpdatedAt = t0.Add(time.Hour)
+	if err := d.UpdateClient(ctx, c); err != nil {
+		t.Fatalf("UpdateClient: %v", err)
+	}
+
+	list, err = d.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients post-update: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("want 1 client post-update, got %d", len(list))
+	}
+	got := list[0]
+
+	if got.ID != c.ID {
+		t.Errorf("ID changed: want %d, got %d", c.ID, got.ID)
+	}
+	if got.Name != "alice-renamed" {
+		t.Errorf("Name: want alice-renamed, got %q", got.Name)
+	}
+	if got.PublicKey != "pk-alice-2" {
+		t.Errorf("PublicKey: want pk-alice-2, got %q", got.PublicKey)
+	}
+	if got.Address != "10.0.0.5/32" {
+		t.Errorf("Address: want 10.0.0.5/32, got %q", got.Address)
+	}
+	if got.Enabled != false {
+		t.Errorf("Enabled: want false, got %v", got.Enabled)
+	}
+	if !got.Note.Valid || got.Note.String != "phone" {
+		t.Errorf("Note: want {phone true}, got %+v", got.Note)
+	}
+	if !got.UpdatedAt.Equal(t0.Add(time.Hour)) {
+		t.Errorf("UpdatedAt: want bumped to %v, got %v", t0.Add(time.Hour), got.UpdatedAt)
+	}
+	if !got.CreatedAt.Equal(t0) {
+		t.Errorf("CreatedAt: want untouched %v, got %v", t0, got.CreatedAt)
+	}
+}
+
+// TestDeleteClient confirms a delete removes the row and that deleting an
+// absent name is a no-op (no error).
+func TestDeleteClient(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	if err := d.InsertClient(ctx, Client{Name: "alice", PublicKey: "pk-alice", Address: "10.0.0.2/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("InsertClient: %v", err)
+	}
+
+	if err := d.DeleteClient(ctx, "alice"); err != nil {
+		t.Fatalf("DeleteClient(alice): %v", err)
+	}
+	if n, err := d.CountClients(ctx); err != nil || n != 0 {
+		t.Fatalf("CountClients after delete: got (%d, %v), want (0, nil)", n, err)
+	}
+
+	// Deleting a non-existent name must not error.
+	if err := d.DeleteClient(ctx, "ghost"); err != nil {
+		t.Errorf("DeleteClient(ghost) on absent row: want nil, got %v", err)
+	}
+}
+
+// TestInsertClient_UniquenessViolations pins that each of the three UNIQUE
+// columns (name, public_key, address) rejects a duplicate insert with a
+// non-nil error rather than silently overwriting.
+func TestInsertClient_UniquenessViolations(t *testing.T) {
+	base := Client{
+		Name:      "alice",
+		PublicKey: "pk-alice",
+		Address:   "10.0.0.2/32",
+		Enabled:   true,
+		CreatedAt: t0,
+		UpdatedAt: t0,
+	}
+
+	tests := []struct {
+		name string
+		dup  Client
+	}{
+		{
+			name: "duplicate name",
+			dup:  Client{Name: "alice", PublicKey: "pk-other", Address: "10.0.0.9/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+		},
+		{
+			name: "duplicate public_key",
+			dup:  Client{Name: "other", PublicKey: "pk-alice", Address: "10.0.0.9/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+		},
+		{
+			name: "duplicate address",
+			dup:  Client{Name: "other", PublicKey: "pk-other", Address: "10.0.0.2/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newTestDB(t)
+			ctx := context.Background()
+
+			if err := d.InsertClient(ctx, base); err != nil {
+				t.Fatalf("InsertClient(base): %v", err)
+			}
+			if err := d.InsertClient(ctx, tc.dup); err == nil {
+				t.Fatalf("InsertClient(%s): want UNIQUE-constraint error, got nil", tc.name)
+			}
+			// The original row must be the only one left.
+			if n, err := d.CountClients(ctx); err != nil || n != 1 {
+				t.Fatalf("CountClients after rejected dup: got (%d, %v), want (1, nil)", n, err)
+			}
+		})
 	}
 }
 

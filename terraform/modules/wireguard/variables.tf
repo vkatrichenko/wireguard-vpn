@@ -141,7 +141,7 @@ variable "install_script_repo" {
 variable "install_script_ref" {
   description = "A commit SHA or tag pinning the exact scripts/install.sh version fetched at boot from install_script_repo. Must point at a ref on the PUBLIC default branch where the install.sh matching install_script_sha256 exists, otherwise the raw fetch 404s and boot aborts. Bumping this re-renders user-data, rolls a new launch-template version, and replaces the instance."
   type        = string
-  default = "main"
+  default     = "main"
 }
 
 variable "install_script_sha256" {

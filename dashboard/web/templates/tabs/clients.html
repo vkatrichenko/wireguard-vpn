@@ -1,6 +1,6 @@
 {{ define "clients" }}
 <section class="card" id="clients">
-  <h2>Clients</h2>
+  <h2>Clients{{ if .Drift }} <span class="drift-badge" id="clients-drift" title="Clients present in the dashboard DB but absent from the Terraform clients.json baseline — export and reconcile to make them survive an instance rebuild.">{{ .Drift }} not in clients.json</span>{{ end }}</h2>
   {{ if .Error }}
   <p class="error">Failed to load clients: {{ .Error }}</p>
   {{ else if .Rows }}

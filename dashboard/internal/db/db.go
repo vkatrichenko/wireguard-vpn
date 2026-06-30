@@ -71,6 +71,15 @@ const driverName = "sqlite"
 //     conflict, while the same peer twice-in-a-second is deduped via
 //     INSERT OR REPLACE. The auxiliary ts index serves the same
 //     range-scan role as on client_traffic.
+//   - clients is the runtime source of truth for WireGuard peers
+//     (Slice 1 of spec 015) — distinct from the client_traffic metrics
+//     table. id is a surrogate AUTOINCREMENT key because name is a
+//     mutable, user-facing label; name / public_key / address each carry
+//     a UNIQUE constraint so a duplicate add surfaces as an insert error
+//     rather than a silent overwrite. created_at / updated_at are
+//     unix-seconds, caller-stamped at the API boundary like the metric
+//     structs' ts; disabled peers (enabled=0) are retained in the table
+//     but later omitted when rendering wg0.conf.
 const schema = `
 CREATE TABLE IF NOT EXISTS system_metrics (
     ts      INTEGER PRIMARY KEY,
@@ -104,6 +113,17 @@ CREATE TABLE IF NOT EXISTS handshake_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_handshake_events_ts ON handshake_events(ts);
+
+CREATE TABLE IF NOT EXISTS clients (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL UNIQUE,
+    public_key  TEXT    NOT NULL UNIQUE,
+    address     TEXT    NOT NULL UNIQUE,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    note        TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
 `
 
 // SystemMetric is one row of CPU% / memory% at a timestamp. TS is
@@ -149,6 +169,29 @@ type HandshakeEvent struct {
 	TS        time.Time
 	PublicKey string
 	Name      string
+}
+
+// Client is one WireGuard peer in the runtime clients table (Slice 1 of
+// spec 015). ID is the surrogate primary key; Name, PublicKey, and Address
+// each map to a UNIQUE column. Enabled is stored as 0/1 on disk and exposed
+// as a bool here. Note is free-text and nullable — sql.NullString round-
+// trips an absent note as (Valid=false) rather than an empty string.
+//
+// CreatedAt / UpdatedAt are unix-seconds on disk and time.Time (UTC) at the
+// API boundary, matching the metric structs' ts convention. They are
+// caller-stamped: InsertClient and UpdateClient persist exactly the values
+// supplied on the struct (the orchestration layer in a later slice is
+// responsible for setting CreatedAt at creation and bumping UpdatedAt on
+// every edit), keeping this package free of an implicit clock dependency.
+type Client struct {
+	ID        int64
+	Name      string
+	PublicKey string
+	Address   string
+	Enabled   bool
+	Note      sql.NullString
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // DB is the package's single public handle. It wraps a *sql.DB with the
@@ -611,6 +654,102 @@ func (d *DB) PruneBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 		return 0, fmt.Errorf("commit prune tx: %w", err)
 	}
 	return total, nil
+}
+
+// ListClients returns every row in the clients table ordered by address
+// then id, giving the UI a stable, deterministic peer list. An empty table
+// yields a nil slice and nil error (not an error), matching the zero-row
+// behaviour of the metric query helpers.
+func (d *DB) ListClients(ctx context.Context) ([]Client, error) {
+	const q = `SELECT id, name, public_key, address, enabled, note, created_at, updated_at FROM clients ORDER BY address ASC, id ASC`
+
+	rows, err := d.sql.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query clients: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Client
+	for rows.Next() {
+		var (
+			c         Client
+			enabled   int64
+			createdAt int64
+			updatedAt int64
+		)
+		if err := rows.Scan(&c.ID, &c.Name, &c.PublicKey, &c.Address, &enabled, &c.Note, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan clients: %w", err)
+		}
+		c.Enabled = enabled != 0
+		c.CreatedAt = time.Unix(createdAt, 0).UTC()
+		c.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate clients: %w", err)
+	}
+	return out, nil
+}
+
+// InsertClient writes one client row. ID is assigned by SQLite's
+// AUTOINCREMENT and ignored on input. Enabled is encoded as 0/1; CreatedAt
+// and UpdatedAt are persisted as the unix-seconds of the supplied times
+// (caller-stamped — see the Client doc). A UNIQUE-constraint violation on
+// name, public_key, or address surfaces as a wrapped error rather than a
+// silent overwrite: unlike the metric inserts there is deliberately no
+// INSERT OR REPLACE here.
+func (d *DB) InsertClient(ctx context.Context, c Client) error {
+	const q = `INSERT INTO clients (name, public_key, address, enabled, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	if _, err := d.sql.ExecContext(ctx, q, c.Name, c.PublicKey, c.Address, b2i(c.Enabled), c.Note, c.CreatedAt.Unix(), c.UpdatedAt.Unix()); err != nil {
+		return fmt.Errorf("insert clients: %w", err)
+	}
+	return nil
+}
+
+// UpdateClient updates the mutable columns of the client identified by ID
+// (name is user-mutable, so the surrogate id is the stable key). It
+// persists the supplied UpdatedAt — the caller is responsible for bumping
+// it to "now" before the call. CreatedAt is intentionally left untouched.
+// A UNIQUE-constraint violation (e.g. renaming onto another client's name)
+// surfaces as a wrapped error.
+func (d *DB) UpdateClient(ctx context.Context, c Client) error {
+	const q = `UPDATE clients SET name = ?, public_key = ?, address = ?, enabled = ?, note = ?, updated_at = ? WHERE id = ?`
+	if _, err := d.sql.ExecContext(ctx, q, c.Name, c.PublicKey, c.Address, b2i(c.Enabled), c.Note, c.UpdatedAt.Unix(), c.ID); err != nil {
+		return fmt.Errorf("update clients: %w", err)
+	}
+	return nil
+}
+
+// DeleteClient removes the client with the given name. Deleting a
+// non-existent name is not an error (zero rows affected), matching the
+// idempotent posture of the prune sweep.
+func (d *DB) DeleteClient(ctx context.Context, name string) error {
+	const q = `DELETE FROM clients WHERE name = ?`
+	if _, err := d.sql.ExecContext(ctx, q, name); err != nil {
+		return fmt.Errorf("delete clients: %w", err)
+	}
+	return nil
+}
+
+// CountClients returns the total number of rows in the clients table. Used
+// by the startup reconcile to decide whether to seed from clients.json (a
+// later slice); an empty table returns (0, nil).
+func (d *DB) CountClients(ctx context.Context) (int, error) {
+	const q = `SELECT COUNT(*) FROM clients`
+	var n int
+	if err := d.sql.QueryRowContext(ctx, q).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count clients: %w", err)
+	}
+	return n, nil
+}
+
+// b2i maps a Go bool to the 0/1 INTEGER encoding the clients.enabled column
+// uses on disk.
+func b2i(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // ErrNotInitialised is returned by callers that try to use a *DB before
