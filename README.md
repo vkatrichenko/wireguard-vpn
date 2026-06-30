@@ -192,6 +192,8 @@ sudo DASHBOARD_RELEASE_TAG="v0.0.11" \
 
 For a **WireGuard-only** box, omit the two `DASHBOARD_*` vars: `sudo bash install.sh`. Useful env vars: `WG_SERVER_NET` (default `172.16.15.1/24`), `WG_SERVER_PORT` (`51820`), `WG_CLIENT_DNS` (`1.1.1.1`), `WG_PUBLIC_ENDPOINT` (your VPS public IP, to skip auto-discovery). The installer prints the **server public key** and an **example client config** when it finishes.
 
+> **You don't pass a server key.** On a standalone VPS the installer **generates the server's WireGuard private key automatically** (`wg genkey`) on first run and persists it to `/etc/wireguard/server.key` (`0600`); every later re-run reuses that same key, so the server identity stays stable. Pass `WG_SERVER_PRIVATE_KEY` only if you want to supply a specific key (e.g. restoring from a backup) — and once chosen, **don't change it on re-runs**, or you'll invalidate every existing client config. _(This differs from the AWS path, where the server key comes from the SSM parameter you create in [Option A, step 2](#install--option-a-aws-terraform).)_
+
 **4. Reach the dashboard to add the first client.** The dashboard is VPN-only, so before you're a peer, tunnel to it over SSH:
 
 ```bash
