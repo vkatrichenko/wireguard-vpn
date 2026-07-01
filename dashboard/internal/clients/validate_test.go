@@ -57,6 +57,93 @@ func TestValidateName(t *testing.T) {
 	}
 }
 
+// TestValidateSet_EmptyIsValid pins the spec 017 contract that an empty
+// bulk-replace payload is valid — it reconciles to zero peers, not an error.
+func TestValidateSet_EmptyIsValid(t *testing.T) {
+	t.Parallel()
+	sn := mustParse(t, "172.16.15.1/24")
+
+	if err := validateSet(sn, nil); err != nil {
+		t.Errorf("validateSet(nil): want nil, got %v", err)
+	}
+	if err := validateSet(sn, []ReplaceEntry{}); err != nil {
+		t.Errorf("validateSet([]): want nil, got %v", err)
+	}
+}
+
+// TestValidateSet_MissingAddressRejected pins the bulk-path requirement that
+// every entry carry an explicit, non-empty address — there is no
+// auto-allocation fallback here (unlike Add), because the bulk path must be
+// idempotent given the same input.
+func TestValidateSet_MissingAddressRejected(t *testing.T) {
+	t.Parallel()
+	sn := mustParse(t, "172.16.15.1/24")
+
+	entries := []ReplaceEntry{
+		{Name: "alice", PublicKey: validPubKey, Address: ""},
+	}
+	if err := validateSet(sn, entries); err == nil {
+		t.Error("validateSet with empty address: want error, got nil")
+	}
+}
+
+// TestValidateSet_IntraPayloadDedup pins the new self-consistency checks: a
+// duplicate name, public key, or address WITHIN the payload itself must be
+// rejected, even though no single entry is individually invalid and neither
+// entry conflicts with anything already in the (empty) table.
+func TestValidateSet_IntraPayloadDedup(t *testing.T) {
+	t.Parallel()
+	sn := mustParse(t, "172.16.15.1/24")
+
+	pubKeyB := "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+	pubKeyC := "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="
+
+	tests := []struct {
+		name    string
+		entries []ReplaceEntry
+	}{
+		{
+			name: "duplicate name",
+			entries: []ReplaceEntry{
+				{Name: "alice", PublicKey: validPubKey, Address: "172.16.15.5/32"},
+				{Name: "alice", PublicKey: pubKeyB, Address: "172.16.15.6/32"},
+			},
+		},
+		{
+			name: "duplicate public key",
+			entries: []ReplaceEntry{
+				{Name: "alice", PublicKey: validPubKey, Address: "172.16.15.5/32"},
+				{Name: "bob", PublicKey: validPubKey, Address: "172.16.15.6/32"},
+			},
+		},
+		{
+			name: "duplicate address",
+			entries: []ReplaceEntry{
+				{Name: "alice", PublicKey: validPubKey, Address: "172.16.15.5/32"},
+				{Name: "bob", PublicKey: pubKeyB, Address: "172.16.15.5/32"},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := validateSet(sn, tc.entries); err == nil {
+				t.Errorf("validateSet(%s): want error, got nil", tc.name)
+			}
+		})
+	}
+
+	// Sanity check: three genuinely distinct entries must pass.
+	ok := []ReplaceEntry{
+		{Name: "alice", PublicKey: validPubKey, Address: "172.16.15.5/32"},
+		{Name: "bob", PublicKey: pubKeyB, Address: "172.16.15.6/32"},
+		{Name: "carol", PublicKey: pubKeyC, Address: "172.16.15.7/32"},
+	}
+	if err := validateSet(sn, ok); err != nil {
+		t.Errorf("validateSet(distinct entries): want nil, got %v", err)
+	}
+}
+
 func TestValidateAddress(t *testing.T) {
 	t.Parallel()
 

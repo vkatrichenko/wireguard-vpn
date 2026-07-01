@@ -80,6 +80,19 @@ const driverName = "sqlite"
 //     unix-seconds, caller-stamped at the API boundary like the metric
 //     structs' ts; disabled peers (enabled=0) are retained in the table
 //     but later omitted when rendering wg0.conf.
+//   - managed_baseline is the dashboard-owned "last Terraform-applied set"
+//     (spec 017, Slice 3): ReplaceClientsAndBaseline overwrites it, in the
+//     same transaction as the clients-table reconcile, with exactly the
+//     entries a successful PUT /api/clients was given. It is intentionally
+//     NOT the clients table itself — the baseline must freeze the
+//     git-declared shape (name/address/public_key only) independent of
+//     any subsequent UI edit to the live clients row, so computeDrift can
+//     diff "live" against "last git-applied" rather than "live" against
+//     "live". id is a surrogate AUTOINCREMENT key for the same reason as
+//     clients.id (there is no natural single-column key to hang UPDATEs
+//     off during a replace); no UNIQUE constraints because a whole-set
+//     replace always clears the table first (see
+//     replaceManagedBaselineTx) rather than reconciling row-by-row.
 const schema = `
 CREATE TABLE IF NOT EXISTS system_metrics (
     ts      INTEGER PRIMARY KEY,
@@ -123,6 +136,13 @@ CREATE TABLE IF NOT EXISTS clients (
     note        TEXT,
     created_at  INTEGER NOT NULL,
     updated_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS managed_baseline (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    address     TEXT    NOT NULL,
+    public_key  TEXT    NOT NULL
 );
 `
 
@@ -192,6 +212,18 @@ type Client struct {
 	Note      sql.NullString
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// BaselineEntry is one row of the dashboard-owned managed_baseline table
+// (spec 017, Slice 3) — the {name, address, public_key} projection of the
+// peer set last applied via a successful PUT /api/clients. It intentionally
+// mirrors clients.ExportEntry's shape (this package doesn't import
+// internal/clients to avoid a cycle; the two stay in sync by convention,
+// checked by the ReplaceAll round-trip tests in internal/clients).
+type BaselineEntry struct {
+	Name      string
+	Address   string
+	PublicKey string
 }
 
 // DB is the package's single public handle. It wraps a *sql.DB with the
@@ -778,6 +810,216 @@ func (d *DB) DeleteClient(ctx context.Context, name string) error {
 		return fmt.Errorf("delete clients: %w", err)
 	}
 	return nil
+}
+
+// ReplaceClients reconciles the clients table to exactly match want, keyed by
+// public_key, in a single transaction — the whole-set replace spec 017 hands
+// to the Terraform-driven bulk-PUT endpoint. Unlike InsertClient there is no
+// UNIQUE-violation-as-caller-error contract here: the caller (clients.Service)
+// is expected to have already validated want for intra-payload uniqueness.
+//
+// Reconciliation, by public_key:
+//   - present in the table but absent from want: DELETE.
+//   - present in both but any of name/address/enabled/note changed: UPDATE.
+//     CreatedAt and id are preserved — only the mutable columns move.
+//   - present in want but absent from the table: INSERT. CreatedAt/UpdatedAt
+//     are caller-stamped on the input Client, same convention as InsertClient.
+//
+// Execution order is deletes -> updates -> inserts. This isn't just tidy
+// bookkeeping: SQLite enforces the UNIQUE constraints on name/public_key/
+// address per-statement, so a swap (e.g. two peers trading addresses) can
+// only succeed if the stale rows are gone before the new values land.
+// Updates before inserts means an update that's simply changing a mutable
+// field on an existing key can't collide with a brand new row that
+// (coincidentally) wants the same UNIQUE value the update is vacating.
+//
+// All-or-nothing: any failure at any step rolls back the whole transaction,
+// leaving the table exactly as it was before the call.
+//
+// Kept alongside ReplaceClientsAndBaseline (rather than folded into it) so
+// callers that only need the peer-table reconcile — today, none in
+// production, but every existing db-layer test — don't have to thread a
+// baseline argument through.
+func (d *DB) ReplaceClients(ctx context.Context, want []Client) error {
+	tx, err := d.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace clients tx: %w", err)
+	}
+
+	if err := replaceClientsTx(ctx, tx, want); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit replace clients tx: %w", err)
+	}
+	return nil
+}
+
+// ReplaceClientsAndBaseline is ReplaceClients plus an atomic overwrite of the
+// managed_baseline table (spec 017, Slice 3), both inside one transaction:
+// clients.Service.ReplaceAll calls this instead of ReplaceClients so a PUT
+// /api/clients that fails partway (e.g. the clients-table UNIQUE-swap edge
+// case) rolls back the baseline write too — the baseline and the live peer
+// set can never disagree, even under a forced error.
+//
+// baseline is the exact {name, address, public_key} set to persist as "last
+// applied" — clients.Service passes the same entries it validated and handed
+// to the clients-table reconcile, not a re-derivation from want, so the two
+// are trivially guaranteed to agree.
+func (d *DB) ReplaceClientsAndBaseline(ctx context.Context, want []Client, baseline []BaselineEntry) error {
+	tx, err := d.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace clients+baseline tx: %w", err)
+	}
+
+	if err := replaceClientsTx(ctx, tx, want); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := replaceManagedBaselineTx(ctx, tx, baseline); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit replace clients+baseline tx: %w", err)
+	}
+	return nil
+}
+
+// replaceClientsTx does the actual reconcile work against an open tx. Split
+// out from ReplaceClients so the rollback-on-error path stays in exactly one
+// place (the caller).
+func replaceClientsTx(ctx context.Context, tx *sql.Tx, want []Client) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id, name, public_key, address, enabled, note, created_at, updated_at FROM clients`)
+	if err != nil {
+		return fmt.Errorf("replace clients: query existing: %w", err)
+	}
+	existing := make(map[string]Client)
+	for rows.Next() {
+		var (
+			c         Client
+			enabled   int64
+			createdAt int64
+			updatedAt int64
+		)
+		if err := rows.Scan(&c.ID, &c.Name, &c.PublicKey, &c.Address, &enabled, &c.Note, &createdAt, &updatedAt); err != nil {
+			rows.Close()
+			return fmt.Errorf("replace clients: scan existing: %w", err)
+		}
+		c.Enabled = enabled != 0
+		c.CreatedAt = time.Unix(createdAt, 0).UTC()
+		c.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+		existing[c.PublicKey] = c
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("replace clients: iterate existing: %w", err)
+	}
+	rows.Close()
+
+	wantByKey := make(map[string]Client, len(want))
+	for _, c := range want {
+		wantByKey[c.PublicKey] = c
+	}
+
+	// Deletes: present in existing, absent from want.
+	for key, old := range existing {
+		if _, ok := wantByKey[key]; ok {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM clients WHERE id = ?`, old.ID); err != nil {
+			return fmt.Errorf("replace clients: delete %q (key=%s): %w", old.Name, key, err)
+		}
+	}
+
+	// Updates: present in both, preserving id/created_at, only rewriting the
+	// mutable columns when something actually changed.
+	for key, next := range wantByKey {
+		old, ok := existing[key]
+		if !ok {
+			continue
+		}
+		if old.Name == next.Name && old.Address == next.Address && old.Enabled == next.Enabled && old.Note == next.Note {
+			continue
+		}
+		const q = `UPDATE clients SET name = ?, address = ?, enabled = ?, note = ?, updated_at = ? WHERE id = ?`
+		if _, err := tx.ExecContext(ctx, q, next.Name, next.Address, b2i(next.Enabled), next.Note, next.UpdatedAt.Unix(), old.ID); err != nil {
+			return fmt.Errorf("replace clients: update %q (key=%s): %w", next.Name, key, err)
+		}
+	}
+
+	// Inserts: present in want, absent from existing.
+	for key, next := range wantByKey {
+		if _, ok := existing[key]; ok {
+			continue
+		}
+		const q = `INSERT INTO clients (name, public_key, address, enabled, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+		if _, err := tx.ExecContext(ctx, q, next.Name, next.PublicKey, next.Address, b2i(next.Enabled), next.Note, next.CreatedAt.Unix(), next.UpdatedAt.Unix()); err != nil {
+			return fmt.Errorf("replace clients: insert %q (key=%s): %w", next.Name, key, err)
+		}
+	}
+
+	return nil
+}
+
+// replaceManagedBaselineTx overwrites the managed_baseline table with exactly
+// entries, against an open tx — the same clear-then-bulk-insert shape as
+// replaceClientsTx's insert half, minus any reconcile-by-key logic: unlike
+// clients, the baseline has no id-preservation contract worth keeping (it's a
+// pure "last applied" snapshot with no dependent foreign state), so a full
+// DELETE + re-INSERT is simplest and correct. An empty entries slice leaves
+// the table empty (the DELETE runs; no INSERTs follow) — the same "empty set
+// is valid" contract ReplaceClients honours for the clients table.
+func replaceManagedBaselineTx(ctx context.Context, tx *sql.Tx, entries []BaselineEntry) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM managed_baseline`); err != nil {
+		return fmt.Errorf("replace managed_baseline: clear: %w", err)
+	}
+
+	const q = `INSERT INTO managed_baseline (name, address, public_key) VALUES (?, ?, ?)`
+	stmt, err := tx.PrepareContext(ctx, q)
+	if err != nil {
+		return fmt.Errorf("replace managed_baseline: prepare insert: %w", err)
+	}
+	defer stmt.Close()
+
+	for i, e := range entries {
+		if _, err := stmt.ExecContext(ctx, e.Name, e.Address, e.PublicKey); err != nil {
+			return fmt.Errorf("replace managed_baseline: insert row %d (name=%s): %w", i, e.Name, err)
+		}
+	}
+	return nil
+}
+
+// LoadManagedBaseline returns the full dashboard-owned baseline set (spec 017,
+// Slice 3) — the {name, address, public_key} peers as of the last successful
+// PUT /api/clients. An empty table (no PUT has ever succeeded — a fresh box
+// pre-first-apply) returns a nil slice and nil error, matching the zero-row
+// convention of ListClients and the metric query helpers; computeDrift treats
+// a nil/empty result as "no baseline yet" and falls back to clients.json.
+func (d *DB) LoadManagedBaseline(ctx context.Context) ([]BaselineEntry, error) {
+	const q = `SELECT name, address, public_key FROM managed_baseline ORDER BY address ASC, id ASC`
+
+	rows, err := d.sql.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query managed_baseline: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BaselineEntry
+	for rows.Next() {
+		var e BaselineEntry
+		if err := rows.Scan(&e.Name, &e.Address, &e.PublicKey); err != nil {
+			return nil, fmt.Errorf("scan managed_baseline: %w", err)
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate managed_baseline: %w", err)
+	}
+	return out, nil
 }
 
 // CountClients returns the total number of rows in the clients table. Used

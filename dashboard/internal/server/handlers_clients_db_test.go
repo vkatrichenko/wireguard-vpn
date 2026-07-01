@@ -56,10 +56,10 @@ func TestHandleGetPartialClients_FromDB(t *testing.T) {
 	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		dbcName,                 // DB-sourced row rendered
-		dbcAddr,                 // its tunnel address
-		`id="clients-drift"`,    // drift badge element present
-		"1 not in clients.json", // exactly one drifted client
+		dbcName,                           // DB-sourced row rendered
+		dbcAddr,                           // its tunnel address
+		`id="clients-drift"`,              // drift badge element present
+		"1 diverged from git-managed set", // exactly one drifted client
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n--- body ---\n%s", want, body)

@@ -59,9 +59,10 @@ func parseRangeParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 type clientsTabData struct {
 	Rows  []ClientRow
 	Error string
-	// Drift is the count of DB clients absent from the boot clients.json
-	// baseline (spec 015) — rendered as a small badge in the Clients-tab
-	// heading; zero hides it.
+	// Drift is the count of DB clients diverged from the git-managed
+	// (Terraform-applied) baseline (spec 017; falls back to the boot
+	// clients.json seed pre-first-apply, spec 015) — rendered as a small
+	// badge in the Clients-tab heading; zero hides it. See computeDrift.
 	Drift int
 	// Message / MessageKind carry the optional outcome line swapped in after an
 	// add/edit/remove mutation (spec 015, Slice 6). Both are empty on the
