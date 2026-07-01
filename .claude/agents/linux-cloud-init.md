@@ -1,6 +1,7 @@
 ---
 name: linux-cloud-init
 description: Use when working on EC2 user-data scripts, cloud-init configuration, systemd unit files, shell scripts for instance bootstrap, or Linux system configuration.
+model: sonnet
 skills: []
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: wireguard-networking
 description: Use when working on WireGuard VPN configuration, network topology, security group rules, VPC routing, UDP tunnel setup, or client/server key management.
+model: sonnet
 skills: []
 ---
 

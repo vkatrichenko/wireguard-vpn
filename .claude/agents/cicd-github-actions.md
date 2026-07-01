@@ -1,6 +1,7 @@
 ---
 name: cicd-github-actions
 description: Use when authoring or fixing GitHub Actions workflows for this repository — building and pushing the dashboard Docker image to AWS ECR, configuring AWS auth via OIDC, triggering EC2 deploys via SSM SendCommand, or diagnosing failed CI runs.
+model: sonnet
 skills:
   - gha-diagnosis
 ---
