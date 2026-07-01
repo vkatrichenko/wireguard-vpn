@@ -68,6 +68,60 @@ func ValidateAddress(sn ServerNet, addr string) error {
 	return nil
 }
 
+// validateSet validates an entire bulk-replace payload as a unit (spec 017
+// Slice 1): every entry must pass the same per-field checks Add/Update already
+// use, PLUS intra-payload dedup — no existing per-field validator compares
+// candidates against each other, only against the existing table, so a bulk
+// PUT needs its own self-consistency pass.
+//
+// Rules:
+//   - An empty entries slice is valid (reconciles to zero peers).
+//   - Every entry's Address must be non-empty and pass ValidateAddress against
+//     sn — unlike Add, there is no auto-allocation fallback in the bulk path
+//     (spec 017 requires idempotency: the caller supplies the full desired
+//     state, including addresses).
+//   - Name and PublicKey are checked with the existing single-field
+//     validators.
+//   - No two entries may share a Name, PublicKey, or Address.
+//
+// All-or-nothing: the first failure aborts and no partial result is returned.
+func validateSet(sn ServerNet, entries []ReplaceEntry) error {
+	seenNames := make(map[string]bool, len(entries))
+	seenKeys := make(map[string]bool, len(entries))
+	seenAddrs := make(map[string]bool, len(entries))
+
+	for i, e := range entries {
+		if err := ValidateName(e.Name); err != nil {
+			return fmt.Errorf("entry %d: %w", i, err)
+		}
+		if err := ValidatePublicKey(e.PublicKey); err != nil {
+			return fmt.Errorf("entry %d: %w", i, err)
+		}
+		if e.Address == "" {
+			return fmt.Errorf("clients: entry %d (%q): address must not be empty", i, e.Name)
+		}
+		if err := ValidateAddress(sn, e.Address); err != nil {
+			return fmt.Errorf("entry %d: %w", i, err)
+		}
+
+		if seenNames[e.Name] {
+			return fmt.Errorf("clients: duplicate name %q in payload", e.Name)
+		}
+		seenNames[e.Name] = true
+
+		if seenKeys[e.PublicKey] {
+			return fmt.Errorf("clients: duplicate public key in payload (entry %d)", i)
+		}
+		seenKeys[e.PublicKey] = true
+
+		if seenAddrs[e.Address] {
+			return fmt.Errorf("clients: duplicate address %q in payload", e.Address)
+		}
+		seenAddrs[e.Address] = true
+	}
+	return nil
+}
+
 // ValidateOverride validates an operator-supplied manual address and returns it
 // normalized as "ip/32". It rejects an address that is malformed, out of
 // subnet, equal to the reserved server IP, or already in use. used entries may

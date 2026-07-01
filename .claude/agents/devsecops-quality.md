@@ -1,6 +1,7 @@
 ---
 name: devsecops-quality
 description: Use when working on pre-commit hooks, tflint rules, trivy security scanning, terraform-docs generation, code formatting, or Makefile-based quality gates.
+model: haiku
 skills: []
 ---
 

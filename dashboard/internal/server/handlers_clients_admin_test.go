@@ -43,13 +43,21 @@ func (a *recordingApplier) count() int {
 	return a.calls
 }
 
-// newClientsAdminServer builds a handler whose clients.Service is backed by a
-// fresh in-memory DB and the supplied recording applier. All other deps are the
-// package's existing fakes — these tests only drive the client-management
-// surface. The wg fake returns no peers, so any added client renders "pending".
+// newClientsAdminServer builds a handler whose clients.Service AND the
+// server's own metricsDB share ONE in-memory DB — matching main.go's
+// production wiring, where clients.NewService(metricsDB, ...) and
+// server.New(..., metricsDB, ...) are passed the exact same *db.DB. This
+// matters as of spec 017 Slice 3: computeDrift reads s.metricsDB directly
+// (LoadManagedBaseline) rather than only going through clientsSvc, so a test
+// harness that (mistakenly) wired two separate DBs would see writes through
+// clientsSvc.ReplaceAll "disappear" from the server's view. All other deps
+// are the package's existing fakes — these tests only drive the
+// client-management surface. The wg fake returns no peers, so any added
+// client renders "pending".
 func newClientsAdminServer(t *testing.T) (http.Handler, *clients.Service, *recordingApplier) {
 	t.Helper()
-	svc := clients.NewService(newTestDB(t), "172.16.15.1/24")
+	database := newTestDB(t)
+	svc := clients.NewService(database, "172.16.15.1/24")
 	rec := &recordingApplier{}
 	svc.SetApplier(rec)
 
@@ -63,7 +71,7 @@ func newClientsAdminServer(t *testing.T) (http.Handler, *clients.Service, *recor
 
 	handler, err := server.New(
 		dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(),
-		fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(),
+		fakeProcSvc(), database, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(),
 		nil, nil, nil, svc,
 	)
 	if err != nil {
@@ -398,6 +406,197 @@ func TestExportClients_BadFormat(t *testing.T) {
 	code, _ := doReq(t, h, http.MethodGet, "/api/clients/export?format=yaml", nil, nil)
 	if code != http.StatusBadRequest {
 		t.Fatalf("bad export format: want 400, got %d", code)
+	}
+}
+
+// ---- Replace (PUT) ---------------------------------------------------------
+
+// putClientsPayload builds the {"clients_config":[...]} body PUT /api/clients
+// and GET /api/clients/export?format=tfvars share, from name/address/key
+// triples.
+func putClientsPayload(entries ...[3]string) string {
+	type entry struct {
+		Name      string `json:"name"`
+		Address   string `json:"address"`
+		PublicKey string `json:"public_key"`
+	}
+	doc := struct {
+		ClientsConfig []entry `json:"clients_config"`
+	}{}
+	for _, e := range entries {
+		doc.ClientsConfig = append(doc.ClientsConfig, entry{Name: e[0], Address: e[1], PublicKey: e[2]})
+	}
+	body, _ := json.Marshal(doc)
+	return string(body)
+}
+
+func TestPutClients_FullSet_Success(t *testing.T) {
+	h, _, rec := newClientsAdminServer(t)
+
+	payload := putClientsPayload(
+		[3]string{"alice", "172.16.15.10/32", adminKeyA},
+		[3]string{"bob", "172.16.15.11/32", adminKeyB},
+	)
+	code, body := doReq(t, h, http.MethodPut, "/api/clients", strings.NewReader(payload), jsonHeaders())
+	if code != http.StatusOK {
+		t.Fatalf("PUT full set: want 200, got %d (%s)", code, body)
+	}
+	if rec.count() != 1 {
+		t.Fatalf("applier calls = %d, want 1", rec.count())
+	}
+	if names := listNames(t, h); len(names) != 2 || !names["alice"] || !names["bob"] {
+		t.Fatalf("unexpected client set after PUT: %v", names)
+	}
+
+	// The PUT response body must equal the tfvars export for the resulting set.
+	expCode, expBody := doReq(t, h, http.MethodGet, "/api/clients/export?format=tfvars", nil, nil)
+	if expCode != http.StatusOK {
+		t.Fatalf("export tfvars: want 200, got %d (%s)", expCode, expBody)
+	}
+	if body != expBody {
+		t.Fatalf("PUT response != tfvars export:\nPUT:    %s\nexport: %s", body, expBody)
+	}
+}
+
+func TestPutClients_ContentType(t *testing.T) {
+	h, _, _ := newClientsAdminServer(t)
+	payload := putClientsPayload([3]string{"alice", "172.16.15.10/32", adminKeyA})
+	req := httptest.NewRequest(http.MethodPut, "/api/clients", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT: want 200, got %d (%s)", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+}
+
+func TestPutClients_EmptySet_ZeroPeers(t *testing.T) {
+	h, _, rec := newClientsAdminServer(t)
+	addOne(t, h, "alice", adminKeyA)
+	before := rec.count()
+
+	payload := putClientsPayload()
+	code, body := doReq(t, h, http.MethodPut, "/api/clients", strings.NewReader(payload), jsonHeaders())
+	if code != http.StatusOK {
+		t.Fatalf("PUT empty set: want 200, got %d (%s)", code, body)
+	}
+	if rec.count() != before+1 {
+		t.Fatalf("applier calls = %d, want %d", rec.count(), before+1)
+	}
+	if names := listNames(t, h); len(names) != 0 {
+		t.Fatalf("client set after empty PUT = %v, want none", names)
+	}
+
+	var doc struct {
+		ClientsConfig []any `json:"clients_config"`
+	}
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatalf("decode empty PUT response: %v (%s)", err, body)
+	}
+	if len(doc.ClientsConfig) != 0 {
+		t.Fatalf("empty PUT response clients_config = %v, want empty", doc.ClientsConfig)
+	}
+}
+
+func TestPutClients_DuplicateInPayload_Rejected(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{"duplicate name", putClientsPayload(
+			[3]string{"alice", "172.16.15.10/32", adminKeyA},
+			[3]string{"alice", "172.16.15.11/32", adminKeyB},
+		)},
+		{"duplicate public key", putClientsPayload(
+			[3]string{"alice", "172.16.15.10/32", adminKeyA},
+			[3]string{"bob", "172.16.15.11/32", adminKeyA},
+		)},
+		{"duplicate address", putClientsPayload(
+			[3]string{"alice", "172.16.15.10/32", adminKeyA},
+			[3]string{"bob", "172.16.15.10/32", adminKeyB},
+		)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _, rec := newClientsAdminServer(t)
+			code, body := doReq(t, h, http.MethodPut, "/api/clients", strings.NewReader(tc.payload), jsonHeaders())
+			if code != http.StatusBadRequest {
+				t.Fatalf("want 400, got %d (%s)", code, body)
+			}
+			var errBody struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(body), &errBody); err != nil || errBody.Error == "" {
+				t.Fatalf("expected {\"error\":...} body, got %s (err=%v)", body, err)
+			}
+			if rec.count() != 0 {
+				t.Fatalf("applier must NOT fire on rejected PUT, calls = %d", rec.count())
+			}
+		})
+	}
+}
+
+func TestPutClients_MissingAddress_Rejected(t *testing.T) {
+	h, _, rec := newClientsAdminServer(t)
+	payload := putClientsPayload([3]string{"alice", "", adminKeyA})
+	code, body := doReq(t, h, http.MethodPut, "/api/clients", strings.NewReader(payload), jsonHeaders())
+	if code != http.StatusBadRequest {
+		t.Fatalf("missing address: want 400, got %d (%s)", code, body)
+	}
+	if rec.count() != 0 {
+		t.Fatalf("applier must NOT fire on rejected PUT, calls = %d", rec.count())
+	}
+	if names := listNames(t, h); len(names) != 0 {
+		t.Fatalf("no write should have happened, got %v", names)
+	}
+}
+
+func TestPutClients_MalformedBody_Rejected(t *testing.T) {
+	h, _, rec := newClientsAdminServer(t)
+
+	// Non-JSON content type.
+	code, body := doReq(t, h, http.MethodPut, "/api/clients", strings.NewReader("not json"), formHeaders(false))
+	if code != http.StatusBadRequest {
+		t.Fatalf("non-JSON content-type: want 400, got %d (%s)", code, body)
+	}
+
+	// JSON content-type but invalid JSON body.
+	code, body = doReq(t, h, http.MethodPut, "/api/clients", strings.NewReader("{not valid json"), jsonHeaders())
+	if code != http.StatusBadRequest {
+		t.Fatalf("malformed JSON: want 400, got %d (%s)", code, body)
+	}
+
+	if rec.count() != 0 {
+		t.Fatalf("applier must NOT fire on malformed PUT, calls = %d", rec.count())
+	}
+}
+
+func TestPutClients_IdempotentRePut(t *testing.T) {
+	h, _, rec := newClientsAdminServer(t)
+	payload := putClientsPayload(
+		[3]string{"alice", "172.16.15.10/32", adminKeyA},
+		[3]string{"bob", "172.16.15.11/32", adminKeyB},
+	)
+
+	code1, body1 := doReq(t, h, http.MethodPut, "/api/clients", strings.NewReader(payload), jsonHeaders())
+	if code1 != http.StatusOK {
+		t.Fatalf("first PUT: want 200, got %d (%s)", code1, body1)
+	}
+	code2, body2 := doReq(t, h, http.MethodPut, "/api/clients", strings.NewReader(payload), jsonHeaders())
+	if code2 != http.StatusOK {
+		t.Fatalf("second PUT: want 200, got %d (%s)", code2, body2)
+	}
+	if rec.count() != 2 {
+		t.Fatalf("applier calls = %d, want 2 (both PUTs apply)", rec.count())
+	}
+	if names := listNames(t, h); len(names) != 2 || !names["alice"] || !names["bob"] {
+		t.Fatalf("client set after idempotent re-PUT = %v, want alice+bob", names)
+	}
+	if body1 != body2 {
+		t.Fatalf("re-PUT response differs:\nfirst:  %s\nsecond: %s", body1, body2)
 	}
 }
 

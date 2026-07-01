@@ -1,6 +1,7 @@
 ---
 name: go-fullstack
 description: Use when working on the WireGuard dashboard application — Go std-lib HTTP handlers and packages, html/template + embed.FS frontend, htmx server-rendered partials, Chart.js charts, modernc.org/sqlite storage, /proc filesystem readers, IMDSv2 metadata reads, and the dashboard Makefile / build pipeline.
+model: sonnet
 skills: []
 ---
 

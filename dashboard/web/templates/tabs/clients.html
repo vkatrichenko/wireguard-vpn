@@ -51,7 +51,7 @@
      mutation, so the same markup drives the cold load and every live update. */}}
 {{ define "clients-card" }}
 <section class="card" id="clients">
-  <h2>Clients{{ if .Drift }} <span class="drift-badge" id="clients-drift" title="Clients present in the dashboard DB but absent from the Terraform clients.json baseline — export and reconcile to make them survive an instance rebuild.">{{ .Drift }} not in clients.json</span>{{ end }}</h2>
+  <h2>Clients{{ if .Drift }} <span class="drift-badge" id="clients-drift" title="Clients diverged from the git-managed (Terraform-applied) set — run terraform apply to reconcile, or export and promote the change into clients_config.">{{ .Drift }} diverged from git-managed set</span>{{ end }}</h2>
 
   {{ if .Message }}
   <p class="client-message client-message-{{ if .MessageKind }}{{ .MessageKind }}{{ else }}info{{ end }}" role="status">{{ .Message }}</p>

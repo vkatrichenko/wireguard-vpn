@@ -973,6 +973,337 @@ func TestClose_Idempotent(t *testing.T) {
 	_ = d.Close()
 }
 
+// TestReplaceClients_InsertUpdateDelete exercises the mixed reconcile in one
+// call: alice survives with a changed address (update, CreatedAt preserved),
+// bob is absent from want (delete), and carol is new (insert). Pins the
+// spec 017 Slice 1 contract end to end.
+func TestReplaceClients_InsertUpdateDelete(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	alice := Client{
+		Name:      "alice",
+		PublicKey: "pk-alice",
+		Address:   "10.0.0.2/32",
+		Enabled:   true,
+		CreatedAt: t0,
+		UpdatedAt: t0,
+	}
+	bob := Client{
+		Name:      "bob",
+		PublicKey: "pk-bob",
+		Address:   "10.0.0.3/32",
+		Enabled:   true,
+		CreatedAt: t0,
+		UpdatedAt: t0,
+	}
+	if err := d.InsertClient(ctx, alice); err != nil {
+		t.Fatalf("seed InsertClient(alice): %v", err)
+	}
+	if err := d.InsertClient(ctx, bob); err != nil {
+		t.Fatalf("seed InsertClient(bob): %v", err)
+	}
+
+	later := t0.Add(time.Hour)
+	want := []Client{
+		// alice: same public_key, changed address — must UPDATE, preserving
+		// CreatedAt and id.
+		{Name: "alice", PublicKey: "pk-alice", Address: "10.0.0.9/32", Enabled: true, CreatedAt: later, UpdatedAt: later},
+		// carol: new public_key — must INSERT.
+		{Name: "carol", PublicKey: "pk-carol", Address: "10.0.0.4/32", Enabled: true, CreatedAt: later, UpdatedAt: later},
+		// bob is omitted entirely — must DELETE.
+	}
+	if err := d.ReplaceClients(ctx, want); err != nil {
+		t.Fatalf("ReplaceClients: %v", err)
+	}
+
+	got, err := d.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len(clients) = %d, want 2 (alice updated + carol inserted, bob deleted)", len(got))
+	}
+
+	byName := make(map[string]Client, len(got))
+	for _, c := range got {
+		byName[c.Name] = c
+	}
+
+	if _, ok := byName["bob"]; ok {
+		t.Errorf("bob still present after ReplaceClients, want deleted")
+	}
+
+	gotAlice, ok := byName["alice"]
+	if !ok {
+		t.Fatalf("alice missing after ReplaceClients")
+	}
+	if gotAlice.Address != "10.0.0.9/32" {
+		t.Errorf("alice Address: want 10.0.0.9/32 (updated), got %q", gotAlice.Address)
+	}
+	if !gotAlice.CreatedAt.Equal(t0) {
+		t.Errorf("alice CreatedAt: want preserved %v, got %v", t0, gotAlice.CreatedAt)
+	}
+	if gotAlice.ID != alice.ID && gotAlice.ID == 0 {
+		t.Errorf("alice ID: want preserved non-zero id, got %d", gotAlice.ID)
+	}
+
+	gotCarol, ok := byName["carol"]
+	if !ok {
+		t.Fatalf("carol missing after ReplaceClients")
+	}
+	if gotCarol.Address != "10.0.0.4/32" {
+		t.Errorf("carol Address: want 10.0.0.4/32, got %q", gotCarol.Address)
+	}
+	if !gotCarol.CreatedAt.Equal(later) {
+		t.Errorf("carol CreatedAt: want %v, got %v", later, gotCarol.CreatedAt)
+	}
+}
+
+// TestReplaceClients_DeleteBeforeInsertAllowsSwap pins the documented
+// execution order (deletes -> updates -> inserts): a single ReplaceClients
+// call that frees up alice's address by deleting her and hands that same
+// address to a brand-new peer must succeed, because the delete lands before
+// the insert. Without delete-first ordering this would trip the UNIQUE
+// constraint on address.
+func TestReplaceClients_DeleteBeforeInsertAllowsSwap(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	alice := Client{
+		Name:      "alice",
+		PublicKey: "pk-alice",
+		Address:   "10.0.0.2/32",
+		Enabled:   true,
+		CreatedAt: t0,
+		UpdatedAt: t0,
+	}
+	if err := d.InsertClient(ctx, alice); err != nil {
+		t.Fatalf("seed InsertClient(alice): %v", err)
+	}
+
+	// dave is a new public_key claiming alice's now-vacated address; alice is
+	// dropped entirely (not present in want).
+	want := []Client{
+		{Name: "dave", PublicKey: "pk-dave", Address: "10.0.0.2/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+	}
+	if err := d.ReplaceClients(ctx, want); err != nil {
+		t.Fatalf("ReplaceClients (address swap via delete+insert): %v", err)
+	}
+
+	got, err := d.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "dave" || got[0].Address != "10.0.0.2/32" {
+		t.Fatalf("clients after swap = %+v, want only dave at 10.0.0.2/32", got)
+	}
+}
+
+// TestReplaceClients_RollsBackOnError forces a failure partway through the
+// reconcile (a duplicate address collision that ReplaceClients itself can't
+// avoid: two distinct *new* public_keys both claiming the same address) and
+// asserts the whole transaction rolled back — the table is left exactly as
+// it was before the call, not partially reconciled.
+func TestReplaceClients_RollsBackOnError(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	alice := Client{
+		Name:      "alice",
+		PublicKey: "pk-alice",
+		Address:   "10.0.0.2/32",
+		Enabled:   true,
+		CreatedAt: t0,
+		UpdatedAt: t0,
+	}
+	if err := d.InsertClient(ctx, alice); err != nil {
+		t.Fatalf("seed InsertClient(alice): %v", err)
+	}
+
+	// Two brand-new peers colliding on the same address: the first INSERT
+	// succeeds, the second must fail the UNIQUE(address) constraint and roll
+	// back the entire tx — including the first insert.
+	want := []Client{
+		{Name: "bob", PublicKey: "pk-bob", Address: "10.0.0.5/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+		{Name: "carol", PublicKey: "pk-carol", Address: "10.0.0.5/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+	}
+	if err := d.ReplaceClients(ctx, want); err == nil {
+		t.Fatal("ReplaceClients with colliding addresses: want error, got nil")
+	}
+
+	got, err := d.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients post-rollback: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "alice" || got[0].Address != "10.0.0.2/32" {
+		t.Fatalf("table after rollback = %+v, want untouched (only alice)", got)
+	}
+}
+
+// TestReplaceClients_EmptyWantDeletesAll confirms the trivial "reconcile to
+// zero peers" case: an empty want slice deletes every existing row.
+func TestReplaceClients_EmptyWantDeletesAll(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	if err := d.InsertClient(ctx, Client{Name: "alice", PublicKey: "pk-alice", Address: "10.0.0.2/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0}); err != nil {
+		t.Fatalf("seed InsertClient: %v", err)
+	}
+
+	if err := d.ReplaceClients(ctx, nil); err != nil {
+		t.Fatalf("ReplaceClients(nil): %v", err)
+	}
+
+	got, err := d.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("len(clients) = %d, want 0 after empty ReplaceClients", len(got))
+	}
+}
+
+// TestManagedBaseline_EmptyLoadReturnsNil pins the "no PUT has ever succeeded"
+// starting state computeDrift's fallback branch relies on: a fresh db's
+// managed_baseline table is empty, and LoadManagedBaseline reports that as a
+// nil slice with no error (not an error, matching the zero-row convention of
+// ListClients and the metric Query helpers).
+func TestManagedBaseline_EmptyLoadReturnsNil(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	got, err := d.LoadManagedBaseline(ctx)
+	if err != nil {
+		t.Fatalf("LoadManagedBaseline on fresh db: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("LoadManagedBaseline on fresh db = %+v, want empty", got)
+	}
+}
+
+// TestReplaceClientsAndBaseline_RoundTrip proves the basic write+read
+// contract: ReplaceClientsAndBaseline persists both the clients table and the
+// managed_baseline table, and LoadManagedBaseline returns exactly what was
+// written, ordered by address then id (matching ListClients' ordering
+// convention).
+func TestReplaceClientsAndBaseline_RoundTrip(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	want := []Client{
+		{Name: "alice", PublicKey: "pk-alice", Address: "10.0.0.2/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+		{Name: "bob", PublicKey: "pk-bob", Address: "10.0.0.3/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+	}
+	baseline := []BaselineEntry{
+		{Name: "alice", Address: "10.0.0.2/32", PublicKey: "pk-alice"},
+		{Name: "bob", Address: "10.0.0.3/32", PublicKey: "pk-bob"},
+	}
+	if err := d.ReplaceClientsAndBaseline(ctx, want, baseline); err != nil {
+		t.Fatalf("ReplaceClientsAndBaseline: %v", err)
+	}
+
+	gotClients, err := d.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(gotClients) != 2 {
+		t.Fatalf("len(clients) = %d, want 2", len(gotClients))
+	}
+
+	gotBaseline, err := d.LoadManagedBaseline(ctx)
+	if err != nil {
+		t.Fatalf("LoadManagedBaseline: %v", err)
+	}
+	if len(gotBaseline) != 2 {
+		t.Fatalf("len(baseline) = %d, want 2: %+v", len(gotBaseline), gotBaseline)
+	}
+	for i, want := range baseline {
+		if gotBaseline[i] != want {
+			t.Errorf("baseline[%d] = %+v, want %+v", i, gotBaseline[i], want)
+		}
+	}
+}
+
+// TestReplaceClientsAndBaseline_ReplaceOverwritesPrevious proves the baseline
+// is a whole-set REPLACE, not an accumulate: a second call with a different
+// set must leave only the new set behind, not a union of old and new.
+func TestReplaceClientsAndBaseline_ReplaceOverwritesPrevious(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	first := []Client{{Name: "alice", PublicKey: "pk-alice", Address: "10.0.0.2/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0}}
+	firstBaseline := []BaselineEntry{{Name: "alice", Address: "10.0.0.2/32", PublicKey: "pk-alice"}}
+	if err := d.ReplaceClientsAndBaseline(ctx, first, firstBaseline); err != nil {
+		t.Fatalf("first ReplaceClientsAndBaseline: %v", err)
+	}
+
+	second := []Client{{Name: "carol", PublicKey: "pk-carol", Address: "10.0.0.4/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0}}
+	secondBaseline := []BaselineEntry{{Name: "carol", Address: "10.0.0.4/32", PublicKey: "pk-carol"}}
+	if err := d.ReplaceClientsAndBaseline(ctx, second, secondBaseline); err != nil {
+		t.Fatalf("second ReplaceClientsAndBaseline: %v", err)
+	}
+
+	gotBaseline, err := d.LoadManagedBaseline(ctx)
+	if err != nil {
+		t.Fatalf("LoadManagedBaseline: %v", err)
+	}
+	if len(gotBaseline) != 1 || gotBaseline[0] != secondBaseline[0] {
+		t.Fatalf("baseline after second replace = %+v, want only %+v", gotBaseline, secondBaseline[0])
+	}
+}
+
+// TestReplaceClientsAndBaseline_RollsBackBothOnError forces the same
+// clients-table UNIQUE(address) collision TestReplaceClients_RollsBackOnError
+// uses, but through ReplaceClientsAndBaseline — proving the baseline write
+// shares the clients-table reconcile's transaction: a forced failure must
+// roll back BOTH tables, leaving the baseline exactly as it was before the
+// call, not partially advanced to the failed attempt's intended set.
+func TestReplaceClientsAndBaseline_RollsBackBothOnError(t *testing.T) {
+	d := newTestDB(t)
+	ctx := context.Background()
+
+	seedClient := Client{Name: "alice", PublicKey: "pk-alice", Address: "10.0.0.2/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0}
+	if err := d.InsertClient(ctx, seedClient); err != nil {
+		t.Fatalf("seed InsertClient(alice): %v", err)
+	}
+	seedBaseline := []BaselineEntry{{Name: "alice", Address: "10.0.0.2/32", PublicKey: "pk-alice"}}
+	if err := d.ReplaceClientsAndBaseline(ctx, []Client{seedClient}, seedBaseline); err != nil {
+		t.Fatalf("seed ReplaceClientsAndBaseline: %v", err)
+	}
+
+	// Two brand-new peers colliding on the same address: the clients-table
+	// reconcile fails partway, so the whole tx (peers AND baseline) must roll
+	// back to the seeded state above.
+	badWant := []Client{
+		{Name: "bob", PublicKey: "pk-bob", Address: "10.0.0.5/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+		{Name: "carol", PublicKey: "pk-carol", Address: "10.0.0.5/32", Enabled: true, CreatedAt: t0, UpdatedAt: t0},
+	}
+	badBaseline := []BaselineEntry{
+		{Name: "bob", Address: "10.0.0.5/32", PublicKey: "pk-bob"},
+		{Name: "carol", Address: "10.0.0.5/32", PublicKey: "pk-carol"},
+	}
+	if err := d.ReplaceClientsAndBaseline(ctx, badWant, badBaseline); err == nil {
+		t.Fatal("ReplaceClientsAndBaseline with colliding addresses: want error, got nil")
+	}
+
+	gotClients, err := d.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients post-rollback: %v", err)
+	}
+	if len(gotClients) != 1 || gotClients[0].Name != "alice" {
+		t.Fatalf("clients after rollback = %+v, want untouched (only alice)", gotClients)
+	}
+
+	gotBaseline, err := d.LoadManagedBaseline(ctx)
+	if err != nil {
+		t.Fatalf("LoadManagedBaseline post-rollback: %v", err)
+	}
+	if len(gotBaseline) != 1 || gotBaseline[0] != seedBaseline[0] {
+		t.Fatalf("baseline after rollback = %+v, want untouched (only %+v) — baseline write did NOT roll back with the peer reconcile", gotBaseline, seedBaseline[0])
+	}
+}
+
 // TestQueryClientTraffic_ByKey pins the per-key range-scan contract for
 // the per-peer chart endpoint: given a (publicKey, from, to), return only
 // that peer's rows inside the inclusive window, ordered ASC by ts, with

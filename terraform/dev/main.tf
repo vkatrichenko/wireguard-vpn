@@ -17,7 +17,7 @@ module "wireguard" {
 
   vpc_id                      = module.network.vpc_id
   subnet_id                   = module.network.public_subnets[0]
-  wg_server_net               = "172.16.15.1/24"
+  wg_server_net               = local.wg_server_net
   wg_server_private_key_param = "/config/${local.project_name}-${local.environment}/default-private-key"
   # $ wg genkey | tee privatekey | wg pubkey > publickey
   # [Interface]
@@ -31,18 +31,10 @@ module "wireguard" {
   # AllowedIPs = 10.22.0.0/16
   # Endpoint = 54.245.26.247:51820
 
-  clients_config = [
-    {
-      name       = "vkatrychenko"
-      address    = "172.16.15.6/32"
-      public_key = "OVtCVOCizGvTVq2vhlymbEOmVnzfZaQKxXgUk+5eYwM="
-    },
-    {
-      name       = "test1"
-      address    = "172.16.15.7/32"
-      public_key = "WuF+51NTLZllDf1U5RSdtPT5xUVuezwCm9ypuOy22io="
-    },
-  ]
+  # Boot seed derives from the same canonical, address-sorted list the API-managed
+  # restapi_object uses (local.clients_config → local.clients_sorted), so both paths
+  # stay in lockstep. Peer entries live in locals.tf.
+  clients_config = local.clients_sorted
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]
@@ -72,6 +64,40 @@ module "wireguard" {
   # dashboard_alerts intentionally omitted — defaults apply (disk/cpu 90%, etc.).
 
   tags = local.default_tags
+}
+
+# Terraform-managed peer set (spec 017). Drives the dashboard's PUT /api/clients
+# bulk endpoint over the VPN, making the whole client list a single reconciled
+# object rather than a boot-only seed. Count-gated on the OFF-by-default flag, so
+# it's inert until the owner opts in.
+#
+# This is a SINGLETON collection, not a per-id object: read/update/destroy paths
+# are overridden to hit /api/clients directly (no `/{id}` suffix the provider would
+# otherwise append). `object_id` is a static "managed" so the address is stable.
+# Read hits the export endpoint (?format=tfvars, address-sorted) to match state.
+# Destroy PUTs an empty clients_config so `terraform destroy` clears peers cleanly.
+resource "restapi_object" "peers" {
+  count = local.manage_peers_via_api ? 1 : 0
+
+  path      = "/api/clients"
+  object_id = "managed"
+  data      = jsonencode({ clients_config = local.clients_sorted })
+
+  create_method = "PUT"
+  create_path   = "/api/clients"
+
+  update_method = "PUT"
+  update_path   = "/api/clients"
+
+  read_method  = "GET"
+  read_path    = "/api/clients/export"
+  query_string = "format=tfvars"
+
+  destroy_method = "PUT"
+  destroy_path   = "/api/clients"
+  destroy_data   = jsonencode({ clients_config = [] })
+
+  depends_on = [module.wireguard]
 }
 
 # The dashboard binary is now distributed as a public GitHub Release (spec 005):

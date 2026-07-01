@@ -122,10 +122,11 @@ func (s *server) alertSnapshot() alerts.Status {
 type clientCountData struct {
 	Online int
 	Total  int
-	// Drift is the count of DB clients whose public key is absent from the
-	// boot clients.json baseline (spec 015) — i.e. runtime-added peers not yet
-	// reconciled back into Terraform. Rendered as a small badge on the
-	// client-count card; zero hides it.
+	// Drift is the count of live enabled DB clients that diverge from the
+	// dashboard-owned managed_baseline — the last Terraform-applied peer set
+	// (spec 017), falling back to the boot clients.json seed pre-first-apply
+	// (spec 015). Rendered as a small badge on the client-count card; zero
+	// hides it. See computeDrift for the exact comparison.
 	Drift int
 }
 
@@ -261,6 +262,7 @@ func New(
 	mux.HandleFunc("GET /api/service", s.handleGetService)
 	mux.HandleFunc("GET /api/clients", s.handleGetClients)
 	mux.HandleFunc("POST /api/clients", s.handleAddClient)
+	mux.HandleFunc("PUT /api/clients", s.handlePutClients)
 	mux.HandleFunc("GET /api/clients/export", s.handleExportClients)
 	mux.HandleFunc("PATCH /api/clients/{name}", s.handleUpdateClient)
 	mux.HandleFunc("DELETE /api/clients/{name}", s.handleDeleteClient)
@@ -403,29 +405,90 @@ func (s *server) buildPageData(ctx context.Context) pageData {
 	return data
 }
 
-// computeDrift counts DB clients whose public key is absent from the boot
-// clients.json baseline — the runtime-added peers an operator has not yet
-// reconciled back into Terraform (spec 015). A missing or unreadable
-// clients.json degrades gracefully to an empty baseline (every DB client counts
-// as drift) rather than 500-ing the page: the baseline is advisory, not
-// load-bearing for rendering the list.
+// computeDrift counts live enabled DB clients that diverge from the
+// dashboard-owned managed_baseline (spec 017, Slice 3) — the peer set as of
+// the last successful PUT /api/clients, i.e. the last Terraform apply. A
+// client counts as drift when its full {name, address, public_key} tuple is
+// not present in the baseline: this catches both a brand-new UI-only peer AND
+// an in-place UI edit of a git-managed peer (a rename or address change
+// changes the tuple even though the public_key is unchanged), matching what a
+// subsequent `terraform plan` would report as a diff. Disabled peers are
+// excluded — a disabled peer has no live-apply presence and (today) no
+// git-managed equivalent, so counting it as drift would be noise the operator
+// can't act on via git.
+//
+// Removed peers (present in the baseline, absent from live) are NOT counted
+// here: computeDrift answers "how many peers does the UI need me to look at",
+// and a peer Terraform still declares but the UI lost track of isn't
+// surfaced by iterating dbClients. This mirrors spec 015's original
+// semantics (which also only counted additions) and keeps the return type a
+// single int rather than an added/removed pair; if the owner wants removals
+// surfaced too, this is the seam to extend.
+//
+// Fallback: when the baseline is empty (no PUT has ever succeeded — a
+// freshly-seeded box pre-first-apply), drift is computed against the
+// clients.json first-boot seed instead, so the badge still means something
+// useful before Terraform's restapi_object has run once. A missing or
+// unreadable clients.json in that fallback degrades gracefully to an empty
+// baseline (every enabled DB client counts as drift) rather than 500-ing the
+// page — the baseline is advisory, not load-bearing for rendering the list.
 func (s *server) computeDrift(ctx context.Context, dbClients []db.Client) int {
+	baseline, err := s.metricsDB.LoadManagedBaseline(ctx)
+	if err != nil {
+		slog.Warn("computeDrift: managed_baseline load failed; falling back to clients.json", "err", err)
+		baseline = nil
+	}
+
+	if len(baseline) > 0 {
+		want := make(map[baselineKey]struct{}, len(baseline))
+		for _, b := range baseline {
+			want[baselineKey{Name: b.Name, Address: b.Address, PublicKey: b.PublicKey}] = struct{}{}
+		}
+		drift := 0
+		for _, c := range dbClients {
+			if !c.Enabled {
+				continue
+			}
+			if _, ok := want[baselineKey{Name: c.Name, Address: c.Address, PublicKey: c.PublicKey}]; !ok {
+				drift++
+			}
+		}
+		return drift
+	}
+
+	// Fallback: pre-first-apply, diff against the boot clients.json seed
+	// (spec 015's original behaviour) — public_key only, matching what that
+	// seed has always compared on.
 	seed, err := s.clientsfileSvc.Load(ctx)
 	if err != nil {
 		slog.Warn("computeDrift: clients.json baseline load failed; treating as empty", "err", err)
 		seed = nil
 	}
-	baseline := make(map[string]struct{}, len(seed))
+	seedKeys := make(map[string]struct{}, len(seed))
 	for _, c := range seed {
-		baseline[c.PublicKey] = struct{}{}
+		seedKeys[c.PublicKey] = struct{}{}
 	}
 	drift := 0
 	for _, c := range dbClients {
-		if _, ok := baseline[c.PublicKey]; !ok {
+		if !c.Enabled {
+			continue
+		}
+		if _, ok := seedKeys[c.PublicKey]; !ok {
 			drift++
 		}
 	}
 	return drift
+}
+
+// baselineKey is the full-tuple comparison key computeDrift uses against the
+// SQLite managed_baseline: comparing on {name, address, public_key} (rather
+// than public_key alone, as the clients.json fallback does) is what makes a
+// UI-only edit of a git-managed peer register as drift, not just a UI-only
+// addition.
+type baselineKey struct {
+	Name      string
+	Address   string
+	PublicKey string
 }
 
 // humanUptime formats time.Since(t) as a short human-readable duration like
