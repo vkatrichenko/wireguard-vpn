@@ -1,6 +1,17 @@
 locals {
+  # Single admin bootstrap peer (spec 019), normalized to a 0-or-1 element list so
+  # every downstream `for` renders empty when var.admin_peer is null. The admin
+  # gets a FIXED first-host tunnel address — the `.2` host of wg_server_net
+  # (172.16.15.1/24 → 172.16.15.2/32). It is the ONLY peer Terraform seeds; all
+  # other peers are UI-managed and never touch user_data.
+  admin_peers = var.admin_peer == null ? [] : [{
+    name       = var.admin_peer.name
+    address    = "${cidrhost(var.wg_server_net, 2)}/32"
+    public_key = var.admin_peer.public_key
+  }]
+
   wg_client_data_json = [
-    for client in var.clients_config : templatefile("${path.module}/templates/client-data.tpl", {
+    for client in local.admin_peers : templatefile("${path.module}/templates/client-data.tpl", {
       client_name          = client.name
       client_pub_key       = client.public_key
       client_ip            = client.address
@@ -11,54 +22,29 @@ locals {
   # JSON manifest consumed by the dashboard at runtime
   # (path: /etc/wireguard-dashboard/clients.json — written by user-data).
   # Stock WireGuard has no native concept of peer names; this file is the
-  # source of truth that maps peer public keys to human-readable labels.
+  # source of truth that maps peer public keys to human-readable labels. In
+  # spec 019 it seeds only the admin peer (or `[]` when admin_peer is null); the
+  # dashboard owns every subsequent write.
   clients_json = jsonencode([
-    for c in var.clients_config : {
+    for c in local.admin_peers : {
       name       = c.name
       address    = c.address
       public_key = c.public_key
     }
   ])
 
-  # --- Canonical client-list JSON (spec 018 §2.5) --------------------------
-  # The SHARED, single-sourced serialization of the peer list used by BOTH the
-  # S3 seed object (client_store.tf) and the root-module drift `check`. Slice 4's
-  # Go serializer MUST reproduce this byte-for-byte or the drift check will report
-  # phantom drift. Contract:
-  #   - Array of objects, each with ONLY { name, address, public_key } — no
-  #     `enabled`/disabled or any runtime state (so a UI enable/disable toggle is
-  #     NOT git drift).
-  #   - Sorted by `address` ascending, using a lexicographic string sort of the
-  #     `address` value (HCL `sort()` semantics; the Go side must string-sort the
-  #     same field). NOTE: this is a plain string sort, so "172.16.15.10/32" sorts
-  #     before "172.16.15.6/32" — deterministic, and both sides must match it.
-  #   - Encoded with `jsonencode` (compact, no extra whitespace). `jsonencode`
-  #     emits object keys alphabetically, so each object serializes as
-  #     {"address":…,"name":…,"public_key":…}.
-  # Address is assumed unique per peer (each is a /32); the map keyed by address
-  # is what gives us a stable, sortable ordering key.
-  clients_by_address = {
-    for c in var.clients_config : c.address => {
-      name       = c.name
-      address    = c.address
-      public_key = c.public_key
-    }
-  }
-  clients_canonical_json = jsonencode([
-    for addr in sort(keys(local.clients_by_address)) : local.clients_by_address[addr]
-  ])
-
-  # The S3 client-list bridge exists ONLY in cloud mode. This flag gates every S3
+  # The S3 client store exists ONLY in cloud mode. This flag gates every S3
   # resource (client_store.tf), the IAM grant (iam.tf), and the module outputs —
   # a default `local` apply provisions zero S3.
   client_store_enabled = var.client_management_mode == "cloud"
 
   # Store coordinates exported to the dashboard env. Non-empty ONLY in cloud mode
   # so local mode stays a clean no-op on the box (the dashboard sees empty coords
-  # and never touches S3). Guarded [0] index: the resources are count-gated on the
-  # same flag, so the index is only reached when they exist.
+  # and never touches S3). The key is a fixed constant — Terraform no longer
+  # manages the object (the dashboard 404-initializes it), so there is no
+  # aws_s3_object to reference.
   client_store_s3_bucket = local.client_store_enabled ? aws_s3_bucket.client_list[0].bucket : ""
-  client_store_s3_key    = local.client_store_enabled ? aws_s3_object.clients[0].key : ""
+  client_store_s3_key    = local.client_store_enabled ? "clients.json" : ""
 
   # Resolved alert webhook URL (secret). Empty when no SSM param name is wired,
   # which suppresses the DASHBOARD_WEBHOOK_URL line in alerts.env. The count-gated

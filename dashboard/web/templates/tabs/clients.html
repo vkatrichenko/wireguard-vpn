@@ -51,7 +51,7 @@
      mutation, so the same markup drives the cold load and every live update. */}}
 {{ define "clients-card" }}
 <section class="card" id="clients">
-  <h2>Clients{{ if .Drift }} <span class="drift-badge" id="clients-drift" title="Clients diverged from the git-managed (Terraform-applied) set — run terraform apply to reconcile, or export and promote the change into clients_config.">{{ .Drift }} diverged from git-managed set</span>{{ end }}</h2>
+  <h2>Clients</h2>
 
   {{ if .Message }}
   <p class="client-message client-message-{{ if .MessageKind }}{{ .MessageKind }}{{ else }}info{{ end }}" role="status">{{ .Message }}</p>
@@ -83,12 +83,6 @@
     </div>
     <p class="hint">Generate the keypair off-host with <code>wg genkey | tee privatekey | wg pubkey</code> and paste the public key — the server never holds the private key.</p>
   </form>
-
-  <div class="client-export">
-    <span class="client-export-label">Reconcile to Terraform:</span>
-    <a class="client-export-link" href="/api/clients/export?format=hcl" download>Export HCL</a>
-    <a class="client-export-link" href="/api/clients/export?format=tfvars" download>Export tfvars</a>
-  </div>
 
   {{ if .Error }}
   <p class="error">Failed to load clients: {{ .Error }}</p>

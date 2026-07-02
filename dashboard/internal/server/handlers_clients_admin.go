@@ -50,81 +50,6 @@ func (s *server) handleAddClient(w http.ResponseWriter, r *http.Request) {
 	s.respondClientSuccess(w, r, htmx, fmt.Sprintf("Added client %q.", p.Name))
 }
 
-// handlePutClients serves PUT /api/clients (spec 017, Slice 2): the
-// Terraform-driven bulk-replace endpoint. Unlike Add/Update/Delete this is
-// JSON-only — Terraform's restapi provider is the only caller, there is no
-// htmx form path — and the body is the exact same {"clients_config": [...]}
-// doc GET /api/clients/export?format=tfvars emits, so a REST client's
-// write-then-read round-trips byte-for-byte with no phantom drift.
-func (s *server) handlePutClients(w http.ResponseWriter, r *http.Request) {
-	if s.clientsSvc == nil {
-		http.Error(w, "client management unavailable", http.StatusServiceUnavailable)
-		return
-	}
-
-	entries, err := parseClientsReplace(r)
-	if err != nil {
-		s.writeClientsAdminError(w, http.StatusBadRequest, "could not read request body")
-		return
-	}
-
-	list, err := s.clientsSvc.ReplaceAll(r.Context(), entries)
-	if err != nil {
-		slog.Warn("PUT /api/clients: replace rejected", "err", err)
-		s.writeClientsAdminError(w, clientErrorStatus(err), err.Error())
-		return
-	}
-
-	body, err := clients.ExportTFVars(list)
-	if err != nil {
-		slog.Error("PUT /api/clients: tfvars render failed", "err", err)
-		s.writeClientsAdminError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(body)
-}
-
-// parseClientsReplace decodes the PUT /api/clients body into ReplaceEntry
-// values. The body must be the tfvars-export shape
-// {"clients_config":[{name,address,public_key}, ...]}; anything that doesn't
-// decode into that shape (including a non-JSON body) is a caller error, left
-// for handlePutClients to report as 400.
-func parseClientsReplace(r *http.Request) ([]clients.ReplaceEntry, error) {
-	if !isJSONRequest(r) {
-		return nil, fmt.Errorf("clients: PUT /api/clients requires application/json")
-	}
-	var body struct {
-		ClientsConfig []struct {
-			Name      string `json:"name"`
-			Address   string `json:"address"`
-			PublicKey string `json:"public_key"`
-		} `json:"clients_config"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		return nil, err
-	}
-	entries := make([]clients.ReplaceEntry, 0, len(body.ClientsConfig))
-	for _, e := range body.ClientsConfig {
-		entries = append(entries, clients.ReplaceEntry{
-			Name:      strings.TrimSpace(e.Name),
-			Address:   strings.TrimSpace(e.Address),
-			PublicKey: strings.TrimSpace(e.PublicKey),
-		})
-	}
-	return entries, nil
-}
-
-// writeClientsAdminError writes the {"error": msg} envelope at the given
-// status — the JSON-only counterpart of respondClientError's non-htmx branch,
-// used by handlePutClients since this endpoint has no htmx fragment path.
-func (s *server) writeClientsAdminError(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	body, _ := json.Marshal(map[string]string{"error": msg})
-	_, _ = w.Write(body)
-}
-
 // handleUpdateClient serves PATCH /api/clients/{name}. Only the supplied fields
 // are applied (PATCH semantics): a JSON body uses absent vs. present keys; a
 // form body uses present-vs-absent form fields. Editable: name, public_key,
@@ -196,49 +121,10 @@ func (s *server) handleDeleteClient(w http.ResponseWriter, r *http.Request) {
 	s.respondClientSuccess(w, r, htmx, fmt.Sprintf("Removed client %q.", name))
 }
 
-// handleExportClients serves GET /api/clients/export?format=hcl|tfvars. It
-// streams the current client set as a downloadable attachment: a paste-ready
-// Terraform `clients_config` HCL block (default) or a clients.auto.tfvars.json
-// document. The pure render lives in internal/clients so it is unit-testable;
-// this handler only sources the list and sets the download headers (reusing the
-// config-download Content-Disposition + filename idiom).
-func (s *server) handleExportClients(w http.ResponseWriter, r *http.Request) {
-	if s.clientsSvc == nil {
-		http.Error(w, "client management unavailable", http.StatusServiceUnavailable)
-		return
-	}
-
-	cs, err := s.clientsSvc.List(r.Context())
-	if err != nil {
-		slog.Error("GET /api/clients/export: list failed", "err", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	switch r.URL.Query().Get("format") {
-	case "tfvars":
-		body, err := clients.ExportTFVars(cs)
-		if err != nil {
-			slog.Error("GET /api/clients/export: tfvars render failed", "err", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Content-Disposition", `attachment; filename="clients.auto.tfvars.json"`)
-		_, _ = w.Write(body)
-	case "", "hcl":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Disposition", `attachment; filename="clients_config.tf"`)
-		_, _ = w.Write([]byte(clients.ExportHCL(cs)))
-	default:
-		http.Error(w, "format must be hcl or tfvars", http.StatusBadRequest)
-	}
-}
-
 // respondClientSuccess re-renders the clients-card fragment (htmx, 200 HTML with
 // an outcome message) or echoes the live list as JSON (plain caller). Both read
-// fresh state via buildClientsTabData so the table + drift badge reflect the
-// just-applied mutation.
+// fresh state via buildClientsTabData so the table reflects the just-applied
+// mutation.
 func (s *server) respondClientSuccess(w http.ResponseWriter, r *http.Request, htmx bool, msg string) {
 	if htmx {
 		data := s.buildClientsTabData(r.Context())

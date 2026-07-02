@@ -6,24 +6,19 @@ locals {
   vpc_name = "${local.project_name}-vpc"
   vpc_cidr = "10.23.0.0/16"
 
-  # Client-management mode (spec 018): "local" = dashboard/SQLite-managed peers
-  # (default, no instance churn); "cloud" = S3-bridged peers (later slices).
+  # Client-management mode (spec 019): "local" = dashboard/SQLite-managed peers
+  # (no S3); "cloud" = SQLite + S3 as a pure durable backup (Terraform never
+  # reads it, no drift detection).
   client_management_mode = "cloud"
 
-  # Canonical peer set — the first-boot seed passed to the wireguard module's
-  # clients_config input.
-  clients_config = [
-    {
-      name       = "vkatrychenko"
-      address    = "172.16.15.6/32"
-      public_key = "LmvqUY/F0ix8y5Xhn1HOJ+7wrhbggSa6zn6Eggh90Rg="
-    },
-    {
-      name       = "test1"
-      address    = "172.16.15.7/32"
-      public_key = "WuF+51NTLZllDf1U5RSdtPT5xUVuezwCm9ypuOy22io="
-    },
-  ]
+  # Single admin bootstrap peer (spec 019) — the ONLY peer Terraform seeds, for
+  # anti-lockout. Day-to-day peers are managed entirely in the dashboard UI, not
+  # here. An object { name, public_key } seeds an admin; `null` seeds no peer
+  # (empty WG peer set + empty clients.json), which is a valid deploy.
+  admin_peer = {
+    name       = "laptop"
+    public_key = "OYR4niUZ/Ay5KAxwyvfAVOjgKo4NwQb0wRSyqRblPF4="
+  }
 
   default_tags = {
     "Managed"     = "by-terraform"

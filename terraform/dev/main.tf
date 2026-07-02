@@ -33,19 +33,13 @@ module "wireguard" {
 
   client_management_mode = local.client_management_mode
 
-  dashboard_release_tag = "v0.0.14"
-  github_repo = "vkatrichenko/wireguard-vpn"
+  dashboard_release_tag = "v0.0.15"
+  github_repo           = "vkatrichenko/wireguard-vpn"
 
-  # The boot seed is ALWAYS the full canonical peer set — in BOTH local and cloud
-  # modes (spec 018). Peer-management behavior is selected by
-  # `client_management_mode`, NOT by emptying this seed:
-  #   local mode → this seed only bootstraps a fresh box; peers are then managed
-  #     live in the dashboard UI backed by instance-local SQLite, no instance churn.
-  #   cloud mode → this seed one-time-bootstraps the S3-bridged peer object; the
-  #     dashboard then owns it and Terraform only warns on drift (later slices).
-  # Seeding the full set unconditionally is what kills spec-017's zero-peer
-  # cold-start lockout.
-  clients_config = local.clients_config
+  # Single admin bootstrap peer (spec 019) — the ONLY peer Terraform seeds, for
+  # anti-lockout. The dashboard UI is the sole authority for every other peer, so
+  # editing the peer list no longer churns the instance. `null` seeds no peer.
+  admin_peer = local.admin_peer
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]

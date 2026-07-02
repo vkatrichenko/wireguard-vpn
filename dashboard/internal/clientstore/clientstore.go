@@ -6,12 +6,11 @@
 // (NoopStore for local mode, S3Store for cloud mode), and the canonical
 // serializer both sides of the bridge must agree on byte-for-structure.
 //
-// Entry deliberately mirrors internal/clients.ExportEntry / internal/db's
-// BaselineEntry rather than importing internal/clients directly: this
+// Entry deliberately mirrors internal/clients.ReplaceEntry's {name, address,
+// public_key} shape rather than importing internal/clients directly: this
 // package must stay leaf-level (internal/clients imports IT, to hold a Store
 // dependency and call Save after a mutation), so importing internal/clients
-// here would be a cycle. The three types are kept in sync by convention, the
-// same posture db.BaselineEntry documents.
+// here would be a cycle. The two types are kept in sync by convention.
 package clientstore
 
 import (

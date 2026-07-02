@@ -22,21 +22,24 @@
 #   WG_PEERS               [Peer] stanzas, verbatim      (default empty — the
 #                          server comes up with zero peers, which is valid)
 #
-# Optional WireGuard dashboard (installed only when DASHBOARD_RELEASE_TAG is set):
-#   DASHBOARD_RELEASE_TAG  GitHub Release tag to install (default empty -> skip
-#                          the whole dashboard install; WG-only box)
-#   DASHBOARD_RELEASE_REPO owner/repo to fetch the release from (required when
-#                          DASHBOARD_RELEASE_TAG is set; fail hard if missing)
+# WireGuard dashboard (always installed alongside WireGuard — there is no
+# bare-WireGuard install path; other tooling covers a bare WG server):
+#   DASHBOARD_RELEASE_TAG  GitHub Release tag to install. REQUIRED — no
+#                          default; fails hard if unset/empty.
+#   DASHBOARD_RELEASE_REPO owner/repo to fetch the release from. REQUIRED — no
+#                          default; fails hard if unset/empty.
+#   INSTALL_SCRIPT_REF     git ref (branch/tag/sha) this install.sh was itself
+#                          fetched at (default main). Reused to fetch
+#                          scripts/wg-peer from the SAME ref/repo, so the CLI
+#                          always matches the installer that placed it.
 #   DASHBOARD_PORT         dashboard bind port           (default 8080)
 #   CLIENT_MANAGEMENT_MODE peer-management mode: local | cloud (spec 018).
-#                          REQUIRED when the dashboard is installed
-#                          (DASHBOARD_RELEASE_TAG set); no default — fails hard if
-#                          unset/invalid there. Unused on WG-only installs.
+#                          REQUIRED — no default; fails hard if unset/invalid.
 #   CLIENT_STORE_S3_BUCKET S3 bucket holding the client list (cloud mode only).
 #   CLIENT_STORE_S3_KEY    S3 object key of the client list (cloud mode only).
 #                          Both are REQUIRED (non-empty) when
-#                          CLIENT_MANAGEMENT_MODE=cloud and the dashboard is
-#                          installed; ignored (may be empty) in local mode.
+#                          CLIENT_MANAGEMENT_MODE=cloud; ignored (may be
+#                          empty) in local mode.
 #   CLIENTS_JSON           clients manifest written to   (default [])
 #                          /etc/wireguard-dashboard/clients.json
 #   WG_CLIENT_DNS          DNS for generated client cfgs (default 1.1.1.1; always
@@ -86,7 +89,7 @@ DASHBOARD_ONLY=0
 usage() {
   cat >&2 <<'USAGE_EOF'
 Usage: install.sh [--uninstall | --purge] [--dashboard-only]
-  (no args)         install or update WireGuard (+ dashboard when pinned)
+  (no args)         install or update WireGuard + dashboard
   --uninstall       stop services and remove artifacts; KEEP data
   --purge           --uninstall and also wipe data (server key, wg0.conf, DB)
   --dashboard-only  restrict remove/purge to the dashboard; leave WireGuard up
@@ -112,23 +115,26 @@ WG_SERVER_PORT="${WG_SERVER_PORT:-51820}"
 WG_SERVER_PRIVATE_KEY="${WG_SERVER_PRIVATE_KEY:-}"
 WG_PEERS="${WG_PEERS:-}"
 
-# Optional dashboard: empty DASHBOARD_RELEASE_TAG -> the whole dashboard block
-# is skipped (see the gate below). DASHBOARD_RELEASE_REPO has no default; it is
-# required when the tag is set and validated inside the gate.
+# Dashboard is always installed (spec 019) — DASHBOARD_RELEASE_TAG and
+# DASHBOARD_RELEASE_REPO have no default; both are required and validated
+# below (early fail-hard, right after this block).
 DASHBOARD_RELEASE_TAG="${DASHBOARD_RELEASE_TAG:-}"
 DASHBOARD_RELEASE_REPO="${DASHBOARD_RELEASE_REPO:-}"
+# Ref this install.sh was itself fetched at (the EC2 wrapper / a manual `curl`
+# both default to "main" off-AWS). Reused verbatim to fetch scripts/wg-peer
+# from DASHBOARD_RELEASE_REPO at the same ref — see step 11 below.
+INSTALL_SCRIPT_REF="${INSTALL_SCRIPT_REF:-main}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8080}"
-# No default: required (and validated) inside the dashboard gate below when
-# DASHBOARD_RELEASE_TAG is set. Empty read here only keeps it nounset-safe.
+# No default: required (and validated) below, since the dashboard is always
+# installed. Empty read here only keeps it nounset-safe.
 CLIENT_MANAGEMENT_MODE="${CLIENT_MANAGEMENT_MODE:-}"
 # S3 client-store coordinates (spec 018). No defaults: required (and validated)
-# inside the dashboard gate ONLY when CLIENT_MANAGEMENT_MODE=cloud. Empty reads
-# here keep them nounset-safe (and empty is correct in local mode).
+# below ONLY when CLIENT_MANAGEMENT_MODE=cloud. Empty reads here keep them
+# nounset-safe (and empty is correct in local mode).
 CLIENT_STORE_S3_BUCKET="${CLIENT_STORE_S3_BUCKET:-}"
 CLIENT_STORE_S3_KEY="${CLIENT_STORE_S3_KEY:-}"
 CLIENTS_JSON="${CLIENTS_JSON:-[]}"
-# Off-AWS discovery for the dashboard — only consulted when the dashboard is
-# installed (harmless reads otherwise). WG_CLIENT_DNS has a default and is always
+# Off-AWS discovery for the dashboard. WG_CLIENT_DNS has a default and is always
 # emitted into the unit; the other two have no default and are emitted only when
 # non-empty (empty -> the Go binary falls back to its own discovery / defaults).
 WG_CLIENT_DNS="${WG_CLIENT_DNS:-1.1.1.1}"
@@ -163,8 +169,9 @@ WG_KEY_FILE="$WG_DIR/server.key"
 remove() {
   echo "Removing WireGuard stack (purge=${PURGE}, dashboard-only=${DASHBOARD_ONLY})..."
 
-  # Dashboard teardown (always — there is no WG-only flavour of remove). Every
-  # step is guarded, so a host that never had the dashboard installed is fine.
+  # Dashboard teardown (always — remove always tears down the dashboard too,
+  # unless restricted with --dashboard-only). Every step is guarded, so a host
+  # that never had the dashboard installed is fine.
   systemctl disable --now wireguard-dashboard.service 2>/dev/null || true
   systemctl reset-failed wireguard-dashboard.service 2>/dev/null || true
   rm -f /etc/systemd/system/wireguard-dashboard.service
@@ -227,6 +234,47 @@ if [ "$ACTION" = "remove" ]; then
   remove
   exit 0
 fi
+
+# --- Dashboard + client-management env validation (fail hard) ---------------
+# The dashboard is always installed alongside WireGuard (spec 019 — there is no
+# bare-WireGuard install path), so its required env is validated up front,
+# before any package install work starts, rather than deep inside the install
+# body.
+if [ -z "$DASHBOARD_RELEASE_TAG" ]; then
+  echo "FATAL: DASHBOARD_RELEASE_TAG is required" >&2
+  exit 1
+fi
+# The repo is mandatory alongside the tag — without it there's nowhere to fetch
+# the release from. Fail hard with a clear message rather than building a
+# half-formed URL.
+if [ -z "$DASHBOARD_RELEASE_REPO" ]; then
+  echo "FATAL: DASHBOARD_RELEASE_REPO is required" >&2
+  exit 1
+fi
+
+# The client-management mode is mandatory (spec 018): the dashboard branches
+# its client store on CLIENT_MANAGEMENT_MODE, so silently defaulting would hide
+# a misconfiguration. Require an explicit, valid choice and fail hard otherwise.
+#   local -> SQLite-only, no external store (spec 015); no S3 coords needed.
+#   cloud -> S3-backed bridge; the bucket + key are REQUIRED (fail-fast if
+#            either is empty), mirroring the DASHBOARD_RELEASE_REPO idiom above.
+case "$CLIENT_MANAGEMENT_MODE" in
+  local) : ;;
+  cloud)
+    if [ -z "$CLIENT_STORE_S3_BUCKET" ] || [ -z "$CLIENT_STORE_S3_KEY" ]; then
+      echo "FATAL: CLIENT_MANAGEMENT_MODE=cloud requires CLIENT_STORE_S3_BUCKET and CLIENT_STORE_S3_KEY to be non-empty" >&2
+      exit 1
+    fi
+    ;;
+  "")
+    echo "FATAL: CLIENT_MANAGEMENT_MODE is unset (set it to 'local' or 'cloud')" >&2
+    exit 1
+    ;;
+  *)
+    echo "FATAL: CLIENT_MANAGEMENT_MODE must be 'local' or 'cloud', got '${CLIENT_MANAGEMENT_MODE}'" >&2
+    exit 1
+    ;;
+esac
 
 # --- Wait for the apt/dpkg lock (unattended-upgrades on fresh boots) --------
 echo "Waiting for apt lock..."
@@ -396,77 +444,51 @@ fi
 # Derive the public key from the private key (never print the private key).
 SERVER_PUBLIC_KEY="$(printf '%s' "$WG_SERVER_PRIVATE_KEY" | wg pubkey)"
 
-# --- Optional WireGuard dashboard ------------------------------------------
-# Provisioned only when DASHBOARD_RELEASE_TAG is non-empty. Reached only after
-# the WG success gate above, so the dashboard's systemd unit (Requires=
-# wg-quick@wg0) has a confirmed-active tunnel to bind to. The binary is fetched
-# from a public GitHub Release over HTTPS — no S3, no AWS specifics (those stay
-# in the EC2 wrapper). When the tag is empty this whole block is skipped
-# (WG-only box).
-if [ -n "${DASHBOARD_RELEASE_TAG:-}" ]; then
-  # The repo is mandatory once a tag is pinned — without it there's nowhere to
-  # fetch the release from. Fail hard with a clear message rather than building
-  # a half-formed URL.
-  if [ -z "$DASHBOARD_RELEASE_REPO" ]; then
-    echo "FATAL: DASHBOARD_RELEASE_TAG is set but DASHBOARD_RELEASE_REPO is empty" >&2
-    exit 1
-  fi
+# --- WireGuard dashboard ----------------------------------------------------
+# Always installed alongside WireGuard (spec 019 — no bare-WireGuard install
+# path; required env already fail-hard validated above). Reached only after
+# the WG success gate above, so the dashboard's systemd unit (Requires=wg-quick@wg0) has a
+# confirmed-active tunnel to bind to. The binary is fetched from a public
+# GitHub Release over HTTPS — no S3, no AWS specifics (those stay in the EC2
+# wrapper).
 
-  # The client-management mode is mandatory once the dashboard is installed
-  # (spec 018): the dashboard branches its client store on CLIENT_MANAGEMENT_MODE,
-  # so silently defaulting would hide a misconfiguration. Require an explicit,
-  # valid choice and fail hard otherwise. WG-only installs never reach here.
-  #   local -> SQLite-only, no external store (spec 015); no S3 coords needed.
-  #   cloud -> S3-backed bridge; the bucket + key are REQUIRED (fail-fast if
-  #            either is empty), mirroring the DASHBOARD_RELEASE_REPO idiom above.
-  case "$CLIENT_MANAGEMENT_MODE" in
-    local) : ;;
-    cloud)
-      if [ -z "$CLIENT_STORE_S3_BUCKET" ] || [ -z "$CLIENT_STORE_S3_KEY" ]; then
-        echo "FATAL: CLIENT_MANAGEMENT_MODE=cloud requires CLIENT_STORE_S3_BUCKET and CLIENT_STORE_S3_KEY to be non-empty" >&2
-        exit 1
-      fi
-      ;;
-    "")
-      echo "FATAL: DASHBOARD_RELEASE_TAG is set but CLIENT_MANAGEMENT_MODE is unset (set it to 'local' or 'cloud')" >&2
-      exit 1
-      ;;
-    *)
-      echo "FATAL: CLIENT_MANAGEMENT_MODE must be 'local' or 'cloud', got '${CLIENT_MANAGEMENT_MODE}'" >&2
-      exit 1
-      ;;
-  esac
+# curl is required for the release download. Slice 1 deliberately omitted it
+# (the server-only path needs no HTTP), so install it here if missing.
+if ! command -v curl >/dev/null 2>&1; then
+  apt-get install -y curl
+fi
 
-  # curl is required for the release download. Slice 1 deliberately omitted it
-  # (the server-only path needs no HTTP), so install it here if missing.
-  if ! command -v curl >/dev/null 2>&1; then
-    apt-get install -y curl
-  fi
+# jq is required by the wg-peer CLI (step 11 below) to build JSON request
+# bodies and URL-escape peer names. Installed here alongside curl since both
+# are dashboard-path dependencies absent from the server-only package set.
+if ! command -v jq >/dev/null 2>&1; then
+  apt-get install -y jq
+fi
 
-  # Derive the bind address from the WG server address: strip the CIDR suffix
-  # off WG_SERVER_NET and append the dashboard port. Replaces the user-data's
-  # hardcoded 172.16.15.1:8080 so a host on a different subnet still works.
-  LISTEN_ADDR="${WG_SERVER_NET%/*}:${DASHBOARD_PORT}"
+# Derive the bind address from the WG server address: strip the CIDR suffix
+# off WG_SERVER_NET and append the dashboard port. Replaces the user-data's
+# hardcoded 172.16.15.1:8080 so a host on a different subnet still works.
+LISTEN_ADDR="${WG_SERVER_NET%/*}:${DASHBOARD_PORT}"
 
-  # 1. Create the dedicated system user (idempotent).
-  id -u wireguard-dashboard >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin wireguard-dashboard
+# 1. Create the dedicated system user (idempotent).
+id -u wireguard-dashboard >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin wireguard-dashboard
 
-  # 2. Create directories with the right ownership/modes.
-  install -d -o root -g root -m 0755 /opt/wireguard-dashboard/bin
-  install -d -o wireguard-dashboard -g wireguard-dashboard -m 0750 /var/lib/wireguard-dashboard
-  install -d -o root -g root -m 0755 /etc/wireguard-dashboard
+# 2. Create directories with the right ownership/modes.
+install -d -o root -g root -m 0755 /opt/wireguard-dashboard/bin
+install -d -o wireguard-dashboard -g wireguard-dashboard -m 0750 /var/lib/wireguard-dashboard
+install -d -o root -g root -m 0755 /etc/wireguard-dashboard
 
-  # 3. Install the privileged peer-sync helper invoked by the dashboard. The Go
-  #    service stages a peers-only fragment (only [Peer] stanzas, no [Interface],
-  #    no PrivateKey) to /var/lib/wireguard-dashboard/peers.conf, then runs
-  #    `sudo /usr/local/sbin/wg-sync` (no args) to merge it into wg0.conf and
-  #    apply it live. The helper runs as root; it re-derives the [Interface]
-  #    block from the on-disk wg0.conf so the server private key never leaves
-  #    /etc/wireguard. Heredoc delimiter is quoted so nothing in the body is
-  #    expanded by this installer — the $VARS / $(...) / <(...) belong to the
-  #    helper at runtime. Shebang is bash because step 4 below uses process
-  #    substitution (<()), which is bash-only.
-  cat > /usr/local/sbin/wg-sync <<'WGSYNC_EOF'
+# 3. Install the privileged peer-sync helper invoked by the dashboard. The Go
+#    service stages a peers-only fragment (only [Peer] stanzas, no [Interface],
+#    no PrivateKey) to /var/lib/wireguard-dashboard/peers.conf, then runs
+#    `sudo /usr/local/sbin/wg-sync` (no args) to merge it into wg0.conf and
+#    apply it live. The helper runs as root; it re-derives the [Interface]
+#    block from the on-disk wg0.conf so the server private key never leaves
+#    /etc/wireguard. Heredoc delimiter is quoted so nothing in the body is
+#    expanded by this installer — the $VARS / $(...) / <(...) belong to the
+#    helper at runtime. Shebang is bash because step 4 below uses process
+#    substitution (<()), which is bash-only.
+cat > /usr/local/sbin/wg-sync <<'WGSYNC_EOF'
 #!/usr/bin/env bash
 #
 # wg-sync — merge the dashboard-staged peers fragment into wg0.conf and apply it
@@ -517,126 +539,126 @@ fi
 
 echo "wg-sync: applied staged peers to $IFACE"
 WGSYNC_EOF
-  chown root:root /usr/local/sbin/wg-sync
-  chmod 0755 /usr/local/sbin/wg-sync
+chown root:root /usr/local/sbin/wg-sync
+chmod 0755 /usr/local/sbin/wg-sync
 
-  # 4. Drop sudoers file granting the wireguard-dashboard user NOPASSWD on the
-  #    narrow set of commands the Go service needs: read WG and systemd state
-  #    (wg show wg0 public-key/dump, systemctl is-active/show wg-quick@wg0) plus
-  #    the single privileged write path — the wg-sync helper above (exact-match,
-  #    no arguments, so the argv must equal `sudo /usr/local/sbin/wg-sync`).
-  #    Write to a staging path first, validate with visudo -c, then atomically
-  #    move into /etc/sudoers.d/ — guarantees we never leave a malformed sudoers
-  #    fragment that could lock everyone out of sudo.
-  cat > /etc/sudoers.d/wireguard-dashboard.tmp <<'SUDOERS_EOF'
+# 4. Drop sudoers file granting the wireguard-dashboard user NOPASSWD on the
+#    narrow set of commands the Go service needs: read WG and systemd state
+#    (wg show wg0 public-key/dump, systemctl is-active/show wg-quick@wg0) plus
+#    the single privileged write path — the wg-sync helper above (exact-match,
+#    no arguments, so the argv must equal `sudo /usr/local/sbin/wg-sync`).
+#    Write to a staging path first, validate with visudo -c, then atomically
+#    move into /etc/sudoers.d/ — guarantees we never leave a malformed sudoers
+#    fragment that could lock everyone out of sudo.
+cat > /etc/sudoers.d/wireguard-dashboard.tmp <<'SUDOERS_EOF'
 wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/wg show wg0 public-key
 wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/wg show wg0 dump
 wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/systemctl is-active wg-quick@wg0.service
 wireguard-dashboard ALL=(root) NOPASSWD: /usr/bin/systemctl show -p ActiveEnterTimestamp wg-quick@wg0.service
 wireguard-dashboard ALL=(root) NOPASSWD: /usr/local/sbin/wg-sync
 SUDOERS_EOF
-  chown root:root /etc/sudoers.d/wireguard-dashboard.tmp
-  chmod 0440 /etc/sudoers.d/wireguard-dashboard.tmp
-  visudo -c -f /etc/sudoers.d/wireguard-dashboard.tmp
-  mv /etc/sudoers.d/wireguard-dashboard.tmp /etc/sudoers.d/wireguard-dashboard
+chown root:root /etc/sudoers.d/wireguard-dashboard.tmp
+chmod 0440 /etc/sudoers.d/wireguard-dashboard.tmp
+visudo -c -f /etc/sudoers.d/wireguard-dashboard.tmp
+mv /etc/sudoers.d/wireguard-dashboard.tmp /etc/sudoers.d/wireguard-dashboard
 
-  # 5. Render the clients manifest the dashboard reads at runtime
-  #    (CLIENTS_CONFIG_PATH=/etc/wireguard-dashboard/clients.json). printf '%s'
-  #    writes the CLIENTS_JSON value verbatim — no second round of shell
-  #    expansion — so any dollar-prefixed or shell-special tokens in the JSON
-  #    survive intact. Mode 0640 + group wireguard-dashboard: only the dashboard
-  #    user can read it.
-  printf '%s\n' "$CLIENTS_JSON" > /etc/wireguard-dashboard/clients.json
-  chown root:wireguard-dashboard /etc/wireguard-dashboard/clients.json
-  chmod 0640 /etc/wireguard-dashboard/clients.json
+# 5. Render the clients manifest the dashboard reads at runtime
+#    (CLIENTS_CONFIG_PATH=/etc/wireguard-dashboard/clients.json). printf '%s'
+#    writes the CLIENTS_JSON value verbatim — no second round of shell
+#    expansion — so any dollar-prefixed or shell-special tokens in the JSON
+#    survive intact. Mode 0640 + group wireguard-dashboard: only the dashboard
+#    user can read it.
+printf '%s\n' "$CLIENTS_JSON" > /etc/wireguard-dashboard/clients.json
+chown root:wireguard-dashboard /etc/wireguard-dashboard/clients.json
+chmod 0640 /etc/wireguard-dashboard/clients.json
 
-  # 5b. Render the alert environment file consumed by the dashboard's systemd
-  #     unit (EnvironmentFile=-/etc/wireguard-dashboard/alerts.env). Each line is
-  #     emitted with printf '%s' so the values (the webhook URLs and bot tokens
-  #     in particular are secrets and may contain shell-special characters) are
-  #     never re-expanded. This is the runtime form of user-data's `%{ if … ~}`
-  #     gates: every knob/secret is written only when its env var is non-empty,
-  #     so an unset transport leaves no line and the Go side falls back to its
-  #     default (e.g. os.Hostname() when DASHBOARD_HOST_LABEL is absent). Mode
-  #     0640 + group wireguard-dashboard: only the dashboard user can read it.
-  {
-    if [ -n "$DASHBOARD_HOST_LABEL" ]; then printf 'DASHBOARD_HOST_LABEL=%s\n' "$DASHBOARD_HOST_LABEL"; fi
-    if [ -n "$DASHBOARD_ALERT_DISK_PCT" ]; then printf 'DASHBOARD_ALERT_DISK_PCT=%s\n' "$DASHBOARD_ALERT_DISK_PCT"; fi
-    if [ -n "$DASHBOARD_ALERT_CPU_PCT" ]; then printf 'DASHBOARD_ALERT_CPU_PCT=%s\n' "$DASHBOARD_ALERT_CPU_PCT"; fi
-    if [ -n "$DASHBOARD_ALERT_CPU_SUSTAIN" ]; then printf 'DASHBOARD_ALERT_CPU_SUSTAIN=%s\n' "$DASHBOARD_ALERT_CPU_SUSTAIN"; fi
-    if [ -n "$DASHBOARD_ALERT_TRANSFER_BYTES" ]; then printf 'DASHBOARD_ALERT_TRANSFER_BYTES=%s\n' "$DASHBOARD_ALERT_TRANSFER_BYTES"; fi
-    if [ -n "$DASHBOARD_SLACK_BOT_TOKEN" ]; then printf 'DASHBOARD_SLACK_BOT_TOKEN=%s\n' "$DASHBOARD_SLACK_BOT_TOKEN"; fi
-    if [ -n "$DASHBOARD_SLACK_CHANNEL" ]; then printf 'DASHBOARD_SLACK_CHANNEL=%s\n' "$DASHBOARD_SLACK_CHANNEL"; fi
-    if [ -n "$DASHBOARD_TELEGRAM_TOKEN" ]; then printf 'DASHBOARD_TELEGRAM_TOKEN=%s\n' "$DASHBOARD_TELEGRAM_TOKEN"; fi
-    if [ -n "$DASHBOARD_TELEGRAM_CHAT_ID" ]; then printf 'DASHBOARD_TELEGRAM_CHAT_ID=%s\n' "$DASHBOARD_TELEGRAM_CHAT_ID"; fi
-    if [ -n "$DASHBOARD_DISCORD_WEBHOOK_URL" ]; then printf 'DASHBOARD_DISCORD_WEBHOOK_URL=%s\n' "$DASHBOARD_DISCORD_WEBHOOK_URL"; fi
-    if [ -n "$DASHBOARD_WEBHOOK_URL" ]; then printf 'DASHBOARD_WEBHOOK_URL=%s\n' "$DASHBOARD_WEBHOOK_URL"; fi
-  } > /etc/wireguard-dashboard/alerts.env
-  chown root:wireguard-dashboard /etc/wireguard-dashboard/alerts.env
-  chmod 0640 /etc/wireguard-dashboard/alerts.env
+# 5b. Render the alert environment file consumed by the dashboard's systemd
+#     unit (EnvironmentFile=-/etc/wireguard-dashboard/alerts.env). Each line is
+#     emitted with printf '%s' so the values (the webhook URLs and bot tokens
+#     in particular are secrets and may contain shell-special characters) are
+#     never re-expanded. This is the runtime form of user-data's `%{ if … ~}`
+#     gates: every knob/secret is written only when its env var is non-empty,
+#     so an unset transport leaves no line and the Go side falls back to its
+#     default (e.g. os.Hostname() when DASHBOARD_HOST_LABEL is absent). Mode
+#     0640 + group wireguard-dashboard: only the dashboard user can read it.
+{
+  if [ -n "$DASHBOARD_HOST_LABEL" ]; then printf 'DASHBOARD_HOST_LABEL=%s\n' "$DASHBOARD_HOST_LABEL"; fi
+  if [ -n "$DASHBOARD_ALERT_DISK_PCT" ]; then printf 'DASHBOARD_ALERT_DISK_PCT=%s\n' "$DASHBOARD_ALERT_DISK_PCT"; fi
+  if [ -n "$DASHBOARD_ALERT_CPU_PCT" ]; then printf 'DASHBOARD_ALERT_CPU_PCT=%s\n' "$DASHBOARD_ALERT_CPU_PCT"; fi
+  if [ -n "$DASHBOARD_ALERT_CPU_SUSTAIN" ]; then printf 'DASHBOARD_ALERT_CPU_SUSTAIN=%s\n' "$DASHBOARD_ALERT_CPU_SUSTAIN"; fi
+  if [ -n "$DASHBOARD_ALERT_TRANSFER_BYTES" ]; then printf 'DASHBOARD_ALERT_TRANSFER_BYTES=%s\n' "$DASHBOARD_ALERT_TRANSFER_BYTES"; fi
+  if [ -n "$DASHBOARD_SLACK_BOT_TOKEN" ]; then printf 'DASHBOARD_SLACK_BOT_TOKEN=%s\n' "$DASHBOARD_SLACK_BOT_TOKEN"; fi
+  if [ -n "$DASHBOARD_SLACK_CHANNEL" ]; then printf 'DASHBOARD_SLACK_CHANNEL=%s\n' "$DASHBOARD_SLACK_CHANNEL"; fi
+  if [ -n "$DASHBOARD_TELEGRAM_TOKEN" ]; then printf 'DASHBOARD_TELEGRAM_TOKEN=%s\n' "$DASHBOARD_TELEGRAM_TOKEN"; fi
+  if [ -n "$DASHBOARD_TELEGRAM_CHAT_ID" ]; then printf 'DASHBOARD_TELEGRAM_CHAT_ID=%s\n' "$DASHBOARD_TELEGRAM_CHAT_ID"; fi
+  if [ -n "$DASHBOARD_DISCORD_WEBHOOK_URL" ]; then printf 'DASHBOARD_DISCORD_WEBHOOK_URL=%s\n' "$DASHBOARD_DISCORD_WEBHOOK_URL"; fi
+  if [ -n "$DASHBOARD_WEBHOOK_URL" ]; then printf 'DASHBOARD_WEBHOOK_URL=%s\n' "$DASHBOARD_WEBHOOK_URL"; fi
+} > /etc/wireguard-dashboard/alerts.env
+chown root:wireguard-dashboard /etc/wireguard-dashboard/alerts.env
+chmod 0640 /etc/wireguard-dashboard/alerts.env
 
-  # 6. Download the pinned release binary over HTTPS. With set -e a bare failing
-  #    curl already aborts, but we keep an explicit FATAL message (matching
-  #    user-data) so a missing asset / private-repo 404 produces a clear
-  #    diagnostic instead of a cryptic abort. No checksum verification: release
-  #    artifacts are trusted (admin-gated repo + CI/CD-built binaries).
-  RELEASE_URL="https://github.com/${DASHBOARD_RELEASE_REPO}/releases/download/${DASHBOARD_RELEASE_TAG}"
-  DL_DIR="$(mktemp -d)"
-  # The release ships one binary per architecture (wireguard-dashboard-amd64 /
-  # wireguard-dashboard-arm64); fetch the one matching this host's GOARCH.
-  if ! curl -fsSL "$RELEASE_URL/wireguard-dashboard-$GOARCH" -o "$DL_DIR/wireguard-dashboard-$GOARCH"; then
-    echo "FATAL: failed to download dashboard binary from $RELEASE_URL" >&2
-    exit 1
-  fi
+# 6. Download the pinned release binary over HTTPS. With set -e a bare failing
+#    curl already aborts, but we keep an explicit FATAL message (matching
+#    user-data) so a missing asset / private-repo 404 produces a clear
+#    diagnostic instead of a cryptic abort. No checksum verification: release
+#    artifacts are trusted (admin-gated repo + CI/CD-built binaries).
+RELEASE_URL="https://github.com/${DASHBOARD_RELEASE_REPO}/releases/download/${DASHBOARD_RELEASE_TAG}"
+DL_DIR="$(mktemp -d)"
+# The release ships one binary per architecture (wireguard-dashboard-amd64 /
+# wireguard-dashboard-arm64); fetch the one matching this host's GOARCH.
+if ! curl -fsSL "$RELEASE_URL/wireguard-dashboard-$GOARCH" -o "$DL_DIR/wireguard-dashboard-$GOARCH"; then
+  echo "FATAL: failed to download dashboard binary from $RELEASE_URL" >&2
+  exit 1
+fi
 
-  # 7. Install the binary atomically with the executable bit set, then
-  #    drop the temp dir. The arch suffix is dropped here: the installed path
-  #    stays /opt/wireguard-dashboard/bin/wireguard-dashboard so the systemd
-  #    unit's ExecStart needs no per-arch change.
-  install -o root -g root -m 0755 "$DL_DIR/wireguard-dashboard-$GOARCH" /opt/wireguard-dashboard/bin/wireguard-dashboard
-  rm -rf "$DL_DIR"
+# 7. Install the binary atomically with the executable bit set, then
+#    drop the temp dir. The arch suffix is dropped here: the installed path
+#    stays /opt/wireguard-dashboard/bin/wireguard-dashboard so the systemd
+#    unit's ExecStart needs no per-arch change.
+install -o root -g root -m 0755 "$DL_DIR/wireguard-dashboard-$GOARCH" /opt/wireguard-dashboard/bin/wireguard-dashboard
+rm -rf "$DL_DIR"
 
-  # 8. Pre-render the optional discovery Environment= lines. WG_PUBLIC_ENDPOINT
-  #    and WG_PUBLIC_IP_ECHO_URL have no defaults, so each emits a line only when
-  #    set (unset -> the Go binary falls back to its own discovery). The unit
-  #    heredoc below is a single unquoted heredoc and can't host a bash `if`, so
-  #    we build the lines into a variable here (empty when both are unset) and
-  #    interpolate it inline — the runtime form of the alerts.env gating above.
-  #    Each rendered line carries its own trailing newline; an empty variable
-  #    leaves no blank Environment= line.
-  DASHBOARD_OPTIONAL_ENV=""
-  if [ -n "$WG_PUBLIC_ENDPOINT" ]; then
-    DASHBOARD_OPTIONAL_ENV="${DASHBOARD_OPTIONAL_ENV}Environment=WG_PUBLIC_ENDPOINT=${WG_PUBLIC_ENDPOINT}
+# 8. Pre-render the optional discovery Environment= lines. WG_PUBLIC_ENDPOINT
+#    and WG_PUBLIC_IP_ECHO_URL have no defaults, so each emits a line only when
+#    set (unset -> the Go binary falls back to its own discovery). The unit
+#    heredoc below is a single unquoted heredoc and can't host a bash `if`, so
+#    we build the lines into a variable here (empty when both are unset) and
+#    interpolate it inline — the runtime form of the alerts.env gating above.
+#    Each rendered line carries its own trailing newline; an empty variable
+#    leaves no blank Environment= line.
+DASHBOARD_OPTIONAL_ENV=""
+if [ -n "$WG_PUBLIC_ENDPOINT" ]; then
+  DASHBOARD_OPTIONAL_ENV="${DASHBOARD_OPTIONAL_ENV}Environment=WG_PUBLIC_ENDPOINT=${WG_PUBLIC_ENDPOINT}
 "
-  fi
-  if [ -n "$WG_PUBLIC_IP_ECHO_URL" ]; then
-    DASHBOARD_OPTIONAL_ENV="${DASHBOARD_OPTIONAL_ENV}Environment=WG_PUBLIC_IP_ECHO_URL=${WG_PUBLIC_IP_ECHO_URL}
+fi
+if [ -n "$WG_PUBLIC_IP_ECHO_URL" ]; then
+  DASHBOARD_OPTIONAL_ENV="${DASHBOARD_OPTIONAL_ENV}Environment=WG_PUBLIC_IP_ECHO_URL=${WG_PUBLIC_IP_ECHO_URL}
 "
-  fi
+fi
 
-  # 8b. Detect where the `aws` CLI lives (cloud mode shells out to it for the
-  #     S3 client store — spec 018). systemd's own default PATH omits
-  #     /snap/bin, where Ubuntu ships the aws snap, so a bare Environment=PATH
-  #     is required or `aws` resolves to "executable file not found in $PATH"
-  #     even though root's install-time shell (which has /snap/bin) finds it
-  #     fine. `command -v` is guarded with `|| true` so a standalone/local-mode
-  #     host with no aws installed doesn't fail the install. /snap/bin and
-  #     /usr/local/bin are always prepended as fallbacks (harmless duplicate if
-  #     AWS_BIN_DIR already matches one of them) so detection misses don't
-  #     regress cloud mode.
-  AWS_BIN="$(command -v aws 2>/dev/null || true)"
-  AWS_BIN_DIR=""
-  [ -n "$AWS_BIN" ] && AWS_BIN_DIR="$(dirname "$AWS_BIN")"
-  DASHBOARD_PATH="${AWS_BIN_DIR:+$AWS_BIN_DIR:}/snap/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# 8b. Detect where the `aws` CLI lives (cloud mode shells out to it for the
+#     S3 client store — spec 018). systemd's own default PATH omits
+#     /snap/bin, where Ubuntu ships the aws snap, so a bare Environment=PATH
+#     is required or `aws` resolves to "executable file not found in $PATH"
+#     even though root's install-time shell (which has /snap/bin) finds it
+#     fine. `command -v` is guarded with `|| true` so a standalone/local-mode
+#     host with no aws installed doesn't fail the install. /snap/bin and
+#     /usr/local/bin are always prepended as fallbacks (harmless duplicate if
+#     AWS_BIN_DIR already matches one of them) so detection misses don't
+#     regress cloud mode.
+AWS_BIN="$(command -v aws 2>/dev/null || true)"
+AWS_BIN_DIR=""
+[ -n "$AWS_BIN" ] && AWS_BIN_DIR="$(dirname "$AWS_BIN")"
+DASHBOARD_PATH="${AWS_BIN_DIR:+$AWS_BIN_DIR:}/snap/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-  # 9. Drop the systemd unit. Bound to the WG tunnel IP via the derived
-  #    LISTEN_ADDR; Requires/After wg-quick@wg0 ensures the tunnel address is
-  #    bindable before start and that the dashboard restarts when WG bounces.
-  #    Heredoc is unquoted so ${LISTEN_ADDR}, ${WG_SERVER_NET}, ${WG_CLIENT_DNS},
-  #    ${DASHBOARD_PATH}, and the pre-rendered ${DASHBOARD_OPTIONAL_ENV}
-  #    interpolate — the rest of the unit body contains no other shell-special
-  #    tokens.
-  cat > /etc/systemd/system/wireguard-dashboard.service <<UNIT_EOF
+# 9. Drop the systemd unit. Bound to the WG tunnel IP via the derived
+#    LISTEN_ADDR; Requires/After wg-quick@wg0 ensures the tunnel address is
+#    bindable before start and that the dashboard restarts when WG bounces.
+#    Heredoc is unquoted so ${LISTEN_ADDR}, ${WG_SERVER_NET}, ${WG_CLIENT_DNS},
+#    ${DASHBOARD_PATH}, and the pre-rendered ${DASHBOARD_OPTIONAL_ENV}
+#    interpolate — the rest of the unit body contains no other shell-special
+#    tokens.
+cat > /etc/systemd/system/wireguard-dashboard.service <<UNIT_EOF
 [Unit]
 Description=WireGuard VPN dashboard
 After=network-online.target wg-quick@wg0.service
@@ -665,16 +687,32 @@ RestartSec=5s
 WantedBy=multi-user.target
 UNIT_EOF
 
-  # 10. Reload systemd, enable at boot, and (re)start the unit. `restart` —
-  #     not `enable --now` — is deliberate: `--now` only *starts* an inactive
-  #     unit and is a no-op when it is already running, so a re-run that ships a
-  #     NEW binary would leave the OLD process live until a reboot. `restart`
-  #     starts it if stopped and swaps the process if running, so re-running the
-  #     installer always picks up the freshly downloaded binary.
-  systemctl daemon-reload
-  systemctl enable wireguard-dashboard.service
-  systemctl restart wireguard-dashboard.service
+# 10. Reload systemd, enable at boot, and (re)start the unit. `restart` —
+#     not `enable --now` — is deliberate: `--now` only *starts* an inactive
+#     unit and is a no-op when it is already running, so a re-run that ships a
+#     NEW binary would leave the OLD process live until a reboot. `restart`
+#     starts it if stopped and swaps the process if running, so re-running the
+#     installer always picks up the freshly downloaded binary.
+systemctl daemon-reload
+systemctl enable wireguard-dashboard.service
+systemctl restart wireguard-dashboard.service
+
+# 11. Install the wg-peer CLI (spec 019 §2.5) — an OPTIONAL on-box script for
+#     first-peer onboarding on a manual VPS (add/remove/update a peer from the
+#     server shell without SSH-forwarding the VPN-only dashboard). It is a
+#     thin client over the local dashboard HTTP API the unit above just
+#     started, so it is the same mutation path as the UI by construction.
+#     scripts/wg-peer is the single source of truth in the repo and is
+#     fetched here from the SAME raw-GitHub repo + ref this install.sh was
+#     itself fetched at (INSTALL_SCRIPT_REF, default "main" off-AWS), mirroring
+#     the self-fetch pattern the EC2 user-data wrapper uses for install.sh.
+#     Fails hard on a download error rather than leaving a stale/partial copy.
+if ! curl -fsSL "https://raw.githubusercontent.com/${DASHBOARD_RELEASE_REPO}/${INSTALL_SCRIPT_REF}/scripts/wg-peer" -o /usr/local/bin/wg-peer; then
+  echo "FATAL: failed to download wg-peer from ${DASHBOARD_RELEASE_REPO}@${INSTALL_SCRIPT_REF}" >&2
+  exit 1
 fi
+chown root:root /usr/local/bin/wg-peer
+chmod 0755 /usr/local/bin/wg-peer
 
 # --- Example first-client config (template only) ----------------------------
 # Print an illustrative wg-quick client config to stdout so the operator can
@@ -717,6 +755,8 @@ CLIENT_EOF
   # and register only the PUBLIC key (dashboard, or the WG_PEERS env on reinstall).
   echo "Hint: generate the keypair off-host with 'wg genkey | tee privatekey | wg pubkey',"
   echo "      then register the client's PUBLIC key via the dashboard or the WG_PEERS env."
+  echo "Easier: run 'wg-peer add <name> --show-config' on this box — it generates the"
+  echo "        keypair for you and prints a ready-to-use config (see below)."
 }
 
 echo "==========================================================="
@@ -724,10 +764,10 @@ echo "WireGuard server is up."
 echo "  Server public key : ${SERVER_PUBLIC_KEY}"
 echo "  Listen port (UDP) : ${WG_SERVER_PORT}"
 echo "Use these to build client configs (endpoint = <this-host-ip>:${WG_SERVER_PORT})."
-if [ -n "${DASHBOARD_RELEASE_TAG:-}" ]; then
-  echo "Dashboard URL     : http://${WG_SERVER_NET%/*}:${DASHBOARD_PORT}"
-fi
+echo "Dashboard URL     : http://${WG_SERVER_NET%/*}:${DASHBOARD_PORT}"
+echo "First peer (manual VPS, no Terraform admin seed)?"
+echo "  Run: wg-peer add <name> --show-config"
 echo "==========================================================="
-# Printed on BOTH the WG-only and dashboard paths — the server (and thus this
-# example) always exists regardless of whether the dashboard was installed.
+# The server (and thus this example) always exists, and the dashboard is
+# always installed alongside it — both lines above are unconditional.
 emit_example_client_config

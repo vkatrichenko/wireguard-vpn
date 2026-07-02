@@ -36,22 +36,17 @@ variable "subnet_id" {
   type        = string
 }
 
-variable "clients_config" {
-  description = "List of WireGuard peer (client) definitions. Each entry's `name` is rendered into /etc/wireguard-dashboard/clients.json by user-data so the dashboard can label peers; `address` is the CIDR the peer is allowed inside the WG subnet (e.g. \"172.16.15.6/32\"); `public_key` is the peer's WireGuard public key."
-  type = list(object({
+variable "admin_peer" {
+  description = "Single admin bootstrap peer (spec 019) — the ONLY peer Terraform seeds, for anti-lockout. `name` is rendered into /etc/wireguard-dashboard/clients.json so the dashboard can label it; `public_key` is its WireGuard public key. The module allocates the admin a fixed first-host tunnel address (the `.2` host of wg_server_net). `null` (default) seeds no peer — an empty WG peer set and empty clients.json, which is a valid deploy. Every other peer is managed in the dashboard UI, not here."
+  type = object({
     name       = string
-    address    = string
     public_key = string
-  }))
+  })
+  default = null
 
   validation {
-    condition     = alltrue([for c in var.clients_config : can(regex("^[0-9.]+/32$", c.address))])
-    error_message = "Every clients_config entry's `address` must be an IPv4 /32 CIDR (e.g. \"172.16.15.6/32\")."
-  }
-
-  validation {
-    condition     = alltrue([for c in var.clients_config : length(c.public_key) == 44])
-    error_message = "Every clients_config entry's `public_key` must be a base64-encoded 32-byte WireGuard key (44 chars including padding)."
+    condition     = var.admin_peer == null ? true : length(var.admin_peer.public_key) == 44
+    error_message = "admin_peer.public_key must be a base64-encoded 32-byte WireGuard key (44 chars including padding)."
   }
 }
 
@@ -106,13 +101,12 @@ variable "tags" {
 }
 
 variable "dashboard_release_tag" {
-  description = "Pinned GitHub Release tag (e.g. \"v1.2.3\") of the wireguard-dashboard binary to fetch at first boot. When non-empty, user-data downloads the asset from the public release over HTTPS and verifies it against the release's SHA256SUMS before installing it (no S3, no IAM data-plane grant). Empty string (default) disables dashboard provisioning. This is the single source of truth for the running version — bumping it re-renders user-data, rolls a new launch-template version, and replaces the instance."
+  description = "Required pinned GitHub Release tag (e.g. \"v1.2.3\") of the wireguard-dashboard binary to fetch at first boot. The dashboard is ALWAYS deployed alongside WireGuard (spec 019) — there is no WG-only path — so this must be a non-empty SemVer tag. User-data downloads the asset from the public release over HTTPS and verifies it against the release's SHA256SUMS before installing it (no S3, no IAM data-plane grant). This is the single source of truth for the running version — bumping it re-renders user-data, rolls a new launch-template version, and replaces the instance."
   type        = string
-  default     = ""
 
   validation {
-    condition     = var.dashboard_release_tag == "" || can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$", var.dashboard_release_tag))
-    error_message = "dashboard_release_tag must be empty or a SemVer tag like 'v1.2.3' (optionally with a pre-release suffix, e.g. 'v1.2.3-rc1')."
+    condition     = can(regex("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$", var.dashboard_release_tag))
+    error_message = "dashboard_release_tag is required and must be a SemVer tag like 'v1.2.3' (optionally with a pre-release suffix, e.g. 'v1.2.3-rc1')."
   }
 }
 
@@ -192,7 +186,7 @@ variable "dashboard_alerts" {
 }
 
 variable "client_management_mode" {
-  description = "Peer-management mode threaded from the root (spec 018). \"local\" (default) = peers managed live in the dashboard UI backed by the instance-local SQLite store (spec 015); clients_config is only a first-boot seed and peer edits cause no instance churn. \"cloud\" = peers bridged through a versioned S3 object (built in later slices); the dashboard reads it at boot and writes it on UI edits, while Terraform seeds it once and warns on drift. Also exported to the dashboard as CLIENT_MANAGEMENT_MODE."
+  description = "Peer-management mode threaded from the root (spec 019). \"local\" (default) = peers managed live in the dashboard UI backed by the instance-local SQLite store only — no S3. \"cloud\" = SQLite plus a versioned S3 object used as a pure durable BACKUP: the dashboard restores from it at boot and writes it on UI edits, but Terraform never reads it and there is no drift detection. Also exported to the dashboard as CLIENT_MANAGEMENT_MODE."
   type        = string
   default     = "local"
   validation {

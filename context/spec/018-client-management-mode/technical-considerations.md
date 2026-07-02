@@ -1,7 +1,7 @@
 # Technical Specification: Client Management Mode (local | cloud)
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
-- **Status:** Draft
+- **Status:** Completed (2026-07-02 — implemented & owner-validated live as dashboard v0.0.15)
 - **Author(s):** Vladyslav Katrychenko
 
 ---
