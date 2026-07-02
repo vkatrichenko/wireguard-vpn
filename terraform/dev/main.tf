@@ -31,15 +31,18 @@ module "wireguard" {
   # AllowedIPs = 10.22.0.0/16
   # Endpoint = 54.245.26.247:51820
 
-  client_management_mode = local.client_management_mode
+  client_management_mode = "cloud"
 
-  dashboard_release_tag = "v0.0.15"
+  dashboard_release_tag = "v0.0.16"
   github_repo           = "vkatrichenko/wireguard-vpn"
 
   # Single admin bootstrap peer (spec 019) — the ONLY peer Terraform seeds, for
   # anti-lockout. The dashboard UI is the sole authority for every other peer, so
   # editing the peer list no longer churns the instance. `null` seeds no peer.
-  admin_peer = local.admin_peer
+  admin_peer = {
+    name       = "laptop"
+    public_key = "OYR4niUZ/Ay5KAxwyvfAVOjgKo4NwQb0wRSyqRblPF4="
+  }
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]

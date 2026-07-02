@@ -53,7 +53,7 @@
 
 ## Slice 5 — Owner-run live end-to-end validation (cannot be done in-session)
 
-- [ ] **Owner-run** (after `aws sso login --profile csm`, one dashboard release with the Slice-2/4 binary): fresh AWS deploy → the `admin_peer` connects and the dashboard is reachable; UI add/remove applies live with **no instance replacement**; rebuild the instance → peers restored from the S3 backup; `wg-peer add --show-config` on a manual VPS produces a usable config and the peer appears in the UI. `local` mode — SQLite-only, no S3. **(owner)**
+- [x] **Owner-run** (after `aws sso login --profile csm`, one dashboard release with the Slice-2/4 binary): fresh AWS deploy → the `admin_peer` connects and the dashboard is reachable; UI add/remove applies live with **no instance replacement**; rebuild the instance → peers restored from the S3 backup; `wg-peer add --show-config` on a manual VPS produces a usable config and the peer appears in the UI. `local` mode — SQLite-only, no S3. **(owner)** — verified live 2026-07-03 (dashboard v0.0.16); one cold-seed bug found & fixed during deploy: missing `s3:ListBucket` made a first-boot `get-object` on the not-yet-created `clients.json` return 403 (not 404), latching `storeReady=false` → added the `s3:ListBucket` grant in [iam.tf](../../../terraform/modules/wireguard/iam.tf).
 
 ---
 

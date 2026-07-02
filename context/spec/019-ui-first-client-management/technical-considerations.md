@@ -6,7 +6,7 @@ Structures & contracts, not implementations.
 # Technical Specification: UI-First Client Management
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
-- **Status:** Draft
+- **Status:** Completed
 - **Author(s):** Vladyslav Katrychenko
 
 ---
@@ -31,6 +31,7 @@ Affected areas: `terraform/dev/*`, `terraform/modules/wireguard/*`, `scripts/ins
 - **Module input (`variables.tf`):** remove `clients_config`; add `admin_peer` object var with `default = null` (so a no-admin deploy is valid). Validate the public key shape when non-null.
 - **Module (`locals.tf`):** render the `WG_PEERS` stanzas and the `CLIENTS_JSON` boot seed from the **single admin peer** (or empty when `admin_peer == null`). Remove `clients_by_address` and `clients_canonical_json`. Keep `client_store_s3_bucket`; set `client_store_s3_key` to the constant `"clients.json"`.
 - **Module (`client_store.tf`):** **keep** `aws_s3_bucket.client_list` + versioning + public-access-block + SSE + `force_destroy`, and the instance-role `s3:GetObject`/`s3:PutObject` statement (resource ARN = the fixed string `"${aws_s3_bucket.client_list[0].arn}/clients.json"`). **Remove** `aws_s3_object.clients` — the dashboard creates/initializes the object on first boot via the existing 404-init path.
+- **Module (`iam.tf`) — `s3:ListBucket` is REQUIRED (deploy learning, 2026-07-03):** because the dashboard now creates `clients.json` itself (no TF seed), the first-boot `aws s3api get-object` hits a key that does not exist yet. S3 returns `404 NoSuchKey` for a missing object **only when the caller holds `s3:ListBucket`**; without it, S3 returns `403 AccessDenied`. The clientstore classifies a 403 as a hard error → latches `storeReady=false` → skips every write-through, so `clients.json` is never created and the backup silently never works. Grant `s3:ListBucket` on the bucket ARN (cloud-gated, scoped to this single dedicated bucket) so the missing-object read returns a proper 404 and the cold-seed path writes the object. Spec 018 masked this because Terraform seeded the object, so `get-object` always hit an existing key.
 - **Module (`checks.tf`):** **delete** — no drift detection.
 - **Module (`outputs.tf`):** keep `client_list_bucket` (informational); drop any `clients_config`-derived outputs.
 
