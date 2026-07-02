@@ -28,6 +28,7 @@
 #   DASHBOARD_RELEASE_REPO owner/repo to fetch the release from (required when
 #                          DASHBOARD_RELEASE_TAG is set; fail hard if missing)
 #   DASHBOARD_PORT         dashboard bind port           (default 8080)
+#   CLIENT_MANAGEMENT_MODE peer-management mode: local (default) | cloud
 #   CLIENTS_JSON           clients manifest written to   (default [])
 #                          /etc/wireguard-dashboard/clients.json
 #   WG_CLIENT_DNS          DNS for generated client cfgs (default 1.1.1.1; always
@@ -109,6 +110,7 @@ WG_PEERS="${WG_PEERS:-}"
 DASHBOARD_RELEASE_TAG="${DASHBOARD_RELEASE_TAG:-}"
 DASHBOARD_RELEASE_REPO="${DASHBOARD_RELEASE_REPO:-}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8080}"
+CLIENT_MANAGEMENT_MODE="${CLIENT_MANAGEMENT_MODE:-local}"
 CLIENTS_JSON="${CLIENTS_JSON:-[]}"
 # Off-AWS discovery for the dashboard — only consulted when the dashboard is
 # installed (harmless reads otherwise). WG_CLIENT_DNS has a default and is always
@@ -593,6 +595,7 @@ ExecStart=/opt/wireguard-dashboard/bin/wireguard-dashboard
 Environment=LISTEN_ADDR=${LISTEN_ADDR}
 Environment=WG_SERVER_NET=${WG_SERVER_NET}
 Environment=WG_CLIENT_DNS=${WG_CLIENT_DNS}
+Environment=CLIENT_MANAGEMENT_MODE=${CLIENT_MANAGEMENT_MODE}
 ${DASHBOARD_OPTIONAL_ENV}# Leading '-' makes the file optional: the unit starts even if alerts.env is
 # absent, so alerting is strictly opt-in via the seeded knobs/webhook above.
 EnvironmentFile=-/etc/wireguard-dashboard/alerts.env

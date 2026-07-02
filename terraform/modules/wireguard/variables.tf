@@ -190,3 +190,13 @@ variable "dashboard_alerts" {
     error_message = "dashboard_alerts.cpu_pct must be between 1 and 100."
   }
 }
+
+variable "client_management_mode" {
+  description = "Peer-management mode threaded from the root (spec 018). \"local\" (default) = peers managed live in the dashboard UI (spec 015); clients_config is only a first-boot seed and peer edits cause no instance churn. \"cloud\" = peers declared in clients_config and delivered via user-data; a change to the peer set auto-replaces the instance (see terraform_data.peer_replace_trigger) and the dashboard hides its client-mutating controls. Also exported to the dashboard as CLIENT_MANAGEMENT_MODE."
+  type        = string
+  default     = "local"
+  validation {
+    condition     = contains(["local", "cloud"], var.client_management_mode)
+    error_message = "client_management_mode must be either \"local\" or \"cloud\"."
+  }
+}

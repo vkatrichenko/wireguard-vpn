@@ -334,7 +334,18 @@ func main() {
 		slog.Warn("clients: startup reconcile failed; live config may lag DB until next change", "err", err)
 	}
 
-	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc, alertStatus, webhookCfg, pollerSvc, clientsSvc)
+	// Spec 018: cosmetic-only client-management mode. "local" (default) leaves
+	// every add/edit/enable-disable/remove control and the drift badge visible,
+	// matching today's behaviour byte-for-byte. "cloud" hides them in the
+	// templates because Terraform is authoritative over peers in that mode —
+	// this is NOT an auth boundary; every /api/clients handler still works
+	// exactly as before, so a determined operator (or a stale bookmark) can
+	// still call them directly. envMode mirrors the envPct/envDuration
+	// convention: an invalid value is logged and falls back to the default
+	// rather than silently doing something unexpected.
+	clientManagementMode := envMode("CLIENT_MANAGEMENT_MODE", "local")
+
+	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc, alertStatus, webhookCfg, pollerSvc, clientsSvc, clientManagementMode)
 	if err != nil {
 		log.Fatalf("server init failed: %v", err)
 	}
@@ -390,6 +401,24 @@ func envPct(key string, def float64) float64 {
 		return def
 	}
 	return v
+}
+
+// envMode validates the named env var against exactly the two known values
+// ("local", "cloud"), falling back to def on anything else — including unset,
+// empty, or a typo like "Cloud"/"cloud " (deliberately no trimming/case-folding:
+// a rejected value should be loud in the logs, not silently coerced). Mirrors
+// the envPct/envDuration convention: a misconfigured knob must never silently
+// pick the wrong mode.
+func envMode(key, def string) string {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return def
+	}
+	if raw != "local" && raw != "cloud" {
+		slog.Warn("ignoring invalid client management mode env; using default", "key", key, "value", raw, "default", def)
+		return def
+	}
+	return raw
 }
 
 // envDuration parses a Go duration string (e.g. "5m") from the named env var,

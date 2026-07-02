@@ -51,7 +51,7 @@
      mutation, so the same markup drives the cold load and every live update. */}}
 {{ define "clients-card" }}
 <section class="card" id="clients">
-  <h2>Clients{{ if .Drift }} <span class="drift-badge" id="clients-drift" title="Clients diverged from the git-managed (Terraform-applied) set — run terraform apply to reconcile, or export and promote the change into clients_config.">{{ .Drift }} diverged from git-managed set</span>{{ end }}</h2>
+  <h2>Clients{{ if and .Drift (not .Cloud) }} <span class="drift-badge" id="clients-drift" title="Clients diverged from the git-managed (Terraform-applied) set — run terraform apply to reconcile, or export and promote the change into clients_config.">{{ .Drift }} diverged from git-managed set</span>{{ end }}</h2>
 
   {{ if .Message }}
   <p class="client-message client-message-{{ if .MessageKind }}{{ .MessageKind }}{{ else }}info{{ end }}" role="status">{{ .Message }}</p>
@@ -59,7 +59,12 @@
 
   {{/* Add-client form. The IP is auto-allocated when Address is left blank; an
        explicit /32 is validated as an override. Posts to #clients via outerHTML
-       so a success (or an inline validation error) re-renders this whole card. */}}
+       so a success (or an inline validation error) re-renders this whole card.
+       Cloud mode hides this cosmetically (spec 018) — Terraform is
+       authoritative over peers there, so the add form has no live effect an
+       operator should reach for from the UI. The POST handler itself is NOT
+       gated; this is presentation only. */}}
+  {{ if not .Cloud -}}
   <form class="client-add-form" hx-post="/api/clients" hx-target="#clients" hx-swap="outerHTML">
     <div class="client-add-fields">
       <div class="client-field">
@@ -84,6 +89,10 @@
     <p class="hint">Generate the keypair off-host with <code>wg genkey | tee privatekey | wg pubkey</code> and paste the public key — the server never holds the private key.</p>
   </form>
 
+  {{ else }}
+  <p class="hint">Peers are Terraform-managed.</p>
+
+  {{ end -}}
   <div class="client-export">
     <span class="client-export-label">Reconcile to Terraform:</span>
     <a class="client-export-link" href="/api/clients/export?format=hcl" download>Export HCL</a>
@@ -127,12 +136,15 @@
           {{ else }}—{{ end }}
         </td>
         <td class="client-manage" onclick="event.stopPropagation()">
-          {{ if .Name }}
+          {{ if and .Name (not $.Cloud) }}
           {{/* Edit toggles the full-width edit row below (spec 016 req 2.2);
                the form itself lives in that row so fields lay out across the
                table width instead of a cramped right-side drawer. The cell's
                onclick stopPropagation keeps this click off the row's
-               detail-expand hx-get; tabs.js does the .hidden toggle. */}}
+               detail-expand hx-get; tabs.js does the .hidden toggle.
+               Every control in this cell is hidden cosmetically in cloud mode
+               (spec 018) — Terraform owns peers there. The underlying
+               PATCH/DELETE handlers are NOT gated; this is presentation only. */}}
           <button type="button" class="client-btn client-edit-toggle" data-edit-target="edit-{{ .PublicKey }}">Edit</button>
           {{ if .Enabled }}
           <button type="button" class="client-btn" hx-patch="/api/clients/{{ .Name | urlquery }}" hx-vals='{"enabled":"false"}' hx-target="#clients" hx-swap="outerHTML">Disable</button>
@@ -147,8 +159,10 @@
            line up under the client they belong to. Hidden until Edit toggles
            it; re-rendered (and re-hidden) on every #clients outerHTML swap, so
            a successful Save collapses back to the read view for free. The td's
-           onclick stopPropagation keeps clicks here off any row hx-get. */}}
-      {{ if .Name }}
+           onclick stopPropagation keeps clicks here off any row hx-get.
+           Cloud mode hides the row entirely (spec 018) — no Edit button exists
+           above to toggle it, and there is nothing to Cancel back to. */}}
+      {{ if and .Name (not $.Cloud) }}
       <tr id="edit-{{ .PublicKey }}" class="client-edit-row hidden">
         <td colspan="10" onclick="event.stopPropagation()">
           <form class="client-edit-form" hx-patch="/api/clients/{{ .Name | urlquery }}" hx-target="#clients" hx-swap="outerHTML">

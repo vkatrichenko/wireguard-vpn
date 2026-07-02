@@ -129,3 +129,10 @@ func TestComputeDrift_EmptyBaselineFallsBackToClientsfile(t *testing.T) {
 		t.Fatalf("expected drift=1 via clients.json fallback (empty baseline, empty seed, one DB client):\n%s", frag)
 	}
 }
+
+// Spec 018 cloud-mode cosmetic-gating tests live in
+// handlers_clients_cloud_mode_test.go (mode-parametrized coverage of the add
+// form / edit toggle / remove / enable-disable / drift badge, plus the
+// computeDrift-skipped assertion) — kept out of this file so drift-baseline
+// tests (spec 017) and mode-gating tests (spec 018) stay independently
+// readable.

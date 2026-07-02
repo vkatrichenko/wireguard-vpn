@@ -53,6 +53,13 @@ type server struct {
 	diskSvc      *disk.Service
 	processesSvc *processes.Service
 	netdevSvc    *netdev.Service
+	// cloudMode is spec 018's cosmetic-only gate: true when CLIENT_MANAGEMENT_MODE
+	// is "cloud" (Terraform is authoritative over peers). It hides every
+	// client-mutating control and the drift badge in the templates and skips the
+	// computeDrift call entirely (the badge is hidden anyway, so computing it would
+	// be wasted work) — it does NOT block or 403 any handler. Enforcement stays
+	// server-side in Terraform/sudoers, never in-band here.
+	cloudMode bool
 	// alertStatus is the read seam to the in-UI active-alerts view (spec 007,
 	// Slice 5). The poller writes it each tick; handlers read a deep copy via
 	// Snapshot. It is OPTIONAL: nil renders the disabled/empty view (Snapshot is
@@ -128,6 +135,10 @@ type clientCountData struct {
 	// (spec 015). Rendered as a small badge on the client-count card; zero
 	// hides it. See computeDrift for the exact comparison.
 	Drift int
+	// Cloud gates the drift badge cosmetically (spec 018): true hides it,
+	// since a cloud-mode box has no in-UI mutation for drift to describe. See
+	// server.cloudMode for the enforcement posture (cosmetic only).
+	Cloud bool
 }
 
 type pageData struct {
@@ -156,6 +167,9 @@ type pageData struct {
 	// hint; .Active drives the firing list / empty state. Recent is unused on
 	// Overview (the Events tab renders it) but carried for free in the snapshot.
 	Alerts alerts.Status
+	// Cloud gates every client-mutating control (add/edit/enable-disable/remove)
+	// and the drift badge cosmetically (spec 018) — see server.cloudMode.
+	Cloud bool
 }
 
 // New returns an http.Handler with the wired routes. The caller passes in
@@ -171,6 +185,13 @@ type pageData struct {
 // Runner without shelling out. New service deps are appended at the end of
 // the parameter list so existing call sites only need to append, never
 // re-order.
+//
+// clientManagementMode is spec 018's newest trailing param: the validated
+// CLIENT_MANAGEMENT_MODE value ("local" or "cloud") from main.go, threaded
+// through raw (not pre-derived to a bool) so the "cloud" == cosmetic-hide
+// comparison lives here alongside the struct field it sets, not duplicated in
+// main.go. A test call site that doesn't care about the mode passes "local"
+// (or "" — both take the same non-cloud path) to keep existing behaviour.
 //
 // Templates are parsed eagerly so a malformed template fails fast on
 // startup rather than on the first request. The FuncMap below is registered
@@ -192,6 +213,7 @@ func New(
 	webhookCfg *notify.WebhookConfig,
 	metricsProvider MetricsProvider,
 	clientsSvc *clients.Service,
+	clientManagementMode string,
 ) (http.Handler, error) {
 	// Two globs because templates/*.html does not recurse into cards/. The
 	// cards/ directory holds named-template fragments ({{ define "..." }})
@@ -232,6 +254,10 @@ func New(
 		alertStatus:     alertStatus,
 		webhookCfg:      webhookCfg,
 		metricsProvider: metricsProvider,
+		// Derived here (rather than in main.go) so the validation of what counts
+		// as "cloud" lives in one place; main.go only validates that the env var
+		// is one of the two known strings and passes the raw value through.
+		cloudMode: clientManagementMode == "cloud",
 	}
 
 	// Build the server-owned test-send notifier from the same holder the write
@@ -340,7 +366,7 @@ func (s *server) handleIndex(w http.ResponseWriter, r *http.Request) {
 // error: the page (or the partial fragment) is still useful with one card
 // degraded, so callers always render whatever the returned pageData holds.
 func (s *server) buildPageData(ctx context.Context) pageData {
-	data := pageData{}
+	data := pageData{Cloud: s.cloudMode}
 
 	info, err := s.serverinfoSvc.Get(ctx)
 	if err != nil {
@@ -374,13 +400,19 @@ func (s *server) buildPageData(ctx context.Context) pageData {
 		// ClientCount drives the Slice 12 summary card. Counted inline rather
 		// than in a helper because the loop is one line and threading a helper
 		// from another file would obscure the "same snapshot" guarantee.
+		data.ClientCount.Cloud = s.cloudMode
 		data.ClientCount.Total = len(data.ClientRows)
 		for _, row := range data.ClientRows {
 			if row.Status == "online" {
 				data.ClientCount.Online++
 			}
 		}
-		data.ClientCount.Drift = s.computeDrift(ctx, dbClients)
+		// Skip computeDrift entirely in cloud mode rather than compute-and-discard:
+		// the badge is hidden either way, so there's no reason to pay for the
+		// managed_baseline (or clients.json fallback) read on every render.
+		if !s.cloudMode {
+			data.ClientCount.Drift = s.computeDrift(ctx, dbClients)
+		}
 	}
 
 	// proc.Sample feeds the system + network-rate cards. The sample is

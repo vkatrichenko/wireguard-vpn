@@ -33,8 +33,7 @@ func newEventsServer(t *testing.T, metricsDB *db.DB, clientsSvc *clients.Service
 		nil,
 		nil,
 		nil,
-		clientsSvc,
-	)
+		clientsSvc, "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

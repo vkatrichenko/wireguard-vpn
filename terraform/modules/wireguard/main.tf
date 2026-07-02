@@ -40,6 +40,15 @@ resource "aws_launch_template" "wireguard" {
   user_data = base64encode(local.user_data)
 }
 
+# spec 018: cloud-mode auto-replace trigger. The instance ignores user_data
+# changes (ignore_changes below), so in cloud mode a peer-set edit would NOT
+# otherwise reach the box. This holds a hash of the declared peer set ONLY in
+# cloud mode; in local mode it is the constant "" so the instance's
+# replace_triggered_by never fires (UI-managed peers, no churn).
+resource "terraform_data" "peer_replace_trigger" {
+  input = var.client_management_mode == "cloud" ? sha256(jsonencode(var.clients_config)) : ""
+}
+
 resource "aws_instance" "wireguard" {
   instance_type = local.effective_instance_type
   # vpc_security_group_ids = local.security_groups_ids
@@ -53,6 +62,7 @@ resource "aws_instance" "wireguard" {
   lifecycle {
     create_before_destroy = true
     ignore_changes        = [user_data, user_data_base64]
+    replace_triggered_by  = [terraform_data.peer_replace_trigger]
   }
 
   tags = {

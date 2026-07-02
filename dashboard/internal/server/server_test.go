@@ -372,7 +372,7 @@ func TestHandleIndex_Success(t *testing.T) {
 	systemdSvc := systemdRunnerActive(enteredAt)
 
 	// nil geo resolver is allowed — geo is advisory.
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -468,7 +468,7 @@ func TestHandleIndex_BothErrors(t *testing.T) {
 	}
 
 	// nil geo resolver is allowed — geo is advisory.
-	handler, err := server.New(dashboard.WebFS(), infoSvc, systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -522,7 +522,7 @@ func TestHandleGetService_IncludesEvents(t *testing.T) {
 	}
 
 	// nil geo resolver is allowed — geo is advisory.
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -579,7 +579,7 @@ func TestHandleGetPartialTabs(t *testing.T) {
 	systemdSvc := systemdRunnerActive(enteredAt)
 
 	// nil geo resolver is allowed — geo is advisory.
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -677,7 +677,7 @@ func TestHandleGetPartialClients_RendersGeoMapCard(t *testing.T) {
 	}
 	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -763,7 +763,7 @@ func TestHandleGetPartialNetwork_RendersCards(t *testing.T) {
 		}
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -854,7 +854,7 @@ func TestHandleGetPartialSystem_RendersDiskCard(t *testing.T) {
 		MountsPath: "/proc/mounts",
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, amberDiskSvc, fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, amberDiskSvc, fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -925,7 +925,7 @@ func TestHandleGetPartialSystem_RendersProcessesCard(t *testing.T) {
 	}
 	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1009,7 +1009,7 @@ func TestHandleGetPartialClients_SeededRow(t *testing.T) {
 
 	geo := staticGeoResolver{country: "US", city: "San Francisco"}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: peerName, Address: peerAddress, PublicKey: peerPublicKey}))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: peerName, Address: peerAddress, PublicKey: peerPublicKey}), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1107,7 +1107,7 @@ func TestHandleGetPartialClients_SeededRow_PubkeyWithSpecialChars(t *testing.T) 
 	clientsSvc := seededClientsfileSvc(peerName, peerAddress, peerPublicKey)
 	wgSvc := seededWgSvc(peerPublicKey, peerEndpoint, peerAddress, 10*time.Second, 1, 2)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: peerName, Address: peerAddress, PublicKey: peerPublicKey}))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: peerName, Address: peerAddress, PublicKey: peerPublicKey}), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1204,7 +1204,7 @@ func TestHandleGetPartialClients_RFC1918Endpoint(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = geo.Close() })
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: peerName, Address: peerAddress, PublicKey: peerPublicKey}))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), geo, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: peerName, Address: peerAddress, PublicKey: peerPublicKey}), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1261,7 +1261,7 @@ func TestHandleGetPartialClientDetail_404OnUnknown(t *testing.T) {
 
 	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1303,7 +1303,7 @@ func TestHandleGetPartialClientDetail_RendersFragment(t *testing.T) {
 		t.Fatalf("seed client_traffic: %v", err)
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1362,7 +1362,7 @@ func TestHandleGetMetricsClient_404OnUnknownPubkey(t *testing.T) {
 
 	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1393,7 +1393,7 @@ func TestHandleGetMetricsClient_400OnBadRange(t *testing.T) {
 
 	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1442,7 +1442,7 @@ func TestHandleGetMetricsClient_DefaultRange(t *testing.T) {
 
 	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", manifestKey)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1510,7 +1510,7 @@ func TestHandleGetMetricsClient_ComputesRates(t *testing.T) {
 		t.Fatalf("seed client_traffic: %v", err)
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1588,7 +1588,7 @@ func TestHandleGetMetricsClient_MonotonicTS(t *testing.T) {
 		t.Fatalf("seed client_traffic: %v", err)
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1650,7 +1650,7 @@ func TestHandleGetMetricsSystem_400OnBadRange(t *testing.T) {
 	}
 	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1711,7 +1711,7 @@ func TestHandleGetMetricsSystem_7dRangeWindowFilters(t *testing.T) {
 		}
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1791,7 +1791,7 @@ func TestHandleGetPartialEvents_RendersSeededRows(t *testing.T) {
 		t.Fatalf("seed handshake_events: %v", err)
 	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1885,7 +1885,7 @@ func TestHandleGetPartialAbout_RendersAllCards(t *testing.T) {
 	}
 	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -1967,7 +1967,7 @@ func TestHandleGetPartialOverview_ConsolidatedView(t *testing.T) {
 	// 10s-ago handshake → status="online" so the client-count card reports 1.
 	wgSvc := seededWgSvc(peerPublicKey, peerEndpoint, peerAddress, 10*time.Second, 123456, 654321)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: peerName, Address: peerAddress, PublicKey: peerPublicKey}))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, wgSvc, fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: peerName, Address: peerAddress, PublicKey: peerPublicKey}), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -2066,7 +2066,7 @@ func TestHandleGetMetricsProm(t *testing.T) {
 		Disks:      []poller.DiskMetric{{Mount: "/", PctFull: 73.2}},
 	}}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, provider, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, provider, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -2120,7 +2120,7 @@ func TestHandleGetMetricsProm_NilProvider(t *testing.T) {
 	}
 	systemdSvc := systemdRunnerActive(time.Now())
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

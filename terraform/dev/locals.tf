@@ -14,11 +14,20 @@ locals {
   # over the VPN. Derived from wg_server_net so the host stays in one place.
   dashboard_base_url = "http://${split("/", local.wg_server_net)[0]}:8080"
 
-  # Feature flag (spec 017): when true, a restapi_object resource drives the whole
-  # peer set through the dashboard's PUT /api/clients bulk endpoint over the VPN.
-  # Defaults OFF — flipping it on is an explicit, owner-opt-in commit. With it off
-  # the restapi_object is count-gated to zero and this slice changes nothing on a box.
-  manage_peers_via_api = false
+  # Client-management mode (spec 018) — selects the peer-management path. Consumed by
+  # the `wireguard` module input added in Slice 3; validated at the module boundary.
+  #   "local" (default) → peers are managed live in the dashboard UI (spec 015).
+  #     `clients_config` is only the first-boot seed; peer edits happen in the UI and
+  #     cause NO instance churn.
+  #   "cloud"           → peers are declared here in `clients_config`, delivered via
+  #     user-data, and editing them auto-replaces the instance (create-before-destroy,
+  #     EIP + server key preserved). Wired in the module in Slice 3.
+  client_management_mode = "local"
+
+  # spec-017's live `PUT /api/clients` restapi path (restapi_object below), kept
+  # DORMANT and INDEPENDENT of `client_management_mode`. Experimental, off by default.
+  # Do NOT combine with `cloud` mode — that would give two owners of the peer set.
+  enable_restapi_peer_sync = false
 
   # Canonical peer set — single source of truth for BOTH the boot seed (module
   # clients_config input) and the API-managed set (restapi_object data below).

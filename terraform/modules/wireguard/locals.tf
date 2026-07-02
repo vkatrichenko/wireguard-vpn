@@ -42,15 +42,16 @@ locals {
     github_repo        = var.github_repo
     install_script_ref = var.install_script_ref
 
-    wg_server_private_key = data.aws_ssm_parameter.wg_server_private_key.value
-    wg_server_net         = var.wg_server_net
-    wg_server_port        = var.wg_server_port
-    peers                 = join("\n", local.wg_client_data_json)
-    use_eip               = var.use_eip ? "enabled" : "disabled"
-    eip_id                = var.use_eip ? aws_eip.wireguard[0].id : null
-    health_check_bucket   = aws_s3_bucket.health_check.bucket
-    dashboard_release_tag = var.dashboard_release_tag
-    clients_json          = local.clients_json
+    wg_server_private_key  = data.aws_ssm_parameter.wg_server_private_key.value
+    wg_server_net          = var.wg_server_net
+    wg_server_port         = var.wg_server_port
+    peers                  = join("\n", local.wg_client_data_json)
+    use_eip                = var.use_eip ? "enabled" : "disabled"
+    eip_id                 = var.use_eip ? aws_eip.wireguard[0].id : null
+    health_check_bucket    = aws_s3_bucket.health_check.bucket
+    dashboard_release_tag  = var.dashboard_release_tag
+    client_management_mode = var.client_management_mode
+    clients_json           = local.clients_json
 
     # Alert seed (spec 007/008 slice 5). Webhook is the secret; the rest are knobs.
     dashboard_webhook_url          = local.dashboard_webhook_url

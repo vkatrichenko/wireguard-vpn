@@ -31,14 +31,23 @@ module "wireguard" {
   # AllowedIPs = 10.22.0.0/16
   # Endpoint = 54.245.26.247:51820
 
-  # Boot seed derives from the same canonical, address-sorted list the API-managed
-  # restapi_object uses (local.clients_config → local.clients_sorted), so both paths
-  # stay in lockstep. Peer entries live in locals.tf.
+  client_management_mode = local.client_management_mode
+
+  # The boot seed is ALWAYS the full canonical, address-sorted peer set — in BOTH
+  # local and cloud modes (spec 018). Peer-management behavior is selected by
+  # `client_management_mode` (threaded to the module in Slice 3), NOT by emptying
+  # this seed:
+  #   local mode → this seed only bootstraps a fresh box; peers are then managed
+  #     live in the dashboard UI with no instance churn.
+  #   cloud mode → this seed is the declared source of truth; editing it auto-
+  #     replaces the instance (wired in the module, Slice 3).
+  # Seeding the full set unconditionally is what kills spec-017's zero-peer
+  # cold-start lockout.
   clients_config = local.clients_sorted
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]
-  dashboard_release_tag = "v0.0.11"
+  dashboard_release_tag = "v0.0.12"
 
   # Single GitHub owner/name slug used BOTH for the raw scripts/install.sh fetch
   # and the dashboard release download (spec 014). The repo MUST be public for the
@@ -66,10 +75,12 @@ module "wireguard" {
   tags = local.default_tags
 }
 
-# Terraform-managed peer set (spec 017). Drives the dashboard's PUT /api/clients
-# bulk endpoint over the VPN, making the whole client list a single reconciled
-# object rather than a boot-only seed. Count-gated on the OFF-by-default flag, so
-# it's inert until the owner opts in.
+# Terraform-managed peer set (spec 017, demoted by spec 018). Drives the dashboard's
+# PUT /api/clients bulk endpoint over the VPN, making the whole client list a single
+# reconciled object rather than a boot-only seed. Now gated on the INDEPENDENT,
+# OFF-by-default `enable_restapi_peer_sync` flag — this is a DORMANT spec-017 path,
+# NOT part of either client_management_mode's normal flow. Do NOT combine it with
+# `cloud` mode: both would own the peer set. Inert until the owner opts in.
 #
 # This is a SINGLETON collection, not a per-id object: read/update/destroy paths
 # are overridden to hit /api/clients directly (no `/{id}` suffix the provider would
@@ -77,7 +88,7 @@ module "wireguard" {
 # Read hits the export endpoint (?format=tfvars, address-sorted) to match state.
 # Destroy PUTs an empty clients_config so `terraform destroy` clears peers cleanly.
 resource "restapi_object" "peers" {
-  count = local.manage_peers_via_api ? 1 : 0
+  count = local.enable_restapi_peer_sync ? 1 : 0
 
   path      = "/api/clients"
   object_id = "managed"

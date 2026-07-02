@@ -13,7 +13,7 @@
 
 | Name | Version |
 |------|---------|
-| <a name="provider_restapi"></a> [restapi](#provider\_restapi) | = 3.0.0 |
+| <a name="provider_restapi"></a> [restapi](#provider\_restapi) | 3.0.0 |
 
 ## Modules
 
