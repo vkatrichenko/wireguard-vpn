@@ -36,7 +36,12 @@ No modules.
 | [aws_instance.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/instance) | resource |
 | [aws_key_pair.ssh](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/key_pair) | resource |
 | [aws_launch_template.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/launch_template) | resource |
+| [aws_s3_bucket.client_list](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket.health_check](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_bucket) | resource |
+| [aws_s3_bucket_public_access_block.client_list](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_bucket_public_access_block) | resource |
+| [aws_s3_bucket_server_side_encryption_configuration.client_list](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_bucket_server_side_encryption_configuration) | resource |
+| [aws_s3_bucket_versioning.client_list](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_bucket_versioning) | resource |
+| [aws_s3_object.clients](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_object) | resource |
 | [aws_security_group.sg_wireguard_external](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/security_group) | resource |
 | [aws_ssm_parameter.ssh_private_key](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/ssm_parameter) | resource |
 | [null_resource.status_check](https://registry.terraform.io/providers/hashicorp/null/3.2.4/docs/resources/resource) | resource |
@@ -44,6 +49,7 @@ No modules.
 | [aws_ami.ubuntu_2404](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/ami) | data source |
 | [aws_iam_policy_document.ec2_assume_role](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.wireguard_policy_doc](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_s3_object.client_list_live](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/s3_object) | data source |
 | [aws_ssm_parameter.dashboard_discord_webhook_url](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/ssm_parameter) | data source |
 | [aws_ssm_parameter.dashboard_slack_bot_token](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/ssm_parameter) | data source |
 | [aws_ssm_parameter.dashboard_telegram_token](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/ssm_parameter) | data source |
@@ -86,6 +92,7 @@ No modules.
 
 | Name | Description |
 |------|-------------|
+| <a name="output_client_list_bucket"></a> [client\_list\_bucket](#output\_client\_list\_bucket) | Name of the S3 bucket holding the canonical client list (clients.json) in cloud mode. Empty string in local mode (no bucket). |
 | <a name="output_instance_arn"></a> [instance\_arn](#output\_instance\_arn) | ARN of the WireGuard EC2 instance — used by the dashboard module to scope SSM document grants. |
 | <a name="output_security_group_id"></a> [security\_group\_id](#output\_security\_group\_id) | n/a |
 <!-- END_TF_DOCS -->

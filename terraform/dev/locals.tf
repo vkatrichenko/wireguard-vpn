@@ -8,7 +8,7 @@ locals {
 
   # Client-management mode (spec 018): "local" = dashboard/SQLite-managed peers
   # (default, no instance churn); "cloud" = S3-bridged peers (later slices).
-  client_management_mode = "local"
+  client_management_mode = "cloud"
 
   # Canonical peer set — the first-boot seed passed to the wireguard module's
   # clients_config input.

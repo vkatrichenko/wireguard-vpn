@@ -42,7 +42,7 @@ func newConfigHandler(t *testing.T, ip, vpcCIDR string, imdsErr error) http.Hand
 	systemdSvc := systemdRunnerActive(time.Now().Add(-time.Hour))
 	clientsSvc := seededClientsfileSvc(cfgName, cfgAddress, cfgPeerPubKey)
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: cfgName, Address: cfgAddress, PublicKey: cfgPeerPubKey}), "local")
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: cfgName, Address: cfgAddress, PublicKey: cfgPeerPubKey}), "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestHandleGetClientConfig_OffAWS(t *testing.T) {
 	}
 	systemdSvc := systemdRunnerActive(time.Now().Add(-time.Hour))
 	clientsSvc := seededClientsfileSvc(cfgName, cfgAddress, cfgPeerPubKey)
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: cfgName, Address: cfgAddress, PublicKey: cfgPeerPubKey}), "local")
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, seededClientsSvc(t, db.Client{Name: cfgName, Address: cfgAddress, PublicKey: cfgPeerPubKey}), "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

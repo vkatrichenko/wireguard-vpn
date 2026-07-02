@@ -72,7 +72,7 @@ func newClientsAdminServer(t *testing.T) (http.Handler, *clients.Service, *recor
 	handler, err := server.New(
 		dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(),
 		fakeProcSvc(), database, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(),
-		nil, nil, nil, svc, "local")
+		nil, nil, nil, svc, "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -612,7 +612,7 @@ func TestAddClient_NilService503(t *testing.T) {
 	h, err := server.New(
 		dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(),
 		fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(),
-		nil, nil, nil, nil, "local")
+		nil, nil, nil, nil, "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

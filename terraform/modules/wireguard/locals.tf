@@ -20,6 +20,46 @@ locals {
     }
   ])
 
+  # --- Canonical client-list JSON (spec 018 §2.5) --------------------------
+  # The SHARED, single-sourced serialization of the peer list used by BOTH the
+  # S3 seed object (client_store.tf) and the root-module drift `check`. Slice 4's
+  # Go serializer MUST reproduce this byte-for-byte or the drift check will report
+  # phantom drift. Contract:
+  #   - Array of objects, each with ONLY { name, address, public_key } — no
+  #     `enabled`/disabled or any runtime state (so a UI enable/disable toggle is
+  #     NOT git drift).
+  #   - Sorted by `address` ascending, using a lexicographic string sort of the
+  #     `address` value (HCL `sort()` semantics; the Go side must string-sort the
+  #     same field). NOTE: this is a plain string sort, so "172.16.15.10/32" sorts
+  #     before "172.16.15.6/32" — deterministic, and both sides must match it.
+  #   - Encoded with `jsonencode` (compact, no extra whitespace). `jsonencode`
+  #     emits object keys alphabetically, so each object serializes as
+  #     {"address":…,"name":…,"public_key":…}.
+  # Address is assumed unique per peer (each is a /32); the map keyed by address
+  # is what gives us a stable, sortable ordering key.
+  clients_by_address = {
+    for c in var.clients_config : c.address => {
+      name       = c.name
+      address    = c.address
+      public_key = c.public_key
+    }
+  }
+  clients_canonical_json = jsonencode([
+    for addr in sort(keys(local.clients_by_address)) : local.clients_by_address[addr]
+  ])
+
+  # The S3 client-list bridge exists ONLY in cloud mode. This flag gates every S3
+  # resource (client_store.tf), the IAM grant (iam.tf), and the module outputs —
+  # a default `local` apply provisions zero S3.
+  client_store_enabled = var.client_management_mode == "cloud"
+
+  # Store coordinates exported to the dashboard env. Non-empty ONLY in cloud mode
+  # so local mode stays a clean no-op on the box (the dashboard sees empty coords
+  # and never touches S3). Guarded [0] index: the resources are count-gated on the
+  # same flag, so the index is only reached when they exist.
+  client_store_s3_bucket = local.client_store_enabled ? aws_s3_bucket.client_list[0].bucket : ""
+  client_store_s3_key    = local.client_store_enabled ? aws_s3_object.clients[0].key : ""
+
   # Resolved alert webhook URL (secret). Empty when no SSM param name is wired,
   # which suppresses the DASHBOARD_WEBHOOK_URL line in alerts.env. The count-gated
   # data source means we only touch SSM when the operator opts in.
@@ -51,6 +91,8 @@ locals {
     health_check_bucket    = aws_s3_bucket.health_check.bucket
     dashboard_release_tag  = var.dashboard_release_tag
     client_management_mode = var.client_management_mode
+    client_store_s3_bucket = local.client_store_s3_bucket
+    client_store_s3_key    = local.client_store_s3_key
     clients_json           = local.clients_json
 
     # Alert seed (spec 007/008 slice 5). Webhook is the secret; the rest are knobs.

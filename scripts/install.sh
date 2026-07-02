@@ -28,10 +28,15 @@
 #   DASHBOARD_RELEASE_REPO owner/repo to fetch the release from (required when
 #                          DASHBOARD_RELEASE_TAG is set; fail hard if missing)
 #   DASHBOARD_PORT         dashboard bind port           (default 8080)
-#   CLIENT_MANAGEMENT_MODE peer-management mode: ui | declared. REQUIRED when
-#                          the dashboard is installed (DASHBOARD_RELEASE_TAG
-#                          set); no default — fails hard if unset there. Unused
-#                          on WG-only installs.
+#   CLIENT_MANAGEMENT_MODE peer-management mode: local | cloud (spec 018).
+#                          REQUIRED when the dashboard is installed
+#                          (DASHBOARD_RELEASE_TAG set); no default — fails hard if
+#                          unset/invalid there. Unused on WG-only installs.
+#   CLIENT_STORE_S3_BUCKET S3 bucket holding the client list (cloud mode only).
+#   CLIENT_STORE_S3_KEY    S3 object key of the client list (cloud mode only).
+#                          Both are REQUIRED (non-empty) when
+#                          CLIENT_MANAGEMENT_MODE=cloud and the dashboard is
+#                          installed; ignored (may be empty) in local mode.
 #   CLIENTS_JSON           clients manifest written to   (default [])
 #                          /etc/wireguard-dashboard/clients.json
 #   WG_CLIENT_DNS          DNS for generated client cfgs (default 1.1.1.1; always
@@ -116,6 +121,11 @@ DASHBOARD_PORT="${DASHBOARD_PORT:-8080}"
 # No default: required (and validated) inside the dashboard gate below when
 # DASHBOARD_RELEASE_TAG is set. Empty read here only keeps it nounset-safe.
 CLIENT_MANAGEMENT_MODE="${CLIENT_MANAGEMENT_MODE:-}"
+# S3 client-store coordinates (spec 018). No defaults: required (and validated)
+# inside the dashboard gate ONLY when CLIENT_MANAGEMENT_MODE=cloud. Empty reads
+# here keep them nounset-safe (and empty is correct in local mode).
+CLIENT_STORE_S3_BUCKET="${CLIENT_STORE_S3_BUCKET:-}"
+CLIENT_STORE_S3_KEY="${CLIENT_STORE_S3_KEY:-}"
 CLIENTS_JSON="${CLIENTS_JSON:-[]}"
 # Off-AWS discovery for the dashboard — only consulted when the dashboard is
 # installed (harmless reads otherwise). WG_CLIENT_DNS has a default and is always
@@ -403,17 +413,26 @@ if [ -n "${DASHBOARD_RELEASE_TAG:-}" ]; then
   fi
 
   # The client-management mode is mandatory once the dashboard is installed
-  # (spec 018): the dashboard gates its client-mutating UI on CLIENT_MANAGEMENT_MODE,
+  # (spec 018): the dashboard branches its client store on CLIENT_MANAGEMENT_MODE,
   # so silently defaulting would hide a misconfiguration. Require an explicit,
   # valid choice and fail hard otherwise. WG-only installs never reach here.
+  #   local -> SQLite-only, no external store (spec 015); no S3 coords needed.
+  #   cloud -> S3-backed bridge; the bucket + key are REQUIRED (fail-fast if
+  #            either is empty), mirroring the DASHBOARD_RELEASE_REPO idiom above.
   case "$CLIENT_MANAGEMENT_MODE" in
-    ui | declared) : ;;
+    local) : ;;
+    cloud)
+      if [ -z "$CLIENT_STORE_S3_BUCKET" ] || [ -z "$CLIENT_STORE_S3_KEY" ]; then
+        echo "FATAL: CLIENT_MANAGEMENT_MODE=cloud requires CLIENT_STORE_S3_BUCKET and CLIENT_STORE_S3_KEY to be non-empty" >&2
+        exit 1
+      fi
+      ;;
     "")
-      echo "FATAL: DASHBOARD_RELEASE_TAG is set but CLIENT_MANAGEMENT_MODE is unset (set it to 'ui' or 'declared')" >&2
+      echo "FATAL: DASHBOARD_RELEASE_TAG is set but CLIENT_MANAGEMENT_MODE is unset (set it to 'local' or 'cloud')" >&2
       exit 1
       ;;
     *)
-      echo "FATAL: CLIENT_MANAGEMENT_MODE must be 'ui' or 'declared', got '${CLIENT_MANAGEMENT_MODE}'" >&2
+      echo "FATAL: CLIENT_MANAGEMENT_MODE must be 'local' or 'cloud', got '${CLIENT_MANAGEMENT_MODE}'" >&2
       exit 1
       ;;
   esac
@@ -617,6 +636,8 @@ Environment=LISTEN_ADDR=${LISTEN_ADDR}
 Environment=WG_SERVER_NET=${WG_SERVER_NET}
 Environment=WG_CLIENT_DNS=${WG_CLIENT_DNS}
 Environment=CLIENT_MANAGEMENT_MODE=${CLIENT_MANAGEMENT_MODE}
+Environment=CLIENT_STORE_S3_BUCKET=${CLIENT_STORE_S3_BUCKET}
+Environment=CLIENT_STORE_S3_KEY=${CLIENT_STORE_S3_KEY}
 ${DASHBOARD_OPTIONAL_ENV}# Leading '-' makes the file optional: the unit starts even if alerts.env is
 # absent, so alerting is strictly opt-in via the seeded knobs/webhook above.
 EnvironmentFile=-/etc/wireguard-dashboard/alerts.env

@@ -35,23 +35,23 @@
 
 ## Slice 3 — Terraform: the S3 bridge (bucket + seed + IAM + drift check + env coords) (req 2.3, 2.4)
 
-- [ ] A versioned S3 bucket + seed object + least-privilege IAM + warn-only drift `check` + dashboard S3 env coords **[Agent: terraform-aws]**
-  - [ ] Dedicated `aws_s3_bucket` + `aws_s3_bucket_versioning` (Enabled) + `public_access_block` (all true) + SSE `AES256` + `force_destroy = true` (comment the destroy/versions tradeoff)
-  - [ ] `aws_s3_object "clients"` key `clients.json`, `content` = canonical `clients_config` JSON, `content_type = "application/json"`, `lifecycle { ignore_changes = [content, etag] }`
-  - [ ] Instance role policy: `s3:GetObject` + `s3:PutObject` on the object ARN only
-  - [ ] `check "client_list_drift"` block with scoped `data.aws_s3_object` → assert live body == canonical `clients_config` → warn-only (verify `application/json` yields `body` via terraform MCP; hash-compare fallback)
-  - [ ] Thread `CLIENT_MANAGEMENT_MODE` + `CLIENT_STORE_S3_BUCKET` + `CLIENT_STORE_S3_KEY` through module `locals.tf` → `user-data.txt` → `install.sh`; install.sh requires bucket+key when mode is `cloud` (fail-fast, `DASHBOARD_RELEASE_REPO` idiom), static `Environment=` lines
-  - [ ] Verify: `terraform fmt -recursive` + `make pre-commit` + `make shellcheck` green
+- [x] A versioned S3 bucket + seed object + least-privilege IAM + warn-only drift `check` + dashboard S3 env coords **[Agent: terraform-aws]**
+  - [x] Dedicated `aws_s3_bucket` + `aws_s3_bucket_versioning` (Enabled) + `public_access_block` (all true) + SSE `AES256` + `force_destroy = true` (comment the destroy/versions tradeoff) — all `count`-gated on `cloud` mode
+  - [x] `aws_s3_object "clients"` key `clients.json`, `content` = canonical `clients_config` JSON, `content_type = "application/json"`, `lifecycle { ignore_changes = [content, etag] }`
+  - [x] Instance role policy: `s3:GetObject` + `s3:PutObject` on the object ARN only (conditional `dynamic` statement — absent in local mode)
+  - [x] `check "client_list_drift"` block: top-level `count`-gated `data.aws_s3_object` (+`depends_on` for cold-start deferral) → assert live body == canonical `clients_config` → warn-only, short-circuits silent in local (`application/json` yields `body` — confirmed via provider docs)
+  - [x] Thread `CLIENT_MANAGEMENT_MODE` + `CLIENT_STORE_S3_BUCKET` + `CLIENT_STORE_S3_KEY` through module `locals.tf` → `user-data.txt` → `install.sh`; install.sh requires bucket+key when mode is `cloud` (fail-fast, `DASHBOARD_RELEASE_REPO` idiom), static `Environment=` lines
+  - [x] Verify: `terraform fmt -recursive` + `make pre-commit` + `make shellcheck` green
 
 ## Slice 4 — Dashboard: S3 client store, boot reconcile + write-through (req 2.3)
 
-- [ ] A client-store abstraction (local no-op + S3-via-`aws`-CLI) wired into boot reconcile and every mutation, with canonical serialization **[Agent: go-fullstack]**
-  - [ ] Canonical serializer (fields `{name,address,public_key}`, sort by address, normalized) matching the TF contract; unit-tested
-  - [ ] Store interface `Load/Save`; local no-op impl; S3 impl shelling out to `aws s3api get-object`/`put-object`; `Load` distinguishes 404/NoSuchKey from other errors
-  - [ ] `main.go` reads `CLIENT_STORE_S3_BUCKET`/`CLIENT_STORE_S3_KEY`, builds the store, passes it to `server.New(...)` (append-only)
-  - [ ] Boot reconcile (cloud): load S3 → SQLite → `wg syncconf`; on 404 seed S3 from the local boot seed; non-404 error fails loudly (no clobber)
-  - [ ] Write-through: after each client mutation (`ReplaceAll`/`applyLocked` path), Save the canonical list to S3; enable/disable does NOT write to S3
-  - [ ] Verify (fake store, no live AWS): boot-load applies, 404-seed, non-404 fail-loud/no-clobber, mutation write-through, enable/disable excluded, canonical-serialization test; full `go test ./...` + build + static arm64 green
+- [x] A client-store abstraction (local no-op + S3-via-`aws`-CLI) wired into boot reconcile and every mutation, with canonical serialization **[Agent: go-fullstack]**
+  - [x] Canonical serializer (fields `{name,address,public_key}`, sort by address, normalized) matching the TF contract; unit-tested (incl. `.10`<`.6` string-sort case)
+  - [x] Store interface `Load/Save`; local no-op impl; S3 impl shelling out to `aws s3api get-object`/`put-object`; `Load` distinguishes 404/NoSuchKey from other errors
+  - [x] `main.go` reads `CLIENT_STORE_S3_BUCKET`/`CLIENT_STORE_S3_KEY`, builds the store, passes it to `server.New(...)` (append-only)
+  - [x] Boot reconcile (cloud): load S3 → SQLite → `wg syncconf`; on 404 seed S3 from the local boot seed; non-404 error fails loudly (no clobber)
+  - [x] Write-through: after each client mutation (`ReplaceAll`/`applyLocked` path), Save the canonical list to S3; enable/disable does NOT write to S3
+  - [x] Verify (fake store, no live AWS): boot-load applies, 404-seed, non-404 fail-loud/no-clobber, mutation write-through, enable/disable excluded, canonical-serialization test; full `go test ./...` + build + static arm64 green
 
 ## Slice 5 — Owner-run live end-to-end validation (cannot be done in-session)
 

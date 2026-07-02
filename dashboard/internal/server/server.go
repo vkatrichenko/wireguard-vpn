@@ -20,6 +20,7 @@ import (
 	"wireguard-dashboard/internal/alerts"
 	"wireguard-dashboard/internal/clients"
 	"wireguard-dashboard/internal/clientsfile"
+	"wireguard-dashboard/internal/clientstore"
 	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/disk"
 	"wireguard-dashboard/internal/netdev"
@@ -60,6 +61,16 @@ type server struct {
 	// interim design gated add/edit/remove controls and the drift badge on
 	// this value; that cosmetic-hide approach was abandoned and reverted.
 	clientManagementMode string
+	// clientStore is the cloud-mode S3 client-list bridge (spec 018, Slice 4),
+	// carried here for symmetry with clientManagementMode / for a future
+	// server-layer consumer (e.g. a status/debug view distinguishing the
+	// effective store without reaching into clientsSvc's internals). The
+	// ACTUAL write-through (after every mutation) and boot reconcile live in
+	// internal/clients (SetStore + ReconcileFromStore) — main.go wires the
+	// same store onto clientsSvc via SetStore before ever calling New. This
+	// field is not read by any handler today; it is safe to pass nil in tests
+	// that don't care (mirrors every other optional dependency here).
+	clientStore clientstore.Store
 	// alertStatus is the read seam to the in-UI active-alerts view (spec 007,
 	// Slice 5). The poller writes it each tick; handlers read a deep copy via
 	// Snapshot. It is OPTIONAL: nil renders the disabled/empty view (Snapshot is
@@ -186,6 +197,12 @@ type pageData struct {
 // identically in both modes. A test call site that doesn't care about the
 // mode passes "local" (or "").
 //
+// clientStore (Slice 4) is the trailing param after clientManagementMode: the
+// cloud-mode S3 client-list bridge main.go built and already wired onto
+// clientsSvc via SetStore (the write-through/boot-reconcile happen there, not
+// here — see the clientStore field doc). A test call site that doesn't
+// exercise it passes nil.
+//
 // Templates are parsed eagerly so a malformed template fails fast on
 // startup rather than on the first request. The FuncMap below is registered
 // before ParseFS because several card templates invoke its helpers and
@@ -207,6 +224,7 @@ func New(
 	metricsProvider MetricsProvider,
 	clientsSvc *clients.Service,
 	clientManagementMode string,
+	clientStore clientstore.Store,
 ) (http.Handler, error) {
 	// Two globs because templates/*.html does not recurse into cards/. The
 	// cards/ directory holds named-template fragments ({{ define "..." }})
@@ -251,6 +269,10 @@ func New(
 		// doc. main.go (envMode) already validated it's one of the two known
 		// strings.
 		clientManagementMode: clientManagementMode,
+		// See the clientStore field doc — carried for symmetry; the real
+		// wiring is clientsSvc.SetStore, already done by main.go before New
+		// is called.
+		clientStore: clientStore,
 	}
 
 	// Build the server-owned test-send notifier from the same holder the write

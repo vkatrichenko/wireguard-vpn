@@ -24,6 +24,7 @@ import (
 	"wireguard-dashboard/internal/alerts"
 	"wireguard-dashboard/internal/clients"
 	"wireguard-dashboard/internal/clientsfile"
+	"wireguard-dashboard/internal/clientstore"
 	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/disk"
 	"wireguard-dashboard/internal/geoip"
@@ -317,35 +318,78 @@ func main() {
 	// uses the real applier, not the no-op default.
 	clientsSvc.SetApplier(wgsync.New())
 
+	// Spec 018: client-management mode. "local" (default) is spec 015's
+	// SQLite-only behaviour, no external store. "cloud" bridges the client
+	// list through a versioned S3 object: the dashboard reads it at boot,
+	// reconciles SQLite + the live wg0 config to match, and writes it back on
+	// every UI mutation. envMode mirrors the envPct/envDuration convention: an
+	// invalid value is logged and falls back to the default rather than
+	// silently doing something unexpected.
+	clientManagementMode := envMode("CLIENT_MANAGEMENT_MODE", "local")
+
+	// clientStore is the injectable seam behind the S3 bridge (Slice 4). In
+	// local mode it stays the default clientstore.NoopStore{} — SetStore below
+	// only overwrites the default when cloud mode built a real S3 store, so
+	// local mode's boot/mutation paths are byte-for-byte spec 015. In cloud
+	// mode, CLIENT_STORE_S3_BUCKET/CLIENT_STORE_S3_KEY are REQUIRED: install.sh
+	// already fails the boot fast when they're unset (the
+	// DASHBOARD_RELEASE_REPO idiom), but the Go binary defensively re-checks —
+	// a cloud-mode dashboard with no coordinates would otherwise silently run
+	// as if it were local, which is exactly the kind of quiet drift spec 018
+	// exists to rule out.
+	var clientStore clientstore.Store = clientstore.NoopStore{}
+	if clientManagementMode == "cloud" {
+		bucket := os.Getenv("CLIENT_STORE_S3_BUCKET")
+		key := os.Getenv("CLIENT_STORE_S3_KEY")
+		if bucket == "" || key == "" {
+			slog.Error("clients: CLIENT_MANAGEMENT_MODE=cloud requires CLIENT_STORE_S3_BUCKET and CLIENT_STORE_S3_KEY", "bucket", bucket, "key", key)
+			os.Exit(1)
+		}
+		clientStore = clientstore.NewS3Store(bucket, key)
+	}
+	clientsSvc.SetStore(clientStore)
+
+	// seed is the Terraform-rendered manifest at /etc/wireguard-dashboard/
+	// clients.json — the spec-015 first-boot seed in local mode, AND the
+	// cold-seed source cloud mode falls back to when the S3 object has never
+	// been written (see ReconcileFromStore). Needed in both modes, so it's
+	// loaded once here regardless of clientManagementMode.
 	seed, err := clientsfileSvc.Load(ctx)
 	if err != nil {
 		slog.Warn("clients: seed manifest load failed; starting with empty client table", "err", err)
 		seed = nil
 	}
-	if err := clientsSvc.Seed(ctx, seed); err != nil {
-		slog.Error("clients: seed failed; continuing with current table", "err", err)
+
+	if clientManagementMode == "cloud" {
+		// Cloud boot reconcile (spec 018, Slice 4): S3 is the source of truth
+		// when present; a 404 cold-seeds it from the local manifest above and
+		// falls through to the ordinary spec-015 Seed+Reconcile. Any OTHER
+		// store error is logged loudly and left there — it deliberately does
+		// NOT fall through to Seed/Reconcile, so a transient S3 outage can
+		// never be mistaken for "never seeded" and clobber whatever the DB
+		// already held. This is non-fatal (no os.Exit): the dashboard's core
+		// purpose is observability, and a peer-management hiccup at boot
+		// should not take monitoring down with it — the operator sees the
+		// error in journald and the next successful mutation (or restart once
+		// S3 recovers) re-converges.
+		if err := clientsSvc.ReconcileFromStore(ctx, seed); err != nil {
+			slog.Error("clients: cloud boot reconcile failed; DB left untouched, live config may lag until S3 recovers", "err", err)
+		}
+	} else {
+		if err := clientsSvc.Seed(ctx, seed); err != nil {
+			slog.Error("clients: seed failed; continuing with current table", "err", err)
+		}
+
+		// Idempotent startup convergence: re-apply the current DB clients once so
+		// the live wg0.conf matches the DB on boot. Non-fatal — in dev (or before
+		// the Slice 5 helper/sudoers exist) the helper invocation fails; we log
+		// and keep serving rather than crash over an absent live-apply path.
+		if err := clientsSvc.Reconcile(ctx); err != nil {
+			slog.Warn("clients: startup reconcile failed; live config may lag DB until next change", "err", err)
+		}
 	}
 
-	// Idempotent startup convergence: re-apply the current DB clients once so the
-	// live wg0.conf matches the DB on boot. Non-fatal — in dev (or before the
-	// Slice 5 helper/sudoers exist) the helper invocation fails; we log and keep
-	// serving rather than crash over an absent live-apply path.
-	if err := clientsSvc.Reconcile(ctx); err != nil {
-		slog.Warn("clients: startup reconcile failed; live config may lag DB until next change", "err", err)
-	}
-
-	// Spec 018: client-management mode. "local" (default) is spec 015's
-	// SQLite-only behaviour. "cloud" designates the S3-backed bridge landing
-	// in a later slice (Slice 4) — for now the value is only carried through
-	// to server.New and stored; it does not yet change any behaviour. The UI
-	// is fully functional in both modes (no control hiding — that interim
-	// "declared" cosmetic-gate design was abandoned and reverted here).
-	// envMode mirrors the envPct/envDuration convention: an invalid value is
-	// logged and falls back to the default rather than silently doing
-	// something unexpected.
-	clientManagementMode := envMode("CLIENT_MANAGEMENT_MODE", "local")
-
-	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc, alertStatus, webhookCfg, pollerSvc, clientsSvc, clientManagementMode)
+	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc, alertStatus, webhookCfg, pollerSvc, clientsSvc, clientManagementMode, clientStore)
 	if err != nil {
 		log.Fatalf("server init failed: %v", err)
 	}
