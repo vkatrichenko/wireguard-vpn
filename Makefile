@@ -30,12 +30,14 @@ pre-commit:
 # Shellcheck — run separately from `pre-commit`; the dockerized pre-commit
 # image (ghcr.io/antonbabenko/pre-commit-terraform) bundles no shellcheck and
 # mounts no docker socket, so it can't host a shellcheck hook.
+# scripts/wg-peer is deliberately extension-less (it's the installed CLI
+# name) and is listed explicitly — a `scripts/*.sh` glob alone would skip it.
 shellcheck:
-	@echo "Running shellcheck on scripts/*.sh..."
+	@echo "Running shellcheck on scripts/*.sh scripts/wg-peer..."
 	@docker run --rm \
 	  -v "$$PWD":/mnt -w /mnt \
 	  --platform linux/amd64 \
-	  $(SHELLCHECK_IMAGE) scripts/*.sh
+	  $(SHELLCHECK_IMAGE) scripts/*.sh scripts/wg-peer
 
 
 .PHONY: clean pre-commit shellcheck

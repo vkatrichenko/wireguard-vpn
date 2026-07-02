@@ -339,13 +339,13 @@ func (s *Service) Update(ctx context.Context, name string, p UpdateParams) (db.C
 	return updated, nil
 }
 
-// ReplaceEntry is one desired peer in a bulk-replace payload (spec 017): the
-// same {name, address, public_key} projection ExportEntries emits, since the
-// Terraform-driven PUT /api/clients endpoint (a later slice) hands the
-// dashboard back exactly what a prior export produced. Unlike AddParams there
-// is no optional Address / Note — the bulk path requires an explicit address
-// on every entry (no auto-allocation, for idempotency) and has no notion of a
-// per-peer note or enabled flag: every git-managed peer is enabled.
+// ReplaceEntry is one desired peer in a bulk-replace payload: the
+// {name, address, public_key} projection ReconcileFromStore hands ReplaceAll
+// when restoring the full peer set from the cloud-mode S3 backup (spec 019).
+// Unlike AddParams there is no optional Address / Note — the bulk path
+// requires an explicit address on every entry (no auto-allocation, for
+// idempotency) and has no notion of a per-peer note or enabled flag: every
+// restored peer is enabled.
 type ReplaceEntry struct {
 	Name      string
 	Address   string
@@ -353,29 +353,21 @@ type ReplaceEntry struct {
 }
 
 // ReplaceAll validates entries as a whole set, then reconciles the clients
-// table AND the dashboard-owned managed_baseline table to match exactly (via
-// db.ReplaceClientsAndBaseline, one transaction covering both) and runs the
-// live-apply step once. This is the service-layer half of spec 017's
-// bulk-replace endpoint: Terraform hands over the entire desired peer set in
-// one call, and the dashboard's SQLite table + live wg0 config must end up
-// matching it exactly — inserts, updates, AND deletes for anything no longer
-// present.
-//
-// The baseline write is what lets computeDrift (internal/server) mean
-// "diverged from the git-managed set" rather than "diverged from the
-// first-boot seed": entries is exactly what a future UI edit or removal will
-// be diffed against, so it must land in the same transaction as the peer
-// reconcile — a partial failure must never leave the baseline claiming a set
-// that the clients table doesn't actually hold.
+// table to match exactly (via db.ReplaceClients: inserts, updates, AND
+// deletes for anything no longer present) and runs the live-apply step once.
+// This is the service-layer half of spec 019's cloud-mode boot restore
+// (ReconcileFromStore): the S3 backup hands over the entire peer set it holds,
+// and the dashboard's SQLite table + live wg0 config must end up matching it
+// exactly.
 //
 // Every replaced peer is stamped Enabled=true: there is no enabled concept in
-// the git-managed input, only in runtime-added peers via Add/Update.
+// the backup's input, only in runtime-added peers via Add/Update.
 // CreatedAt/UpdatedAt are stamped "now" on new peers; db.ReplaceClients
 // preserves CreatedAt (and id) for peers whose public_key survives unchanged.
 //
-// Validation runs before any DB write — an invalid payload leaves the table,
-// the baseline, and the live config untouched (all-or-nothing, matching
-// db.ReplaceClientsAndBaseline's own transactional guarantee).
+// Validation runs before any DB write — an invalid payload leaves the table
+// and the live config untouched (all-or-nothing, matching db.ReplaceClients's
+// own transactional guarantee).
 func (s *Service) ReplaceAll(ctx context.Context, entries []ReplaceEntry) ([]db.Client, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -386,7 +378,6 @@ func (s *Service) ReplaceAll(ctx context.Context, entries []ReplaceEntry) ([]db.
 
 	now := time.Now().UTC()
 	want := make([]db.Client, 0, len(entries))
-	baseline := make([]db.BaselineEntry, 0, len(entries))
 	for _, e := range entries {
 		want = append(want, db.Client{
 			Name:      e.Name,
@@ -396,14 +387,9 @@ func (s *Service) ReplaceAll(ctx context.Context, entries []ReplaceEntry) ([]db.
 			CreatedAt: now,
 			UpdatedAt: now,
 		})
-		baseline = append(baseline, db.BaselineEntry{
-			Name:      e.Name,
-			Address:   e.Address,
-			PublicKey: e.PublicKey,
-		})
 	}
 
-	if err := s.db.ReplaceClientsAndBaseline(ctx, want, baseline); err != nil {
+	if err := s.db.ReplaceClients(ctx, want); err != nil {
 		return nil, fmt.Errorf("clients: replace all: %w", err)
 	}
 	if err := s.applyLocked(ctx); err != nil {
@@ -526,7 +512,7 @@ func (s *Service) saveStoreLocked(ctx context.Context) error {
 // operator peer). It implements this decision table:
 //
 //   - Load returns a NON-EMPTY list → S3 is authoritative (steady state):
-//     ReplaceAll(entries), same as a Terraform bulk PUT. Store marked ready.
+//     ReplaceAll(entries) reconciles the DB to match S3 exactly. Store marked ready.
 //   - Load returns clientstore.ErrNotFound OR an empty list (the two are
 //     treated identically — an empty object is never authoritative, exactly
 //     like a missing one):

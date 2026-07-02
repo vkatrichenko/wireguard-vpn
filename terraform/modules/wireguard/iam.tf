@@ -25,7 +25,7 @@ data "aws_iam_policy_document" "wireguard_policy_doc" {
     resources = ["${aws_s3_bucket.health_check.arn}/*"]
   }
 
-  # S3 client-list bridge (spec 018). CLOUD-ONLY: the statement is emitted only
+  # S3 client-list backup (spec 019). CLOUD-ONLY: the statement is emitted only
   # when the store is enabled (cloud mode) — in local mode there is no bucket and
   # no grant. Least-privilege: read + write the SINGLE clients.json object only —
   # no ListBucket, no bucket-level or wildcard grant. The [0] index is safe here

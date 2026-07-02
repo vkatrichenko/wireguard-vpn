@@ -1,0 +1,344 @@
+#!/usr/bin/env bash
+#
+# wg-peer — optional on-box CLI for first-peer onboarding on a manual VPS
+# install (spec 019, functional-spec.md §2.5).
+#
+# This is a THIN CLIENT over the LOCAL dashboard HTTP API — it calls the exact
+# same endpoints the dashboard UI uses (spec 004/015), so IP allocation,
+# `wg syncconf`, S3 write-through (cloud mode), and client-config generation
+# all run through the dashboard's Go code. The script and the UI are the same
+# mutation path by construction; wg-peer never touches wg0.conf, SQLite, or S3
+# directly.
+#
+# It exists because the dashboard is VPN-only: on a fresh manual-VPS install
+# there is no peer yet, so there is no way to reach the dashboard over the
+# tunnel. wg-peer lets an operator add that first peer from the server shell
+# instead of SSH-forwarding the dashboard port. It is NOT required on the
+# Terraform/AWS path, which seeds an admin peer instead.
+#
+# Environment:
+#   WG_PEER_API_ADDR   dashboard API host:port. Defaults to LISTEN_ADDR (the
+#                       env var the dashboard's own systemd unit is started
+#                       with) if set, else 172.16.15.1:8080 (the install.sh /
+#                       dashboard default bind address).
+#
+# Usage:
+#   wg-peer add <name> [--pubkey KEY] [--show-config]
+#   wg-peer remove <name>
+#   wg-peer update <name> [--name NEW] [--pubkey KEY]
+#   wg-peer -h | --help | help
+#
+set -euo pipefail
+
+# --- API base resolution -----------------------------------------------------
+API_ADDR="${WG_PEER_API_ADDR:-${LISTEN_ADDR:-172.16.15.1:8080}}"
+API_BASE="http://${API_ADDR}"
+
+# The literal placeholder the dashboard's config-download endpoint emits in
+# place of a client private key (the server never holds one). Matched verbatim
+# and substituted in-memory when wg-peer server-generates an ephemeral keypair.
+PLACEHOLDER='PrivateKey = <paste your client private key here>'
+
+usage() {
+  cat >&2 <<'USAGE_EOF'
+Usage: wg-peer <command> [args]
+
+Commands:
+  add <name> [--pubkey KEY] [--show-config]
+      Add a peer. Without --pubkey, a keypair is generated on this host: the
+      public key is registered with the dashboard and the private key is kept
+      in memory only (never written to disk/SQLite/S3). Combine with
+      --show-config to print a ready-to-use client config (private key shown
+      once). With --pubkey, the operator supplies their own public key (the
+      server never holds that peer's private key); --show-config then prints
+      the config with the private-key placeholder left intact.
+
+  remove <name>
+      Remove a peer.
+
+  update <name> [--name NEW] [--pubkey KEY]
+      Update an existing peer. At least one of --name / --pubkey is required;
+      both may be combined in one call.
+
+  -h, --help, help
+      Show this help.
+
+Environment:
+  WG_PEER_API_ADDR   dashboard API host:port
+                      (default: $LISTEN_ADDR if set, else 172.16.15.1:8080)
+USAGE_EOF
+}
+
+# --- HTTP helpers -------------------------------------------------------------
+# curl is invoked WITHOUT --fail so 4xx/5xx responses are captured (the API's
+# error body is the useful diagnostic) rather than turned into a curl failure.
+# A nonzero curl exit here means a connection-level problem (refused, DNS,
+# timeout) rather than an HTTP error, and gets its own message. HTTP_STATUS /
+# HTTP_BODY are populated as globals — bash has no clean multi-value return.
+HTTP_STATUS=""
+HTTP_BODY=""
+
+http_request() {
+  local method="$1" path="$2" body="${3:-}"
+  local url="${API_BASE}${path}"
+  local raw
+  local -a curl_args
+  curl_args=(-sS -w '\n%{http_code}' -X "$method")
+  if [ -n "$body" ]; then
+    curl_args+=(-H 'Content-Type: application/json' -d "$body")
+  fi
+  curl_args+=("$url")
+
+  if ! raw="$(curl "${curl_args[@]}" 2>/dev/null)"; then
+    echo "ERROR: dashboard API not reachable at ${API_BASE}; is wireguard-dashboard running?" >&2
+    exit 1
+  fi
+
+  HTTP_STATUS="${raw##*$'\n'}"
+  HTTP_BODY="${raw%$'\n'*}"
+}
+
+http_get()    { http_request GET    "$1" ""; }
+http_post()   { http_request POST   "$1" "$2"; }
+http_patch()  { http_request PATCH  "$1" "$2"; }
+http_delete() { http_request DELETE "$1" ""; }
+
+# 2xx check on the just-populated HTTP_STATUS.
+http_ok() {
+  case "$HTTP_STATUS" in
+    2[0-9][0-9]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# URL-path-escape a peer name for use in /api/clients/<name>[...] paths.
+url_escape() {
+  jq -rn --arg s "$1" '$s|@uri'
+}
+
+# --- commands -----------------------------------------------------------------
+
+cmd_add() {
+  if [ "$#" -lt 1 ]; then
+    echo "ERROR: add requires <name>" >&2
+    usage
+    exit 2
+  fi
+  local name="$1"
+  shift
+
+  local pubkey="" show_config=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --pubkey)
+        if [ "$#" -lt 2 ]; then
+          echo "ERROR: --pubkey requires a value" >&2
+          exit 2
+        fi
+        pubkey="$2"
+        shift 2
+        ;;
+      --show-config)
+        show_config=1
+        shift
+        ;;
+      *)
+        echo "ERROR: unknown argument to add: $1" >&2
+        usage
+        exit 2
+        ;;
+    esac
+  done
+
+  # Server-side ephemeral keygen when no --pubkey is given. `priv` lives ONLY
+  # in this shell variable: never written to a file, SQLite, or S3. It goes
+  # out of scope when this function returns (explicitly cleared below too).
+  local generated=0
+  local priv=""
+  if [ -z "$pubkey" ]; then
+    generated=1
+    priv="$(wg genkey)"
+    pubkey="$(printf '%s' "$priv" | wg pubkey)"
+  fi
+
+  local body
+  body="$(jq -n --arg name "$name" --arg pubkey "$pubkey" '{name: $name, public_key: $pubkey}')"
+
+  http_post "/api/clients" "$body"
+  if ! http_ok; then
+    echo "ERROR: add failed (HTTP ${HTTP_STATUS}): ${HTTP_BODY}" >&2
+    priv=""
+    exit 1
+  fi
+
+  echo "Peer '${name}' added."
+  local addr
+  addr="$(printf '%s' "$HTTP_BODY" | jq -r '.address // empty' 2>/dev/null || true)"
+  [ -n "$addr" ] && echo "  Address:    ${addr}"
+  echo "  Public key: ${pubkey}"
+  if [ "$generated" -eq 1 ] && [ "$show_config" -eq 0 ]; then
+    echo "  Note: a keypair was generated but not shown (no --show-config)." >&2
+    echo "        Re-running 'add' would register a NEW peer, not recover this key —" >&2
+    echo "        use 'wg-peer update ${name} --pubkey ...' if you need to attach a" >&2
+    echo "        different keypair, or re-add with --show-config next time." >&2
+  fi
+
+  if [ "$show_config" -eq 1 ]; then
+    print_client_config "$name" "$generated" "$priv"
+  fi
+
+  # Explicitly discard — belt-and-suspenders on top of going out of scope.
+  priv=""
+}
+
+# Fetch the dashboard-generated config and print it. When $generated=1, the
+# private-key placeholder is substituted with $priv IN MEMORY (streamed
+# line-by-line through a pipe — no temp file, no herestring) and shown once;
+# otherwise the placeholder is left intact (operator holds their own key).
+print_client_config() {
+  local name="$1" generated="$2" priv="$3"
+  local encoded_name
+  encoded_name="$(url_escape "$name")"
+
+  http_get "/api/clients/${encoded_name}/config"
+  if ! http_ok; then
+    echo "ERROR: failed to fetch client config (HTTP ${HTTP_STATUS}): ${HTTP_BODY}" >&2
+    exit 1
+  fi
+
+  echo
+  if [ "$generated" -eq 1 ]; then
+    echo "Client config — PRIVATE KEY SHOWN ONCE. Copy it now; it is not stored"
+    echo "anywhere on this server (not on disk, not in SQLite, not in S3):"
+  else
+    echo "Client config (bring-your-own key — fill in your own private key):"
+  fi
+  echo "-----------------------------------------------------------"
+  if [ "$generated" -eq 1 ]; then
+    printf '%s\n' "$HTTP_BODY" | while IFS= read -r line || [ -n "$line" ]; do
+      if [ "$line" = "$PLACEHOLDER" ]; then
+        printf 'PrivateKey = %s\n' "$priv"
+      else
+        printf '%s\n' "$line"
+      fi
+    done
+  else
+    printf '%s\n' "$HTTP_BODY"
+  fi
+  echo "-----------------------------------------------------------"
+}
+
+cmd_remove() {
+  if [ "$#" -ne 1 ]; then
+    echo "ERROR: remove requires exactly <name>" >&2
+    usage
+    exit 2
+  fi
+  local name="$1"
+  local encoded_name
+  encoded_name="$(url_escape "$name")"
+
+  http_delete "/api/clients/${encoded_name}"
+  if [ "$HTTP_STATUS" = "404" ]; then
+    echo "ERROR: peer '${name}' not found" >&2
+    exit 1
+  fi
+  if ! http_ok; then
+    echo "ERROR: remove failed (HTTP ${HTTP_STATUS}): ${HTTP_BODY}" >&2
+    exit 1
+  fi
+  echo "Peer '${name}' removed."
+}
+
+cmd_update() {
+  if [ "$#" -lt 1 ]; then
+    echo "ERROR: update requires <name>" >&2
+    usage
+    exit 2
+  fi
+  local name="$1"
+  shift
+
+  local new_name="" pubkey=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --name)
+        if [ "$#" -lt 2 ]; then
+          echo "ERROR: --name requires a value" >&2
+          exit 2
+        fi
+        new_name="$2"
+        shift 2
+        ;;
+      --pubkey)
+        if [ "$#" -lt 2 ]; then
+          echo "ERROR: --pubkey requires a value" >&2
+          exit 2
+        fi
+        pubkey="$2"
+        shift 2
+        ;;
+      *)
+        echo "ERROR: unknown argument to update: $1" >&2
+        usage
+        exit 2
+        ;;
+    esac
+  done
+
+  if [ -z "$new_name" ] && [ -z "$pubkey" ]; then
+    echo "ERROR: update requires at least one of --name or --pubkey" >&2
+    usage
+    exit 2
+  fi
+
+  # PATCH pointer-presence semantics: only send the field(s) supplied.
+  local body
+  if [ -n "$new_name" ] && [ -n "$pubkey" ]; then
+    body="$(jq -n --arg name "$new_name" --arg pubkey "$pubkey" '{name: $name, public_key: $pubkey}')"
+  elif [ -n "$new_name" ]; then
+    body="$(jq -n --arg name "$new_name" '{name: $name}')"
+  else
+    body="$(jq -n --arg pubkey "$pubkey" '{public_key: $pubkey}')"
+  fi
+
+  local encoded_name
+  encoded_name="$(url_escape "$name")"
+
+  http_patch "/api/clients/${encoded_name}" "$body"
+  if ! http_ok; then
+    echo "ERROR: update failed (HTTP ${HTTP_STATUS}): ${HTTP_BODY}" >&2
+    exit 1
+  fi
+  echo "Peer '${name}' updated."
+}
+
+# --- dispatch -----------------------------------------------------------------
+if [ "$#" -lt 1 ]; then
+  usage
+  exit 2
+fi
+
+cmd="$1"
+shift
+
+case "$cmd" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  add)
+    cmd_add "$@"
+    ;;
+  remove)
+    cmd_remove "$@"
+    ;;
+  update)
+    cmd_update "$@"
+    ;;
+  *)
+    echo "ERROR: unknown command: $cmd" >&2
+    usage
+    exit 2
+    ;;
+esac

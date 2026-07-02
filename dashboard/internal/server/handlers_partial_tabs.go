@@ -59,11 +59,6 @@ func parseRangeParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 type clientsTabData struct {
 	Rows  []ClientRow
 	Error string
-	// Drift is the count of DB clients diverged from the git-managed
-	// (Terraform-applied) baseline (spec 017; falls back to the boot
-	// clients.json seed pre-first-apply, spec 015) — rendered as a small
-	// badge in the Clients-tab heading; zero hides it. See computeDrift.
-	Drift int
 	// Message / MessageKind carry the optional outcome line swapped in after an
 	// add/edit/remove mutation (spec 015, Slice 6). Both are empty on the
 	// tab-tick render so the card shows the bare list + controls; the write
@@ -79,7 +74,7 @@ type clientsTabData struct {
 // join failing is NOT a hard error: it populates Error so the fragment can
 // render an inline message rather than 500-ing (which htmx would swallow,
 // leaving stale content). Extracted so the partial render and every
-// post-mutation re-render stay in lock-step — one place computes rows + drift.
+// post-mutation re-render stay in lock-step — one place computes the rows.
 func (s *server) buildClientsTabData(ctx context.Context) clientsTabData {
 	data := clientsTabData{}
 	dbClients, clientsErr := s.clientsSvc.List(ctx)
@@ -89,7 +84,6 @@ func (s *server) buildClientsTabData(ctx context.Context) clientsTabData {
 		data.Error = joined.Error()
 	} else {
 		data.Rows = buildClientRows(dbClients, peers, time.Now(), s.geoipSvc)
-		data.Drift = s.computeDrift(ctx, dbClients)
 	}
 	return data
 }
