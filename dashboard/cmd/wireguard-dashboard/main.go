@@ -334,15 +334,15 @@ func main() {
 		slog.Warn("clients: startup reconcile failed; live config may lag DB until next change", "err", err)
 	}
 
-	// Spec 018: cosmetic-only client-management mode. "local" (default) leaves
-	// every add/edit/enable-disable/remove control and the drift badge visible,
-	// matching today's behaviour byte-for-byte. "cloud" hides them in the
-	// templates because Terraform is authoritative over peers in that mode —
-	// this is NOT an auth boundary; every /api/clients handler still works
-	// exactly as before, so a determined operator (or a stale bookmark) can
-	// still call them directly. envMode mirrors the envPct/envDuration
-	// convention: an invalid value is logged and falls back to the default
-	// rather than silently doing something unexpected.
+	// Spec 018: client-management mode. "local" (default) is spec 015's
+	// SQLite-only behaviour. "cloud" designates the S3-backed bridge landing
+	// in a later slice (Slice 4) — for now the value is only carried through
+	// to server.New and stored; it does not yet change any behaviour. The UI
+	// is fully functional in both modes (no control hiding — that interim
+	// "declared" cosmetic-gate design was abandoned and reverted here).
+	// envMode mirrors the envPct/envDuration convention: an invalid value is
+	// logged and falls back to the default rather than silently doing
+	// something unexpected.
 	clientManagementMode := envMode("CLIENT_MANAGEMENT_MODE", "local")
 
 	handler, err := server.New(dashboard.WebFS(), serverinfoSvc, systemdSvc, clientsfileSvc, wgSvc, procSvc, metricsDB, geoipSvc, diskSvc, processesSvc, netdevSvc, alertStatus, webhookCfg, pollerSvc, clientsSvc, clientManagementMode)

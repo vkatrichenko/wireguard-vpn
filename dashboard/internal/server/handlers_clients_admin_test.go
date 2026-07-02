@@ -56,18 +56,6 @@ func (a *recordingApplier) count() int {
 // client renders "pending".
 func newClientsAdminServer(t *testing.T) (http.Handler, *clients.Service, *recordingApplier) {
 	t.Helper()
-	return newClientsAdminServerMode(t, "local")
-}
-
-// newClientsAdminServerMode is the spec 018 mode-parametrized variant —
-// newClientsAdminServer delegates here with "local" so every existing call
-// site keeps compiling and testing today's default behaviour unchanged.
-// Passing "cloud" wires the same fakes but threads the mode through to
-// server.New so tests can assert the cosmetic-only template guards (add form,
-// edit toggle, remove, enable/disable, drift badge) without duplicating the
-// whole harness.
-func newClientsAdminServerMode(t *testing.T, mode string) (http.Handler, *clients.Service, *recordingApplier) {
-	t.Helper()
 	database := newTestDB(t)
 	svc := clients.NewService(database, "172.16.15.1/24")
 	rec := &recordingApplier{}
@@ -84,7 +72,7 @@ func newClientsAdminServerMode(t *testing.T, mode string) (http.Handler, *client
 	handler, err := server.New(
 		dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(),
 		fakeProcSvc(), database, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(),
-		nil, nil, nil, svc, mode)
+		nil, nil, nil, svc, "local")
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

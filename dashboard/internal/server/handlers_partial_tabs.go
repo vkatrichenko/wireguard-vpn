@@ -72,9 +72,6 @@ type clientsTabData struct {
 	// webhook-card outcome convention.
 	Message     string
 	MessageKind string
-	// Cloud gates every client-mutating control (add/edit/enable-disable/remove)
-	// and the drift badge cosmetically (spec 018) — see server.cloudMode.
-	Cloud bool
 }
 
 // buildClientsTabData performs the DB-clients + live-wg join that both the
@@ -84,7 +81,7 @@ type clientsTabData struct {
 // leaving stale content). Extracted so the partial render and every
 // post-mutation re-render stay in lock-step — one place computes rows + drift.
 func (s *server) buildClientsTabData(ctx context.Context) clientsTabData {
-	data := clientsTabData{Cloud: s.cloudMode}
+	data := clientsTabData{}
 	dbClients, clientsErr := s.clientsSvc.List(ctx)
 	peers, peersErr := s.wgSvc.Show(ctx)
 	if joined := errors.Join(clientsErr, peersErr); joined != nil {
@@ -92,11 +89,7 @@ func (s *server) buildClientsTabData(ctx context.Context) clientsTabData {
 		data.Error = joined.Error()
 	} else {
 		data.Rows = buildClientRows(dbClients, peers, time.Now(), s.geoipSvc)
-		// Skip computeDrift entirely in cloud mode — the badge is hidden anyway,
-		// so there's no reason to pay for the managed_baseline read every tick.
-		if !s.cloudMode {
-			data.Drift = s.computeDrift(ctx, dbClients)
-		}
+		data.Drift = s.computeDrift(ctx, dbClients)
 	}
 	return data
 }

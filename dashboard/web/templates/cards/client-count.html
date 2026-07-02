@@ -1,6 +1,6 @@
 {{ define "client-count" }}
 <section id="client-count" class="card">
-  <h2>Clients{{ if and .Drift (not .Cloud) }} <span class="drift-badge" title="Clients diverged from the git-managed (Terraform-applied) set.">{{ .Drift }} drift</span>{{ end }}</h2>
+  <h2>Clients{{ if .Drift }} <span class="drift-badge" title="Clients diverged from the git-managed (Terraform-applied) set.">{{ .Drift }} drift</span>{{ end }}</h2>
   {{/* KPI/stat tile (mockup .stat pattern). The large mono number is the
        online/total figure; "online" / "total" are small fitted labels under
        each value. Splitting number from label means --fs-stat applies ONLY to

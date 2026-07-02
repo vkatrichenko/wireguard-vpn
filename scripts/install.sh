@@ -28,7 +28,10 @@
 #   DASHBOARD_RELEASE_REPO owner/repo to fetch the release from (required when
 #                          DASHBOARD_RELEASE_TAG is set; fail hard if missing)
 #   DASHBOARD_PORT         dashboard bind port           (default 8080)
-#   CLIENT_MANAGEMENT_MODE peer-management mode: local (default) | cloud
+#   CLIENT_MANAGEMENT_MODE peer-management mode: ui | declared. REQUIRED when
+#                          the dashboard is installed (DASHBOARD_RELEASE_TAG
+#                          set); no default — fails hard if unset there. Unused
+#                          on WG-only installs.
 #   CLIENTS_JSON           clients manifest written to   (default [])
 #                          /etc/wireguard-dashboard/clients.json
 #   WG_CLIENT_DNS          DNS for generated client cfgs (default 1.1.1.1; always
@@ -110,7 +113,9 @@ WG_PEERS="${WG_PEERS:-}"
 DASHBOARD_RELEASE_TAG="${DASHBOARD_RELEASE_TAG:-}"
 DASHBOARD_RELEASE_REPO="${DASHBOARD_RELEASE_REPO:-}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8080}"
-CLIENT_MANAGEMENT_MODE="${CLIENT_MANAGEMENT_MODE:-local}"
+# No default: required (and validated) inside the dashboard gate below when
+# DASHBOARD_RELEASE_TAG is set. Empty read here only keeps it nounset-safe.
+CLIENT_MANAGEMENT_MODE="${CLIENT_MANAGEMENT_MODE:-}"
 CLIENTS_JSON="${CLIENTS_JSON:-[]}"
 # Off-AWS discovery for the dashboard — only consulted when the dashboard is
 # installed (harmless reads otherwise). WG_CLIENT_DNS has a default and is always
@@ -396,6 +401,22 @@ if [ -n "${DASHBOARD_RELEASE_TAG:-}" ]; then
     echo "FATAL: DASHBOARD_RELEASE_TAG is set but DASHBOARD_RELEASE_REPO is empty" >&2
     exit 1
   fi
+
+  # The client-management mode is mandatory once the dashboard is installed
+  # (spec 018): the dashboard gates its client-mutating UI on CLIENT_MANAGEMENT_MODE,
+  # so silently defaulting would hide a misconfiguration. Require an explicit,
+  # valid choice and fail hard otherwise. WG-only installs never reach here.
+  case "$CLIENT_MANAGEMENT_MODE" in
+    ui | declared) : ;;
+    "")
+      echo "FATAL: DASHBOARD_RELEASE_TAG is set but CLIENT_MANAGEMENT_MODE is unset (set it to 'ui' or 'declared')" >&2
+      exit 1
+      ;;
+    *)
+      echo "FATAL: CLIENT_MANAGEMENT_MODE must be 'ui' or 'declared', got '${CLIENT_MANAGEMENT_MODE}'" >&2
+      exit 1
+      ;;
+  esac
 
   # curl is required for the release download. Slice 1 deliberately omitted it
   # (the server-only path needs no HTTP), so install it here if missing.

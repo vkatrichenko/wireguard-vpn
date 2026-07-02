@@ -192,7 +192,7 @@ variable "dashboard_alerts" {
 }
 
 variable "client_management_mode" {
-  description = "Peer-management mode threaded from the root (spec 018). \"local\" (default) = peers managed live in the dashboard UI (spec 015); clients_config is only a first-boot seed and peer edits cause no instance churn. \"cloud\" = peers declared in clients_config and delivered via user-data; a change to the peer set auto-replaces the instance (see terraform_data.peer_replace_trigger) and the dashboard hides its client-mutating controls. Also exported to the dashboard as CLIENT_MANAGEMENT_MODE."
+  description = "Peer-management mode threaded from the root (spec 018). \"local\" (default) = peers managed live in the dashboard UI backed by the instance-local SQLite store (spec 015); clients_config is only a first-boot seed and peer edits cause no instance churn. \"cloud\" = peers bridged through a versioned S3 object (built in later slices); the dashboard reads it at boot and writes it on UI edits, while Terraform seeds it once and warns on drift. Also exported to the dashboard as CLIENT_MANAGEMENT_MODE."
   type        = string
   default     = "local"
   validation {

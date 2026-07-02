@@ -2,44 +2,60 @@
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
 - **Technical Considerations:** [technical-considerations.md](./technical-considerations.md)
-- **Status:** In Progress
+- **Status:** In Progress (re-planned 2026-07-02 around the S3-bridge design; supersedes the interim `ui`/`declared` + instance-replace implementation)
 
 ---
 
-> **Verification reality:** No browser MCP — dashboard UI gating is verified via Go handler/template render tests (`server_test` harness), not a live browser. **No live `terraform plan`/`apply` in-session** — validate is limited to `fmt` + `make pre-commit` (full-config validate needs `aws sso login --profile csm`); the cloud-mode instance replacement is **owner-run**. Everything defaults to `local` → no behavior change on the running box until the owner sets `cloud`.
+> **Design recap:** `client_management_mode = local | cloud` (default `local`). **local** = SQLite-only (spec 015). **cloud** = a versioned S3 object is a UI-authoritative, durable bridge — the dashboard reads it at boot and writes it on every UI edit (no instance replacement); Terraform seeds it once from `clients_config` and **warns** on drift without reverting. The interim `declared`-mode instance-replace trigger, the cosmetic UI-hide, and all `restapi` machinery are removed.
 >
-> **Per-slice gate:** dashboard slices → `cd dashboard && go build ./... && go vet ./... && go test ./...` (+ static `CGO_ENABLED=0 GOOS=linux GOARCH=arm64` build). Terraform slices → `terraform fmt -recursive` + `make pre-commit` (fmt/docs/tflint/trivy); install.sh changes also `make shellcheck`. Each slice leaves the app/config runnable.
+> **Canonical JSON contract (shared by TF + Go, anti-phantom-drift):** `[{ "name", "address", "public_key" }]` only (exclude `enabled`/runtime state), sorted by `address` ascending, normalized encoding. Both the Terraform seed/`check` and the dashboard's S3 writes MUST produce this identical shape.
+>
+> **Verification reality:** No browser MCP — UI/Go behavior via Go tests with a **fake store** (no live AWS). No live `terraform plan`/`apply` in-session (full-config validate needs `aws sso login --profile csm`); S3 seed/drift/reconnect is **owner-run**. Defaults to `local` → no behavior change on a running box until the owner opts into `cloud`.
+>
+> **Per-slice gate:** dashboard slices → `cd dashboard && go build ./... && go vet ./... && go test ./...` (+ static arm64 build). Terraform slices → `terraform fmt -recursive` + `make pre-commit`; install.sh changes also `make shellcheck`.
 
 ---
 
-## Slice 1 — Dashboard: read mode, gate controls + drift badge (cosmetic) (req 2.4)
+## Slice 1 — Terraform: finalize mode (local/cloud) + strip the interim machinery (req 2.1, 2.5)
 
-- [x] Dashboard reads `CLIENT_MANAGEMENT_MODE` and hides all client-mutating controls + the drift badge in cloud mode (cosmetic only), verified by table-driven render tests over `{local, cloud}` **[Agent: go-fullstack]**
-  - [x] `cmd/wireguard-dashboard/main.go`: read `getenv("CLIENT_MANAGEMENT_MODE","local")` + validate (warn→fallback `local`), append as the new **last positional arg** to `server.New(...)`
-  - [x] `internal/server/server.go`: `New(...)` + `server` struct gain `cloudMode bool`; add `Cloud bool` to `pageData` **and** `clientCountData`; set both in `buildPageData`; gate `computeDrift` (skip → `Drift=0`) when cloud at `server.go:383`
-  - [x] `internal/server/handlers_partial_tabs.go`: add `Cloud bool` to `clientsTabData`, set in `buildClientsTabData`, gate `computeDrift` at ~L92
-  - [x] `web/templates/tabs/clients.html` + `web/templates/cards/client-count.html`: guard the add form, inline edit toggle+row, remove button, enable/disable toggle, and drift badge with `{{ if not .Cloud }}` / `{{ if and … (not $.Cloud) }}` (list stays read-only visible)
-  - [x] Mode-parametrized `newClientsAdminServer` + table-driven render tests: assert all mutating controls + badge absent in cloud, present in local; assert `computeDrift` not invoked in cloud. Full `go test ./...` + build + static arm64 green
+- [x] Root/module Terraform uses `client_management_mode = local | cloud` and the interim declared/restapi machinery is gone; default `local` is a no-op vs today **[Agent: terraform-aws]**
+  - [x] Rename values `ui`→`local`, `declared`→`cloud` across `terraform/dev/locals.tf`, `terraform/modules/wireguard/variables.tf` (default + `contains(["local","cloud"])` + description), and all comments
+  - [x] Remove `terraform_data.peer_replace_trigger` and the `replace_triggered_by` line from `terraform/modules/wireguard/main.tf`
+  - [x] Remove `clients_sorted` from `terraform/dev/locals.tf`; module seed = `local.clients_config`
+  - [x] Confirm fully removed: `restapi_object`, `provider "restapi"`, the `Mastercard/restapi` version pin, `enable_restapi_peer_sync`, `dashboard_base_url` (most already done by the owner — verify none remain)
+  - [x] Verify: `terraform fmt -recursive` + `make pre-commit` green; default `local` unchanged vs today
 
-## Slice 2 — Terraform (root): consolidate the flag, remove `manage_peers_via_api` (req 2.1, 2.5)
+## Slice 2 — Dashboard: revert the cosmetic UI-hide, keep mode read (req 2.2, 2.3)
 
-- [x] Root config replaces `manage_peers_via_api` with `client_management_mode` + `enable_restapi_peer_sync`, seed becomes unconditional, restapi re-gated — default `local` is a no-op vs today **[Agent: terraform-aws]**
-  - [x] `terraform/dev/locals.tf`: replace `manage_peers_via_api` with `client_management_mode = "local"`; add `enable_restapi_peer_sync = false`; rewrite the spec-017 flag comments
-  - [x] `terraform/dev/main.tf`: make the module seed unconditional — `clients_config = local.clients_sorted` (drop the `? [] :` toggle); re-gate `restapi_object.peers` `count` on `local.enable_restapi_peer_sync`; add the "experimental, don't combine with cloud" runbook comment
-  - [x] Verify: `terraform fmt -recursive`; `make pre-commit` green; confirm default (`local`, restapi off) has no `restapi_object` and no behavior change vs today
+- [x] The dashboard UI is fully functional in both modes again; the `declared`/`cloudMode` hide machinery is removed; mode is still read (drives the store in Slice 4) **[Agent: go-fullstack]**
+  - [x] Remove `Declared`/`cloudMode` fields from `pageData`/`clientCountData`/`clientsTabData`, the `computeDrift` gating, and the template guards in `web/templates/tabs/clients.html` + `cards/client-count.html` (restore spec-015 rendering)
+  - [x] Delete `internal/server/handlers_clients_declared_mode_test.go`; revert the `newClientsAdminServer(Mode)` helper (keep a store param if Slice 4 needs it)
+  - [x] Rename the mode values `ui`→`local`, `cloud` in `main.go`'s `envMode` (default `local`, validate `local`/`cloud`); mode currently just carried, not yet consumed
+  - [x] Verify: `go build/vet/test ./...` + static arm64 green; UI renders identically to spec 015
 
-## Slice 3 — Terraform (module): consume the mode — auto-replace + dashboard env (req 2.3, 2.4)
+## Slice 3 — Terraform: the S3 bridge (bucket + seed + IAM + drift check + env coords) (req 2.3, 2.4)
 
-- [x] Module gains a `client_management_mode` input driving cloud-mode instance auto-replace and the dashboard env var; `local` mode replaces nothing **[Agent: terraform-aws]**
-  - [x] `terraform/modules/wireguard/variables.tf`: add `client_management_mode` string input (`default "local"`, `validation` `contains(["local","cloud"],…)`); root `main.tf` passes `client_management_mode = local.client_management_mode`
-  - [x] `terraform/modules/wireguard/main.tf`: add `terraform_data "peer_replace_trigger"` (`input = var.client_management_mode == "cloud" ? sha256(jsonencode(var.clients_config)) : ""`); add `replace_triggered_by = [terraform_data.peer_replace_trigger]` to the instance lifecycle
-  - [x] `terraform/modules/wireguard/locals.tf` + `templates/user-data.txt`: thread `client_management_mode` into the `templatefile()` vars and `export CLIENT_MANAGEMENT_MODE="${client_management_mode}"`
-  - [x] `scripts/install.sh`: add `CLIENT_MANAGEMENT_MODE="${CLIENT_MANAGEMENT_MODE:-local}"` default and a static `Environment=CLIENT_MANAGEMENT_MODE=…` line in the dashboard systemd unit
-  - [x] Verify: `terraform fmt -recursive`; `make pre-commit` + `make shellcheck` green; confirm `local` mode → replace trigger is the constant `""` (no replacement), config valid
+- [ ] A versioned S3 bucket + seed object + least-privilege IAM + warn-only drift `check` + dashboard S3 env coords **[Agent: terraform-aws]**
+  - [ ] Dedicated `aws_s3_bucket` + `aws_s3_bucket_versioning` (Enabled) + `public_access_block` (all true) + SSE `AES256` + `force_destroy = true` (comment the destroy/versions tradeoff)
+  - [ ] `aws_s3_object "clients"` key `clients.json`, `content` = canonical `clients_config` JSON, `content_type = "application/json"`, `lifecycle { ignore_changes = [content, etag] }`
+  - [ ] Instance role policy: `s3:GetObject` + `s3:PutObject` on the object ARN only
+  - [ ] `check "client_list_drift"` block with scoped `data.aws_s3_object` → assert live body == canonical `clients_config` → warn-only (verify `application/json` yields `body` via terraform MCP; hash-compare fallback)
+  - [ ] Thread `CLIENT_MANAGEMENT_MODE` + `CLIENT_STORE_S3_BUCKET` + `CLIENT_STORE_S3_KEY` through module `locals.tf` → `user-data.txt` → `install.sh`; install.sh requires bucket+key when mode is `cloud` (fail-fast, `DASHBOARD_RELEASE_REPO` idiom), static `Environment=` lines
+  - [ ] Verify: `terraform fmt -recursive` + `make pre-commit` + `make shellcheck` green
 
-## Slice 4 — Owner-run live end-to-end validation (cannot be done in-session)
+## Slice 4 — Dashboard: S3 client store, boot reconcile + write-through (req 2.3)
 
-- [ ] **Owner-run** (after `aws sso login --profile csm`, one dashboard release cut with the Slice-1 binary): with `client_management_mode = "cloud"`, edit `clients_config` + `terraform apply` → confirm exactly one instance replacement, EIP unchanged, an existing client `.conf` still connects, dashboard client controls + drift badge hidden; set back to `local` → confirm UI management works and a peer edit does not replace the instance **(owner)**
+- [ ] A client-store abstraction (local no-op + S3-via-`aws`-CLI) wired into boot reconcile and every mutation, with canonical serialization **[Agent: go-fullstack]**
+  - [ ] Canonical serializer (fields `{name,address,public_key}`, sort by address, normalized) matching the TF contract; unit-tested
+  - [ ] Store interface `Load/Save`; local no-op impl; S3 impl shelling out to `aws s3api get-object`/`put-object`; `Load` distinguishes 404/NoSuchKey from other errors
+  - [ ] `main.go` reads `CLIENT_STORE_S3_BUCKET`/`CLIENT_STORE_S3_KEY`, builds the store, passes it to `server.New(...)` (append-only)
+  - [ ] Boot reconcile (cloud): load S3 → SQLite → `wg syncconf`; on 404 seed S3 from the local boot seed; non-404 error fails loudly (no clobber)
+  - [ ] Write-through: after each client mutation (`ReplaceAll`/`applyLocked` path), Save the canonical list to S3; enable/disable does NOT write to S3
+  - [ ] Verify (fake store, no live AWS): boot-load applies, 404-seed, non-404 fail-loud/no-clobber, mutation write-through, enable/disable excluded, canonical-serialization test; full `go test ./...` + build + static arm64 green
+
+## Slice 5 — Owner-run live end-to-end validation (cannot be done in-session)
+
+- [ ] **Owner-run** (after `aws sso login --profile csm`, one dashboard release with the Slice-2/4 binary): `cloud` mode — deploy → S3 object seeded from `clients_config`, operator connects; add a peer in the UI → applies live (no instance replacement), S3 object updates; replace the instance → re-reads S3, keeps the UI-added peer; edit `clients_config` to differ → `terraform plan` shows the drift **warning**, `apply` does **not** revert. `local` mode — spec-015 behavior unchanged, no S3 usage **(owner)**
 
 ---
 
@@ -47,6 +63,8 @@
 
 | Task/Slice | Issue | Recommendation |
 |---|---|---|
-| Slice 1 UI verify | No browser MCP | Controls/badge asserted absent/present in Go template render tests, not a live browser |
-| Slices 2–3 TF verify | Full-config `terraform validate` needs live AWS creds (expired `csm` SSO) | Agents run `fmt` + `make pre-commit` (+ `shellcheck`); no plan/apply locally |
-| Slice 4 | Cloud-mode instance replacement + EIP/reconnect can't run in-session | Owner runs the live E2E; needs a dashboard release carrying the Slice-1 binary |
+| Slice 3 drift check | `data.aws_s3_object` may not return `body` for all content types | Verify `application/json` yields `body` via terraform MCP; fall back to hash-compare if not |
+| Slices 3–4 contract | Canonical JSON must match between TF and Go | Both reference the shared contract note above; add a fixture asserting the two encodings agree |
+| Slices 1–3 TF verify | Full-config `terraform validate` needs live AWS creds (expired `csm` SSO) | Agents run `fmt` + `make pre-commit` (+ `shellcheck`); no plan/apply locally |
+| Slice 4 Go verify | No live AWS in-session | S3 store behind an interface + faked; live S3 exercised only in owner E2E (Slice 5) |
+| Slice 5 | S3 seed/drift/reconnect can't run in-session | Owner runs the live E2E; needs a dashboard release carrying the new binary |
