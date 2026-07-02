@@ -56,6 +56,15 @@ type Service struct {
 	// nothing anywhere and Load always reports clientstore.ErrNotFound — see
 	// saveStoreLocked and ReconcileFromStore.
 	store clientstore.Store
+	// storeReady gates write-through (saveStoreLocked): false means "do not
+	// write to the store" (see saveStoreLocked). Defaults to true so local
+	// mode (NoopStore) and every pre-boot-reconcile test behave exactly like
+	// before this field existed. ReconcileFromStore is the only thing that
+	// ever sets it false — a hard (non-404, non-empty-list) S3 load error at
+	// boot, meaning we genuinely don't know whether S3 holds something better
+	// than what we're about to run with, so refusing to overwrite it until a
+	// later successful reconcile/restart is the only safe default.
+	storeReady bool
 }
 
 // NewService constructs the orchestration service over the given DB and the
@@ -72,7 +81,7 @@ func NewService(database *db.DB, serverNet string) *Service {
 		slog.Warn("clients: invalid WG_SERVER_NET; falling back to default", "value", serverNet, "err", err)
 		sn, _ = ParseServerNet("") // the empty-string default never errors
 	}
-	return &Service{db: database, serverNet: sn, applier: noopApplier{}, store: clientstore.NoopStore{}}
+	return &Service{db: database, serverNet: sn, applier: noopApplier{}, store: clientstore.NoopStore{}, storeReady: true}
 }
 
 // SetApplier swaps the default no-op live-apply step for a real one (Slice 4).
@@ -97,6 +106,28 @@ func (s *Service) SetStore(store clientstore.Store) {
 	if store != nil {
 		s.store = store
 	}
+}
+
+// StoreReady reports whether the cloud-mode client store is currently trusted
+// for write-through (spec 018 Slice 4 incident follow-up). It is true by
+// default (local mode, and any test that never calls ReconcileFromStore) and
+// only goes false when ReconcileFromStore hits a hard S3 load error at boot.
+// The server package can use this to render a non-fatal "client store
+// offline" notice; a false value is otherwise only visible in logs.
+func (s *Service) StoreReady() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.storeReady
+}
+
+// setStoreReady is the locked setter behind ReconcileFromStore's boot
+// decisions. Kept separate from the public accessor so callers holding s.mu
+// already (none today, but future write paths might) aren't tempted to call
+// the locking StoreReady() and deadlock.
+func (s *Service) setStoreReady(ready bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.storeReady = ready
 }
 
 // Seed imports the Terraform-rendered manifest into the clients table on first
@@ -433,19 +464,35 @@ func (s *Service) applyLocked(ctx context.Context) error {
 // live-apply must never reach S3 with a config that didn't actually take
 // effect on the wg interface.
 //
-// A Save failure is returned to the caller (propagating as the mutation's own
-// error) rather than logged-and-swallowed: by the time this runs, the DB and
-// the live wg0 config have already changed, so silently ignoring a failed S3
-// write would let the durable bridge silently drift stale relative to both —
-// exactly the kind of silent divergence spec 018 exists to rule out. The
-// operator sees a failed request and can retry; the DB/live config are
-// already correct, so a retried Add/Update with the same values is the
-// expected recovery path.
+// Both the storeReady guard and Save's error are handled best-effort
+// (log-and-continue, never returned to the caller) — this is a reversal from
+// the original Slice 4 design and exists because of a live incident: by the
+// time this runs, the DB and the live wg0 config have ALREADY changed
+// successfully, so failing the whole mutation over a store problem would make
+// the dashboard refuse a locally-correct Add/Update/Delete just because S3 is
+// unreachable. The write-through log at the WARN level is what makes this
+// non-silent: the operator sees "not persisted to S3" in journald and can
+// retry later or wait for the next successful boot reconcile to heal it.
+//
+//   - storeReady == false (set by a hard ReconcileFromStore load error): skip
+//     Save entirely. We don't know whether S3 currently holds something
+//     better than our local state, so writing to it here would risk
+//     clobbering that unknown-but-possibly-good object with a stale mutation.
+//   - storeReady == true but Save fails: log and move on. The mutation
+//     already succeeded locally; propagating the S3 error here is exactly
+//     what let a `wg syncconf`-driven write-through client add/delete look
+//     like it failed even though the local, functional half of the change
+//     had already taken effect.
 //
 // Until SetStore is called (local mode, and every pre-Slice-4 test) s.store
-// is a clientstore.NoopStore, making this a cheap extra ListClients + a
-// genuine no-op Save — no behavioural change from spec 015.
+// is a clientstore.NoopStore with storeReady defaulting to true, making this
+// a cheap extra ListClients + a genuine no-op Save — no behavioural change
+// from spec 015.
 func (s *Service) saveStoreLocked(ctx context.Context) error {
+	if !s.storeReady {
+		slog.Warn("clients: client store offline; change applied locally but NOT persisted to S3")
+		return nil
+	}
 	all, err := s.db.ListClients(ctx)
 	if err != nil {
 		return fmt.Errorf("clients: store save list: %w", err)
@@ -455,53 +502,53 @@ func (s *Service) saveStoreLocked(ctx context.Context) error {
 		entries = append(entries, clientstore.Entry{Name: c.Name, Address: c.Address, PublicKey: c.PublicKey})
 	}
 	if err := s.store.Save(ctx, entries); err != nil {
-		return fmt.Errorf("clients: store save: %w", err)
+		slog.Warn("clients: client store save failed; change applied locally but NOT persisted to S3", "err", err)
 	}
 	return nil
 }
 
-// ReconcileFromStore is the cloud-mode boot path (spec 018, Slice 4): it loads
-// the canonical client list from the injected Store and makes the DB + live
-// wg0 config match it exactly, via the same ReplaceAll a Terraform bulk PUT
-// uses — so a rebuilt/replaced instance re-reads the current S3 list and
-// converges to it with no cold-start peer loss.
+// ReconcileFromStore is the cloud-mode boot path (spec 018, Slice 4, revised
+// after a live incident where an empty-but-existing S3 object wiped every
+// operator peer). It implements this decision table:
 //
-// When the store reports clientstore.ErrNotFound (the bridge object has never
-// been seeded — e.g. a brand-new bucket, or the documented "delete the object
-// to force a re-seed" escape hatch), this seeds the store from localSeed (the
-// existing /etc/wireguard-dashboard/clients.json boot manifest) and THEN
-// converges the DB/live config the ordinary spec-015 way (Seed + Reconcile) —
-// the one-time cold-seed the S3 object needs before write-through can start
-// being the durable source of truth on every later boot.
+//   - Load returns a NON-EMPTY list → S3 is authoritative (steady state):
+//     ReplaceAll(entries), same as a Terraform bulk PUT. Store marked ready.
+//   - Load returns clientstore.ErrNotFound OR an empty list (the two are
+//     treated identically — an empty object is never authoritative, exactly
+//     like a missing one):
+//   - current DB is non-empty → HEAL S3 FROM THE DB: Save the DB's own
+//     canonical list back to the store, leave the DB untouched. This is
+//     what protects a persisted/rebooted box's UI-added clients from an
+//     S3 object that reads back empty (the incident's exact shape).
+//   - current DB is empty → cold-seed FROM localSeed (the
+//     /etc/wireguard-dashboard/clients.json boot manifest): Save it to the
+//     store, then Seed + Reconcile the DB/live config the ordinary
+//     spec-015 way. This is the one-time bootstrap the S3 object needs
+//     before write-through becomes the durable source of truth.
+//   - Load returns any OTHER (hard, non-404) error → the store might hold
+//     something we can't currently see, so we neither wipe it nor write to
+//     it: if the DB is empty, Seed + Reconcile from localSeed so the box
+//     stays usable and matches wg0; if the DB already has rows, leave it
+//     alone. Either way storeReady is set false (see saveStoreLocked) and
+//     the error is returned so main.go logs it loudly.
 //
-// Any OTHER store error is deliberately NOT treated as "empty": it is
-// returned unmodified, before touching the DB or the store, so a transient S3
-// outage fails loudly instead of looking like a freshly-seeded empty list and
-// wiping the operator's peers. Callers (main.go) log this at Error level and
-// keep serving with whatever the DB already held — the dashboard's core
-// purpose is observability, and a peer-management hiccup should not take that
-// down too.
+// In every branch the store's Save is skipped/attempted directly by this
+// method (not through saveStoreLocked's storeReady guard) because boot
+// reconcile IS the thing that decides whether the store is trustworthy —
+// the guard exists for the mutation write-through paths that run AFTER boot.
 func (s *Service) ReconcileFromStore(ctx context.Context, localSeed []clientsfile.Client) error {
 	s.mu.Lock()
 	store := s.store
 	s.mu.Unlock()
 
 	entries, err := store.Load(ctx)
-	if err != nil {
-		if errors.Is(err, clientstore.ErrNotFound) {
-			seedEntries := make([]clientstore.Entry, 0, len(localSeed))
-			for _, c := range localSeed {
-				seedEntries = append(seedEntries, clientstore.Entry{Name: c.Name, Address: c.Address, PublicKey: c.PublicKey})
-			}
-			if err := store.Save(ctx, seedEntries); err != nil {
-				return fmt.Errorf("clients: seed store from local boot seed: %w", err)
-			}
-			if err := s.Seed(ctx, localSeed); err != nil {
-				return fmt.Errorf("clients: seed db after store cold-seed: %w", err)
-			}
-			return s.Reconcile(ctx)
-		}
-		return fmt.Errorf("clients: load store: %w", err)
+	if err != nil && !errors.Is(err, clientstore.ErrNotFound) {
+		return s.reconcileFromHardStoreError(ctx, localSeed, err)
+	}
+
+	empty := errors.Is(err, clientstore.ErrNotFound) || len(entries) == 0
+	if empty {
+		return s.reconcileFromEmptyStore(ctx, store, localSeed)
 	}
 
 	replace := make([]ReplaceEntry, 0, len(entries))
@@ -509,9 +556,85 @@ func (s *Service) ReconcileFromStore(ctx context.Context, localSeed []clientsfil
 		replace = append(replace, ReplaceEntry{Name: e.Name, Address: e.Address, PublicKey: e.PublicKey})
 	}
 	if _, err := s.ReplaceAll(ctx, replace); err != nil {
+		s.setStoreReady(false)
 		return fmt.Errorf("clients: reconcile from store: %w", err)
 	}
+	s.setStoreReady(true)
 	return nil
+}
+
+// reconcileFromEmptyStore handles the ErrNotFound/empty-list branch of
+// ReconcileFromStore: the box's own state heals the store, never the other
+// way around. See ReconcileFromStore's doc comment for the full decision
+// table.
+func (s *Service) reconcileFromEmptyStore(ctx context.Context, store clientstore.Store, localSeed []clientsfile.Client) error {
+	n, err := s.db.CountClients(ctx)
+	if err != nil {
+		s.setStoreReady(false)
+		return fmt.Errorf("clients: count clients before store heal: %w", err)
+	}
+
+	if n > 0 {
+		all, err := s.db.ListClients(ctx)
+		if err != nil {
+			s.setStoreReady(false)
+			return fmt.Errorf("clients: list clients to heal store: %w", err)
+		}
+		healEntries := make([]clientstore.Entry, 0, len(all))
+		for _, c := range all {
+			healEntries = append(healEntries, clientstore.Entry{Name: c.Name, Address: c.Address, PublicKey: c.PublicKey})
+		}
+		if err := store.Save(ctx, healEntries); err != nil {
+			s.setStoreReady(false)
+			return fmt.Errorf("clients: heal store from db: %w", err)
+		}
+		s.setStoreReady(true)
+		return nil
+	}
+
+	seedEntries := make([]clientstore.Entry, 0, len(localSeed))
+	for _, c := range localSeed {
+		seedEntries = append(seedEntries, clientstore.Entry{Name: c.Name, Address: c.Address, PublicKey: c.PublicKey})
+	}
+	if err := store.Save(ctx, seedEntries); err != nil {
+		s.setStoreReady(false)
+		return fmt.Errorf("clients: seed store from local boot seed: %w", err)
+	}
+	if err := s.Seed(ctx, localSeed); err != nil {
+		s.setStoreReady(false)
+		return fmt.Errorf("clients: seed db after store cold-seed: %w", err)
+	}
+	if err := s.Reconcile(ctx); err != nil {
+		s.setStoreReady(false)
+		return fmt.Errorf("clients: reconcile after store cold-seed: %w", err)
+	}
+	s.setStoreReady(true)
+	return nil
+}
+
+// reconcileFromHardStoreError handles a non-404 Load failure: the store is
+// marked not-ready (gating write-through in saveStoreLocked) and the DB is
+// left alone UNLESS it's empty, in which case it's seeded from localSeed so
+// the box still has a usable, wg0-matching client set despite the outage.
+// The store itself is never written to here — an unreadable object is not
+// the same as a confirmed-empty one, and clobbering it would risk destroying
+// data we simply failed to see.
+func (s *Service) reconcileFromHardStoreError(ctx context.Context, localSeed []clientsfile.Client, loadErr error) error {
+	s.setStoreReady(false)
+
+	n, err := s.db.CountClients(ctx)
+	if err != nil {
+		return fmt.Errorf("clients: count clients after store load error: %w", err)
+	}
+	if n == 0 {
+		if err := s.Seed(ctx, localSeed); err != nil {
+			return fmt.Errorf("clients: seed db after store load error: %w", err)
+		}
+		if err := s.Reconcile(ctx); err != nil {
+			return fmt.Errorf("clients: reconcile after store load error: %w", err)
+		}
+	}
+	return fmt.Errorf("clients: load store: %w", loadErr)
 }
 
 // addressesOf projects the client set to its tunnel-address strings — the
