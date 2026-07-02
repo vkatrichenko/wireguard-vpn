@@ -36,7 +36,12 @@ No modules.
 | [aws_instance.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/instance) | resource |
 | [aws_key_pair.ssh](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/key_pair) | resource |
 | [aws_launch_template.wireguard](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/launch_template) | resource |
+| [aws_s3_bucket.client_list](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket.health_check](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_bucket) | resource |
+| [aws_s3_bucket_public_access_block.client_list](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_bucket_public_access_block) | resource |
+| [aws_s3_bucket_server_side_encryption_configuration.client_list](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_bucket_server_side_encryption_configuration) | resource |
+| [aws_s3_bucket_versioning.client_list](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_bucket_versioning) | resource |
+| [aws_s3_object.clients](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/s3_object) | resource |
 | [aws_security_group.sg_wireguard_external](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/security_group) | resource |
 | [aws_ssm_parameter.ssh_private_key](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/resources/ssm_parameter) | resource |
 | [null_resource.status_check](https://registry.terraform.io/providers/hashicorp/null/3.2.4/docs/resources/resource) | resource |
@@ -44,6 +49,7 @@ No modules.
 | [aws_ami.ubuntu_2404](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/ami) | data source |
 | [aws_iam_policy_document.ec2_assume_role](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.wireguard_policy_doc](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/iam_policy_document) | data source |
+| [aws_s3_object.client_list_live](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/s3_object) | data source |
 | [aws_ssm_parameter.dashboard_discord_webhook_url](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/ssm_parameter) | data source |
 | [aws_ssm_parameter.dashboard_slack_bot_token](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/ssm_parameter) | data source |
 | [aws_ssm_parameter.dashboard_telegram_token](https://registry.terraform.io/providers/hashicorp/aws/6.41.0/docs/data-sources/ssm_parameter) | data source |
@@ -56,6 +62,7 @@ No modules.
 |------|-------------|------|---------|:--------:|
 | <a name="input_additional_security_group_ids"></a> [additional\_security\_group\_ids](#input\_additional\_security\_group\_ids) | Additional security groups if provided, default empty. | `list(string)` | <pre>[<br/>  ""<br/>]</pre> | no |
 | <a name="input_ami_id"></a> [ami\_id](#input\_ami\_id) | Optional explicit AMI override for the WG server. When set (non-null), it takes precedence over the cpu\_architecture-derived AMI lookup. When null (default), the module resolves the latest Ubuntu 24.04 AMI for the selected cpu\_architecture via the aws\_ami data source. | `string` | `null` | no |
+| <a name="input_client_management_mode"></a> [client\_management\_mode](#input\_client\_management\_mode) | Peer-management mode threaded from the root (spec 018). "local" (default) = peers managed live in the dashboard UI backed by the instance-local SQLite store (spec 015); clients\_config is only a first-boot seed and peer edits cause no instance churn. "cloud" = peers bridged through a versioned S3 object (built in later slices); the dashboard reads it at boot and writes it on UI edits, while Terraform seeds it once and warns on drift. Also exported to the dashboard as CLIENT\_MANAGEMENT\_MODE. | `string` | `"local"` | no |
 | <a name="input_clients_config"></a> [clients\_config](#input\_clients\_config) | List of WireGuard peer (client) definitions. Each entry's `name` is rendered into /etc/wireguard-dashboard/clients.json by user-data so the dashboard can label peers; `address` is the CIDR the peer is allowed inside the WG subnet (e.g. "172.16.15.6/32"); `public_key` is the peer's WireGuard public key. | <pre>list(object({<br/>    name       = string<br/>    address    = string<br/>    public_key = string<br/>  }))</pre> | n/a | yes |
 | <a name="input_cpu_architecture"></a> [cpu\_architecture](#input\_cpu\_architecture) | CPU architecture for the WireGuard server. Drives the Ubuntu AMI name suffix, the AMI `architecture` filter, and the default instance type. Allowed: "x86\_64" (amd64, t3a.micro default) or "arm64" (Graviton, t4g.micro default). Default "arm64" for better price/performance. | `string` | `"arm64"` | no |
 | <a name="input_dashboard_alerts"></a> [dashboard\_alerts](#input\_dashboard\_alerts) | Spec-007 alert thresholds seeded into /etc/wireguard-dashboard/alerts.env (mapped to DASHBOARD\_HOST\_LABEL / DASHBOARD\_ALERT\_DISK\_PCT / \_CPU\_PCT / \_CPU\_SUSTAIN / \_TRANSFER\_BYTES). host\_label empty (default) omits DASHBOARD\_HOST\_LABEL so the Go side falls back to os.Hostname(). cpu\_sustain is a Go duration (e.g. "5m"); transfer\_bytes is a humanized size (e.g. "50GiB"). | <pre>object({<br/>    host_label     = optional(string, "")<br/>    disk_pct       = optional(number, 90)<br/>    cpu_pct        = optional(number, 90)<br/>    cpu_sustain    = optional(string, "5m")<br/>    transfer_bytes = optional(string, "50GiB")<br/>  })</pre> | `{}` | no |
@@ -85,6 +92,7 @@ No modules.
 
 | Name | Description |
 |------|-------------|
+| <a name="output_client_list_bucket"></a> [client\_list\_bucket](#output\_client\_list\_bucket) | Name of the S3 bucket holding the canonical client list (clients.json) in cloud mode. Empty string in local mode (no bucket). |
 | <a name="output_instance_arn"></a> [instance\_arn](#output\_instance\_arn) | ARN of the WireGuard EC2 instance — used by the dashboard module to scope SSM document grants. |
 | <a name="output_security_group_id"></a> [security\_group\_id](#output\_security\_group\_id) | n/a |
 <!-- END_TF_DOCS -->

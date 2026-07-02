@@ -17,7 +17,7 @@ module "wireguard" {
 
   vpc_id                      = module.network.vpc_id
   subnet_id                   = module.network.public_subnets[0]
-  wg_server_net               = local.wg_server_net
+  wg_server_net               = "172.16.15.1/24"
   wg_server_private_key_param = "/config/${local.project_name}-${local.environment}/default-private-key"
   # $ wg genkey | tee privatekey | wg pubkey > publickey
   # [Interface]
@@ -31,28 +31,22 @@ module "wireguard" {
   # AllowedIPs = 10.22.0.0/16
   # Endpoint = 54.245.26.247:51820
 
-  # Boot seed derives from the same canonical, address-sorted list the API-managed
-  # restapi_object uses (local.clients_config → local.clients_sorted), so both paths
-  # stay in lockstep. Peer entries live in locals.tf.
-  clients_config = local.clients_sorted
+  client_management_mode = local.client_management_mode
+
+  # The boot seed is ALWAYS the full canonical peer set — in BOTH local and cloud
+  # modes (spec 018). Peer-management behavior is selected by
+  # `client_management_mode`, NOT by emptying this seed:
+  #   local mode → this seed only bootstraps a fresh box; peers are then managed
+  #     live in the dashboard UI backed by instance-local SQLite, no instance churn.
+  #   cloud mode → this seed one-time-bootstraps the S3-bridged peer object; the
+  #     dashboard then owns it and Terraform only warns on drift (later slices).
+  # Seeding the full set unconditionally is what kills spec-017's zero-peer
+  # cold-start lockout.
+  clients_config = local.clients_config
   # additional_security_group_ids = [
   #   module.development_custom_security_groups["dev_SELF"].security_group_id
   # ]
-  dashboard_release_tag = "v0.0.11"
 
-  # Single GitHub owner/name slug used BOTH for the raw scripts/install.sh fetch
-  # and the dashboard release download (spec 014). The repo MUST be public for the
-  # anonymous raw fetch / release download to resolve — a private repo 404s and
-  # aborts the boot (no `.ready`). No checksum: the portable installer is fetched
-  # at boot from github_repo at install_script_ref (module default `main`).
-  github_repo = "vkatrichenko/wireguard-vpn"
-  # install_script_ref pins the exact scripts/install.sh commit/tag fetched at
-  # boot. Left commented so the module default `main` applies; uncomment and pin
-  # to a commit SHA to freeze the installer version.
-  # install_script_ref = "5d05d6a4ba53fd6ff1dad923fa857a3b866461f5"
-
-  # Alert seed (spec 008 slice 5), wired-but-disabled. To enable: create the SSM
-  # parameter out-of-band (e.g. `aws ssm put-parameter --type SecureString`) and
   # set its NAME here — Terraform reads it at apply and seeds DASHBOARD_WEBHOOK_URL
   # into /etc/wireguard-dashboard/alerts.env. Empty = no webhook line written.
   dashboard_webhook_url_param = ""
@@ -65,44 +59,3 @@ module "wireguard" {
 
   tags = local.default_tags
 }
-
-# Terraform-managed peer set (spec 017). Drives the dashboard's PUT /api/clients
-# bulk endpoint over the VPN, making the whole client list a single reconciled
-# object rather than a boot-only seed. Count-gated on the OFF-by-default flag, so
-# it's inert until the owner opts in.
-#
-# This is a SINGLETON collection, not a per-id object: read/update/destroy paths
-# are overridden to hit /api/clients directly (no `/{id}` suffix the provider would
-# otherwise append). `object_id` is a static "managed" so the address is stable.
-# Read hits the export endpoint (?format=tfvars, address-sorted) to match state.
-# Destroy PUTs an empty clients_config so `terraform destroy` clears peers cleanly.
-resource "restapi_object" "peers" {
-  count = local.manage_peers_via_api ? 1 : 0
-
-  path      = "/api/clients"
-  object_id = "managed"
-  data      = jsonencode({ clients_config = local.clients_sorted })
-
-  create_method = "PUT"
-  create_path   = "/api/clients"
-
-  update_method = "PUT"
-  update_path   = "/api/clients"
-
-  read_method  = "GET"
-  read_path    = "/api/clients/export"
-  query_string = "format=tfvars"
-
-  destroy_method = "PUT"
-  destroy_path   = "/api/clients"
-  destroy_data   = jsonencode({ clients_config = [] })
-
-  depends_on = [module.wireguard]
-}
-
-# The dashboard binary is now distributed as a public GitHub Release (spec 005):
-# the instance pulls a pinned tag at boot over HTTPS with SHA256 verification.
-# The old private path — the S3 artifact bucket (`modules/dashboard`), the SSM
-# deploy document, and the GitHub-OIDC CI build/deploy roles (`modules/github-oidc`
-# wiring) — is intentionally gone. The release workflow authenticates only with
-# GITHUB_TOKEN, so no AWS-facing CI role remains to wire here.

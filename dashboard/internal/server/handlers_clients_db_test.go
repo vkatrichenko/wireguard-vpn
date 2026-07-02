@@ -41,8 +41,7 @@ func TestHandleGetPartialClients_FromDB(t *testing.T) {
 		dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(),
 		fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(),
 		nil, nil, nil,
-		seededClientsSvc(t, db.Client{Name: dbcName, Address: dbcAddr, PublicKey: dbcPubKey}),
-	)
+		seededClientsSvc(t, db.Client{Name: dbcName, Address: dbcAddr, PublicKey: dbcPubKey}), "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -87,8 +86,7 @@ func TestHandleGetPartialClients_NoDriftWhenSeeded(t *testing.T) {
 		dashboard.WebFS(), infoSvc, &systemdSvc, clientsfileSvc, fakeWgSvc(),
 		fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(),
 		nil, nil, nil,
-		seededClientsSvc(t, db.Client{Name: dbcName, Address: dbcAddr, PublicKey: dbcPubKey}),
-	)
+		seededClientsSvc(t, db.Client{Name: dbcName, Address: dbcAddr, PublicKey: dbcPubKey}), "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -126,8 +124,7 @@ func TestHandleGetClientConfig_ResolvesFromDB(t *testing.T) {
 		dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(),
 		fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(),
 		nil, nil, nil,
-		seededClientsSvc(t, db.Client{Name: dbcName, Address: dbcAddr, PublicKey: dbcPubKey}),
-	)
+		seededClientsSvc(t, db.Client{Name: dbcName, Address: dbcAddr, PublicKey: dbcPubKey}), "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

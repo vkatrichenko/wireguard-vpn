@@ -7,13 +7,10 @@
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | = 1.14.8 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | = 6.41.0 |
-| <a name="requirement_restapi"></a> [restapi](#requirement\_restapi) | = 3.0.0 |
 
 ## Providers
 
-| Name | Version |
-|------|---------|
-| <a name="provider_restapi"></a> [restapi](#provider\_restapi) | = 3.0.0 |
+No providers.
 
 ## Modules
 
@@ -24,9 +21,7 @@
 
 ## Resources
 
-| Name | Type |
-|------|------|
-| [restapi_object.peers](https://registry.terraform.io/providers/Mastercard/restapi/3.0.0/docs/resources/object) | resource |
+No resources.
 
 ## Inputs
 

@@ -103,6 +103,14 @@ _Runtime client management & first-client onboarding — manage peers live and m
 
 ---
 
+### Phase 10
+
+_GitOps peer management — declare the peer set in Terraform and reconcile it live._
+
+- [x] **Terraform-Managed Peers via REST API (spec 017):** Make git/Terraform authoritative for the WireGuard peer set by driving the dashboard's new idempotent `PUT /api/clients` bulk endpoint (SQLite → `wg syncconf`, no tunnel drop) through the `Mastercard/restapi` provider (`= 3.0.0`); the whole set is one count-gated `restapi_object` (flag `manage_peers_via_api`, off by default) so UI edits and UI-only peers surface as `terraform plan` drift and `apply` reconciles to git; a canonical address-sorted export read avoids phantom drift; the spec-015 drift badge is repointed to a dashboard-owned SQLite baseline. _(Implemented & owner-verified live 2026-07-01, dashboard v0.0.12. Two ergonomics/safety footguns surfaced — destructive empty-PUT on destroy/flag-off, and zero-peer cold-start on rebuild — deferred to the follow-up client-management-mode spec, not defects in the mechanism.)_
+
+---
+
 ### Future / Under Consideration
 
 _Not yet specified; captured so the direction isn't lost._

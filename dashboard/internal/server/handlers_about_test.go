@@ -43,7 +43,7 @@ func TestHandleGetPartialAbout_OffAWS(t *testing.T) {
 	infoSvc := offAWSInfoSvc(echoIP, key)
 	systemdSvc := systemdRunnerActive(time.Now().Add(-time.Hour))
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestHandleIndex_OffAWS(t *testing.T) {
 	infoSvc := offAWSInfoSvc(echoIP, key)
 	systemdSvc := systemdRunnerActive(time.Now().Add(-time.Hour))
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t))
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

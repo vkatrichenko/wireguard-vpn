@@ -75,8 +75,7 @@ func newHistoryServer(t *testing.T, testDB *db.DB) http.Handler {
 		nil,
 		nil,
 		nil,
-		emptyClientsSvc(t),
-	)
+		emptyClientsSvc(t), "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

@@ -1,7 +1,7 @@
 # Technical Specification: Terraform-Managed Peers via REST API
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
-- **Status:** Draft
+- **Status:** Completed
 - **Author(s):** Vladyslav Katrychenko
 
 ---
@@ -41,7 +41,8 @@
 
 - **`terraform/dev/versions.tf`:** add `restapi = { source = "Mastercard/restapi", version = "= 3.0.0" }` to `required_providers` (exact-pin house format, space after `=`).
 - **`terraform/dev/providers.tf`:** add `provider "restapi" { uri = "http://172.16.15.1:8080"; write_returns_object = true }`. No `default_tags` (restapi is not taggable — note for reviewers). Base URI derives from `wg_server_net` (the `.1` host) — a `local`, no data source / EIP output required.
-- **Single-source local (`terraform/dev/locals.tf`):** `clients_config` moves to a root `local` (or a new `wireguard` module output) sorted by `address`, consumed by **both** the `module "wireguard"` seed input and the new resource's `data` — guaranteeing they cannot diverge and that the array order matches the dashboard's canonical (address-sorted) read → **no phantom drift**.
+- **Single-source local (`terraform/dev/locals.tf`):** `clients_config` moves to a root `local` sorted by `address` (`clients_sorted`), consumed by the new resource's `data` — the array order matches the dashboard's canonical (address-sorted) read → **no phantom drift**.
+- **Ownership toggle (peer seed).** The `module "wireguard"` `clients_config` input is `local.manage_peers_via_api ? [] : local.clients_sorted`. Flag **off** → full peer list seeds into user-data (legacy). Flag **on** → the module receives `[]`, so editing peers no longer re-renders user-data (no launch-template version bump, no `aws_instance` in-place update); peers are owned entirely by the `restapi_object`. Binary install/update over user-data is unaffected — only the peer seed is gated. Flipping the flag on is a **one-time** user-data change (seed → empty); subsequent peer edits touch only the `restapi_object`.
 - **Resource (`terraform/dev/main.tf`, root module):**
 
   ```hcl
@@ -68,7 +69,8 @@
 ## 3. Impact and Risk Analysis
 
 - **System Dependencies:** the resource requires (a) a running instance with the dashboard up **and** (b) the operator connected to the WireGuard tunnel (port 8080 is tunnel-only). **Mitigation — `local.manage_peers_via_api` count-gate (default `false`):** fresh applies bring the box up and seed from `clients_config` as today; the operator flips the flag on once the box is reachable, and subsequent applies reconcile live. Mirrors the existing `count`-gating idiom for opt-in wiring.
-- **Boot seed vs. live authority (double-write):** both derive from the *same* `clients_config` local, so on the first flag-on apply the live set already matches `data` → no spurious diff. `clients_config` remains the first-boot seed; `restapi_object` is the ongoing reconciler. `ignore_changes = [user_data]` on the instance is unchanged (peer edits never trigger instance replacement).
+- **Boot seed vs. live authority (double-write):** with the flag **on** the module seed is emptied, so peers have a single owner (the `restapi_object`) — no double-write. The one-time flag-flip apply also PUTs the current `clients_config` (which matches what the box already seeded) → no spurious peer diff.
+- **Cold-start on rebuild (flag on).** Because user-data seeds zero peers when the flag is on, a **full instance rebuild** (AMI rotation, `-replace`) boots with no peers — locking the operator out of the VPN-only dashboard, so the provider can't repopulate. **Mitigation — rebuild runbook (documented in `main.tf`):** set `manage_peers_via_api = false` → apply + replace the instance so it re-seeds the full `clients_config` → reconnect → set the flag back to `true`. Accepted because instance rebuilds are rare and explicit here.
 - **SQLite `UNIQUE` swap edge:** a single PUT that swaps a unique field between two peers (e.g. A↔B addresses, or rename A→B while adding a new A) can still collide despite delete-before-insert ordering. **Mitigation:** documented limitation — apply such a swap in two steps; the all-or-nothing transaction guarantees no partial state.
 - **`CreatedAt` churn:** preserved for unchanged `public_key`s; a re-key legitimately counts as a new peer. Acceptable.
 - **Unreachable-endpoint failure:** `plan` / `apply` fails clearly when off-VPN (the provider connects lazily at apply). Intended, documented behavior — not a bug.

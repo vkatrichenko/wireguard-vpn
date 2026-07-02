@@ -25,6 +25,23 @@ data "aws_iam_policy_document" "wireguard_policy_doc" {
     resources = ["${aws_s3_bucket.health_check.arn}/*"]
   }
 
+  # S3 client-list bridge (spec 018). CLOUD-ONLY: the statement is emitted only
+  # when the store is enabled (cloud mode) — in local mode there is no bucket and
+  # no grant. Least-privilege: read + write the SINGLE clients.json object only —
+  # no ListBucket, no bucket-level or wildcard grant. The [0] index is safe here
+  # because the dynamic block iterates only when the bucket exists.
+  dynamic "statement" {
+    for_each = local.client_store_enabled ? [1] : []
+
+    content {
+      actions = [
+        "s3:GetObject",
+        "s3:PutObject",
+      ]
+      resources = ["${aws_s3_bucket.client_list[0].arn}/clients.json"]
+    }
+  }
+
   # No dashboard-artifact S3 read statements: the dashboard binary is fetched at
   # boot from a public GitHub Release over HTTPS (spec 005), so the instance role
   # no longer needs s3:GetObject/s3:ListBucket on a private artifact bucket.
