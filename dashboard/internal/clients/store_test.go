@@ -20,6 +20,13 @@ type fakeStore struct {
 
 	loadEntries []clientstore.Entry
 	loadErr     error
+	// loadFunc, when set, overrides loadEntries/loadErr entirely and is
+	// invoked with the 1-based call number — the seam that lets a test vary
+	// Load's outcome across calls, e.g. a hard error on the boot reconcile
+	// followed by a success/ErrNotFound on saveStoreLocked's later lazy
+	// re-check (see the self-heal tests below).
+	loadFunc  func(call int) ([]clientstore.Entry, error)
+	loadCalls int
 
 	saveCalls int
 	lastSave  []clientstore.Entry
@@ -29,6 +36,10 @@ type fakeStore struct {
 func (f *fakeStore) Load(context.Context) ([]clientstore.Entry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.loadCalls++
+	if f.loadFunc != nil {
+		return f.loadFunc(f.loadCalls)
+	}
 	return f.loadEntries, f.loadErr
 }
 
@@ -293,7 +304,10 @@ func TestAdd_StoreNotReady_AppliesLocallyWithoutStoreWrite(t *testing.T) {
 	ctx := context.Background()
 	rec := &recordingApplier{}
 	svc.SetApplier(rec)
-	store := &fakeStore{}
+	// loadErr keeps saveStoreLocked's lazy re-check failing too — this test
+	// covers a store that is STILL offline, as distinct from the self-heal
+	// tests below where the re-check succeeds.
+	store := &fakeStore{loadErr: errors.New("s3: still unreachable")}
 	svc.SetStore(store)
 	svc.storeReady = false // simulate a boot that hit a hard S3 error
 
@@ -337,6 +351,103 @@ func TestAdd_StoreSaveError_MutationStillSucceeds(t *testing.T) {
 	}
 	if store.calls() != 1 {
 		t.Errorf("store.saveCalls = %d, want 1 (Save must still be attempted even though it will fail)", store.calls())
+	}
+}
+
+// --- write-through guard: lazy re-check self-heal ----------------------------
+//
+// Regression coverage for a second live incident: a hard boot error (e.g.
+// `exec: "aws": executable file not found in $PATH`) used to pin storeReady
+// false for the life of the process, since nothing ever re-checked it.
+// saveStoreLocked must now lazily re-check via a fresh Load on every
+// mutation while storeReady is false, so the store self-heals without a
+// `systemctl restart`.
+
+func TestAdd_StoreOfflineSelfHeals_WhenLoadSucceedsAgain(t *testing.T) {
+	svc, database := newTestService(t)
+	ctx := context.Background()
+	rec := &recordingApplier{}
+	svc.SetApplier(rec)
+	store := &fakeStore{loadEntries: []clientstore.Entry{{Name: "existing", Address: "172.16.15.5/32", PublicKey: "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG="}}}
+	svc.SetStore(store)
+	svc.storeReady = false // simulate a boot that hit a hard S3 error
+
+	if _, err := svc.Add(ctx, AddParams{Name: "alice", PublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}); err != nil {
+		t.Fatalf("Add: %v, want the mutation to succeed", err)
+	}
+
+	if !svc.StoreReady() {
+		t.Error("StoreReady() = false, want true after Load succeeded on the lazy re-check")
+	}
+	if store.calls() != 1 {
+		t.Fatalf("store.saveCalls = %d, want 1 (a reachable store must resume write-through immediately)", store.calls())
+	}
+	got, err := database.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "alice" {
+		t.Fatalf("db clients = %+v, want the local Add to have taken effect", got)
+	}
+	if len(store.lastSave) != 1 || store.lastSave[0].Name != "alice" {
+		t.Errorf("saved entries = %+v, want the full canonical list (just alice)", store.lastSave)
+	}
+}
+
+func TestAdd_StoreStillOffline_StaysBestEffort(t *testing.T) {
+	svc, database := newTestService(t)
+	ctx := context.Background()
+	rec := &recordingApplier{}
+	svc.SetApplier(rec)
+	wantErr := errors.New("s3: connection reset")
+	store := &fakeStore{loadErr: wantErr}
+	svc.SetStore(store)
+	svc.storeReady = false // simulate a boot that hit a hard S3 error
+
+	if _, err := svc.Add(ctx, AddParams{Name: "alice", PublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}); err != nil {
+		t.Fatalf("Add: %v, want the mutation to succeed even though the store is still offline", err)
+	}
+
+	if svc.StoreReady() {
+		t.Error("StoreReady() = true, want false — the lazy re-check's Load still failed")
+	}
+	if store.calls() != 0 {
+		t.Errorf("store.saveCalls = %d, want 0 (a still-offline store must never be written to)", store.calls())
+	}
+	got, err := database.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "alice" {
+		t.Fatalf("db clients = %+v, want the local Add to have taken effect regardless of the store outage", got)
+	}
+}
+
+func TestAdd_StoreOfflineSelfHeals_WhenLoadReturnsNotFound(t *testing.T) {
+	svc, database := newTestService(t)
+	ctx := context.Background()
+	rec := &recordingApplier{}
+	svc.SetApplier(rec)
+	store := &fakeStore{loadErr: clientstore.ErrNotFound}
+	svc.SetStore(store)
+	svc.storeReady = false // simulate a boot that hit a hard S3 error
+
+	if _, err := svc.Add(ctx, AddParams{Name: "alice", PublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}); err != nil {
+		t.Fatalf("Add: %v, want the mutation to succeed", err)
+	}
+
+	if !svc.StoreReady() {
+		t.Error("StoreReady() = false, want true — ErrNotFound means S3 is reachable, just not seeded yet")
+	}
+	if store.calls() != 1 {
+		t.Fatalf("store.saveCalls = %d, want 1 (ErrNotFound must be treated as reachable and Save must create the object)", store.calls())
+	}
+	got, err := database.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "alice" {
+		t.Fatalf("db clients = %+v, want the local Add to have taken effect", got)
 	}
 }
 

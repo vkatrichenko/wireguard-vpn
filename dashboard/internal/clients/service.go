@@ -474,25 +474,39 @@ func (s *Service) applyLocked(ctx context.Context) error {
 // non-silent: the operator sees "not persisted to S3" in journald and can
 // retry later or wait for the next successful boot reconcile to heal it.
 //
-//   - storeReady == false (set by a hard ReconcileFromStore load error): skip
-//     Save entirely. We don't know whether S3 currently holds something
-//     better than our local state, so writing to it here would risk
-//     clobbering that unknown-but-possibly-good object with a stale mutation.
-//   - storeReady == true but Save fails: log and move on. The mutation
-//     already succeeded locally; propagating the S3 error here is exactly
-//     what let a `wg syncconf`-driven write-through client add/delete look
-//     like it failed even though the local, functional half of the change
-//     had already taken effect.
+//   - storeReady == false (set by a hard ReconcileFromStore load error):
+//     attempt a lazy re-check — a fresh Load — rather than giving up
+//     immediately. This is the self-heal for a second live incident: a hard
+//     boot error (e.g. `exec: "aws": executable file not found in $PATH`)
+//     used to pin storeReady false for the life of the process, since
+//     nothing ever re-checked it. If the re-check succeeds, or reports
+//     ErrNotFound (the object doesn't exist yet, but S3 itself is reachable
+//     — our Save below will create it), the underlying problem has resolved
+//     itself and write-through resumes without a restart. Any other error
+//     means we still don't know whether S3 holds something better than our
+//     local state, so Save is skipped for this mutation exactly as before.
+//   - storeReady == true (either already, or just healed above) but Save
+//     fails: log and move on. The mutation already succeeded locally;
+//     propagating the S3 error here is exactly what let a
+//     `wg syncconf`-driven write-through client add/delete look like it
+//     failed even though the local, functional half of the change had
+//     already taken effect.
 //
 // Until SetStore is called (local mode, and every pre-Slice-4 test) s.store
-// is a clientstore.NoopStore with storeReady defaulting to true, making this
-// a cheap extra ListClients + a genuine no-op Save — no behavioural change
-// from spec 015.
+// is a clientstore.NoopStore with storeReady defaulting to true, so the
+// lazy-recheck branch is never entered — this is a cheap extra ListClients +
+// a genuine no-op Save, no behavioural change from spec 015.
 func (s *Service) saveStoreLocked(ctx context.Context) error {
 	if !s.storeReady {
-		slog.Warn("clients: client store offline; change applied locally but NOT persisted to S3")
-		return nil
+		if _, err := s.store.Load(ctx); err == nil || errors.Is(err, clientstore.ErrNotFound) {
+			s.storeReady = true
+			slog.Info("clients: client store reachable again; resuming S3 write-through")
+		} else {
+			slog.Warn("clients: client store offline; change applied locally but NOT persisted to S3", "err", err)
+			return nil
+		}
 	}
+
 	all, err := s.db.ListClients(ctx)
 	if err != nil {
 		return fmt.Errorf("clients: store save list: %w", err)

@@ -16,7 +16,7 @@ locals {
     {
       name       = "vkatrychenko"
       address    = "172.16.15.6/32"
-      public_key = "OVtCVOCizGvTVq2vhlymbEOmVnzfZaQKxXgUk+5eYwM="
+      public_key = "LmvqUY/F0ix8y5Xhn1HOJ+7wrhbggSa6zn6Eggh90Rg="
     },
     {
       name       = "test1"
