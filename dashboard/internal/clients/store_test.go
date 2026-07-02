@@ -161,6 +161,185 @@ func TestReconcileFromStore_OtherErrorFailsLoudWithoutClobberingDB(t *testing.T)
 	}
 }
 
+// --- ReconcileFromStore: empty-S3-is-never-authoritative --------------------
+//
+// Regression coverage for the live incident (spec 018 Slice 4): an S3 object
+// that EXISTS but decodes to an empty list must be treated exactly like
+// ErrNotFound (never as "the operator deleted every peer"), and the box's own
+// state — its current DB if non-empty, else the clients.json local seed —
+// heals S3 rather than S3 emptying the DB.
+
+func TestReconcileFromStore_EmptyListWithEmptyDB_ColdSeedsAndHealsStore(t *testing.T) {
+	svc, database := newTestService(t)
+	ctx := context.Background()
+	rec := &recordingApplier{}
+	svc.SetApplier(rec)
+	// The object exists but decodes to []  — not ErrNotFound — which is the
+	// exact shape that wiped peers in the incident.
+	store := &fakeStore{loadEntries: []clientstore.Entry{}}
+	svc.SetStore(store)
+
+	localSeed := []clientsfile.Client{
+		{Name: "carol", Address: "172.16.15.7/32", PublicKey: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="},
+	}
+
+	if err := svc.ReconcileFromStore(ctx, localSeed); err != nil {
+		t.Fatalf("ReconcileFromStore: %v", err)
+	}
+
+	got, err := database.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "carol" {
+		t.Fatalf("db clients = %+v, want the local boot seed imported (an empty S3 object must never be authoritative)", got)
+	}
+	if store.calls() != 1 {
+		t.Fatalf("store.saveCalls = %d, want 1 (an empty S3 object must be healed from the local seed)", store.calls())
+	}
+	if len(store.lastSave) != 1 || store.lastSave[0].Name != "carol" {
+		t.Errorf("healed store content = %+v, want the local boot seed", store.lastSave)
+	}
+	if !svc.StoreReady() {
+		t.Error("StoreReady() = false, want true after a successful cold-seed")
+	}
+	if rec.calls != 1 {
+		t.Errorf("applier.calls = %d, want 1 (cold-seed must still converge the live config)", rec.calls)
+	}
+}
+
+func TestReconcileFromStore_EmptyListWithPopulatedDB_HealsStoreKeepsDB(t *testing.T) {
+	svc, database := newTestService(t)
+	ctx := context.Background()
+	rec := &recordingApplier{}
+	svc.SetApplier(rec)
+
+	// Simulate a persisted/rebooted box: the DB already holds a client added
+	// through the UI before this boot. That must survive an empty S3 read.
+	if _, err := svc.Add(ctx, AddParams{Name: "ui-added", PublicKey: "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD="}); err != nil {
+		t.Fatalf("seed Add: %v", err)
+	}
+
+	store := &fakeStore{loadEntries: []clientstore.Entry{}}
+	svc.SetStore(store)
+	rec.calls = 0 // reset: the seeding Add above already invoked the applier once
+
+	if err := svc.ReconcileFromStore(ctx, nil); err != nil {
+		t.Fatalf("ReconcileFromStore: %v", err)
+	}
+
+	got, err := database.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "ui-added" {
+		t.Fatalf("db clients = %+v, want the pre-existing DB content left untouched", got)
+	}
+	if store.calls() != 1 {
+		t.Fatalf("store.saveCalls = %d, want 1 (S3 must be healed FROM the DB, not the other way around)", store.calls())
+	}
+	if len(store.lastSave) != 1 || store.lastSave[0].Name != "ui-added" {
+		t.Errorf("healed store content = %+v, want the DB's own client list", store.lastSave)
+	}
+	if !svc.StoreReady() {
+		t.Error("StoreReady() = false, want true after a successful heal")
+	}
+}
+
+func TestReconcileFromStore_HardErrorWithEmptyDB_SeedsLocallyAndMarksNotReady(t *testing.T) {
+	svc, database := newTestService(t)
+	ctx := context.Background()
+	rec := &recordingApplier{}
+	svc.SetApplier(rec)
+
+	wantErr := errors.New("s3: connection reset")
+	store := &fakeStore{loadErr: wantErr}
+	svc.SetStore(store)
+
+	localSeed := []clientsfile.Client{
+		{Name: "carol", Address: "172.16.15.7/32", PublicKey: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="},
+	}
+
+	err := svc.ReconcileFromStore(ctx, localSeed)
+	if err == nil {
+		t.Fatal("ReconcileFromStore err = nil, want a propagated error (visible in logs)")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("ReconcileFromStore err = %v, want it to wrap %v", err, wantErr)
+	}
+
+	got, listErr := database.ListClients(ctx)
+	if listErr != nil {
+		t.Fatalf("ListClients: %v", listErr)
+	}
+	if len(got) != 1 || got[0].Name != "carol" {
+		t.Fatalf("db clients = %+v, want the local seed imported so the box stays usable despite the S3 outage", got)
+	}
+	if store.calls() != 0 {
+		t.Errorf("store.saveCalls = %d, want 0 (a hard load error must never write to S3)", store.calls())
+	}
+	if svc.StoreReady() {
+		t.Error("StoreReady() = true, want false after a hard load error")
+	}
+	if rec.calls != 1 {
+		t.Errorf("applier.calls = %d, want 1 (the box must still converge live config to the local seed)", rec.calls)
+	}
+}
+
+// --- write-through guard: storeReady + best-effort ---------------------------
+
+func TestAdd_StoreNotReady_AppliesLocallyWithoutStoreWrite(t *testing.T) {
+	svc, database := newTestService(t)
+	ctx := context.Background()
+	rec := &recordingApplier{}
+	svc.SetApplier(rec)
+	store := &fakeStore{}
+	svc.SetStore(store)
+	svc.storeReady = false // simulate a boot that hit a hard S3 error
+
+	if _, err := svc.Add(ctx, AddParams{Name: "alice", PublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}); err != nil {
+		t.Fatalf("Add: %v, want the mutation to succeed locally even though the store is offline", err)
+	}
+
+	got, err := database.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "alice" {
+		t.Fatalf("db clients = %+v, want the local Add to have taken effect", got)
+	}
+	if rec.calls != 1 {
+		t.Errorf("applier.calls = %d, want 1 (an offline store must not block the live-apply step)", rec.calls)
+	}
+	if store.calls() != 0 {
+		t.Errorf("store.saveCalls = %d, want 0 (a not-ready store must never be written to)", store.calls())
+	}
+}
+
+func TestAdd_StoreSaveError_MutationStillSucceeds(t *testing.T) {
+	svc, database := newTestService(t)
+	ctx := context.Background()
+	rec := &recordingApplier{}
+	svc.SetApplier(rec)
+	store := &fakeStore{saveErr: errors.New("s3: put failed")}
+	svc.SetStore(store) // storeReady defaults to true
+
+	if _, err := svc.Add(ctx, AddParams{Name: "alice", PublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}); err != nil {
+		t.Fatalf("Add: %v, want the mutation to succeed even though the store Save failed (best-effort)", err)
+	}
+
+	got, err := database.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("ListClients: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "alice" {
+		t.Fatalf("db clients = %+v, want the local Add to have taken effect", got)
+	}
+	if store.calls() != 1 {
+		t.Errorf("store.saveCalls = %d, want 1 (Save must still be attempted even though it will fail)", store.calls())
+	}
+}
+
 // --- write-through on mutations ----------------------------------------------
 
 func TestAdd_WritesThroughToStore(t *testing.T) {

@@ -361,19 +361,23 @@ func main() {
 	}
 
 	if clientManagementMode == "cloud" {
-		// Cloud boot reconcile (spec 018, Slice 4): S3 is the source of truth
-		// when present; a 404 cold-seeds it from the local manifest above and
-		// falls through to the ordinary spec-015 Seed+Reconcile. Any OTHER
-		// store error is logged loudly and left there — it deliberately does
-		// NOT fall through to Seed/Reconcile, so a transient S3 outage can
-		// never be mistaken for "never seeded" and clobber whatever the DB
-		// already held. This is non-fatal (no os.Exit): the dashboard's core
-		// purpose is observability, and a peer-management hiccup at boot
-		// should not take monitoring down with it — the operator sees the
-		// error in journald and the next successful mutation (or restart once
-		// S3 recovers) re-converges.
+		// Cloud boot reconcile (spec 018, Slice 4, revised after a live
+		// incident where an empty-but-existing S3 object wiped every
+		// operator peer). ReconcileFromStore now treats a missing OR an
+		// empty S3 list identically: the box's own state (current DB if
+		// non-empty, else this local manifest) heals S3, never the other
+		// way around — S3 is only authoritative when it actually holds a
+		// non-empty list. A hard (non-404) load error never touches S3 and
+		// never wipes a non-empty DB; it only seeds from the local manifest
+		// if the DB was already empty, and marks the store not-ready so
+		// write-through (Add/Update/Delete) skips S3 until a later
+		// successful reconcile/restart. This is non-fatal (no os.Exit): the
+		// dashboard's core purpose is observability, and a peer-management
+		// hiccup at boot should not take monitoring down with it — the
+		// operator sees the error in journald and the next successful boot
+		// reconcile (once S3 recovers) re-converges and marks it ready again.
 		if err := clientsSvc.ReconcileFromStore(ctx, seed); err != nil {
-			slog.Error("clients: cloud boot reconcile failed; DB left untouched, live config may lag until S3 recovers", "err", err)
+			slog.Error("clients: cloud boot reconcile hit a store error; local state was used as the fallback and S3 write-through is paused until the next successful reconcile", "err", err)
 		}
 	} else {
 		if err := clientsSvc.Seed(ctx, seed); err != nil {
