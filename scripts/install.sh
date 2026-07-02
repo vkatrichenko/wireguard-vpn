@@ -614,12 +614,28 @@ SUDOERS_EOF
 "
   fi
 
+  # 8b. Detect where the `aws` CLI lives (cloud mode shells out to it for the
+  #     S3 client store — spec 018). systemd's own default PATH omits
+  #     /snap/bin, where Ubuntu ships the aws snap, so a bare Environment=PATH
+  #     is required or `aws` resolves to "executable file not found in $PATH"
+  #     even though root's install-time shell (which has /snap/bin) finds it
+  #     fine. `command -v` is guarded with `|| true` so a standalone/local-mode
+  #     host with no aws installed doesn't fail the install. /snap/bin and
+  #     /usr/local/bin are always prepended as fallbacks (harmless duplicate if
+  #     AWS_BIN_DIR already matches one of them) so detection misses don't
+  #     regress cloud mode.
+  AWS_BIN="$(command -v aws 2>/dev/null || true)"
+  AWS_BIN_DIR=""
+  [ -n "$AWS_BIN" ] && AWS_BIN_DIR="$(dirname "$AWS_BIN")"
+  DASHBOARD_PATH="${AWS_BIN_DIR:+$AWS_BIN_DIR:}/snap/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
   # 9. Drop the systemd unit. Bound to the WG tunnel IP via the derived
   #    LISTEN_ADDR; Requires/After wg-quick@wg0 ensures the tunnel address is
   #    bindable before start and that the dashboard restarts when WG bounces.
-  #    Heredoc is unquoted so ${LISTEN_ADDR}, ${WG_SERVER_NET}, ${WG_CLIENT_DNS}
-  #    and the pre-rendered ${DASHBOARD_OPTIONAL_ENV} interpolate — the rest of
-  #    the unit body contains no other shell-special tokens.
+  #    Heredoc is unquoted so ${LISTEN_ADDR}, ${WG_SERVER_NET}, ${WG_CLIENT_DNS},
+  #    ${DASHBOARD_PATH}, and the pre-rendered ${DASHBOARD_OPTIONAL_ENV}
+  #    interpolate — the rest of the unit body contains no other shell-special
+  #    tokens.
   cat > /etc/systemd/system/wireguard-dashboard.service <<UNIT_EOF
 [Unit]
 Description=WireGuard VPN dashboard
@@ -632,6 +648,7 @@ Type=simple
 User=wireguard-dashboard
 Group=wireguard-dashboard
 ExecStart=/opt/wireguard-dashboard/bin/wireguard-dashboard
+Environment=PATH=${DASHBOARD_PATH}
 Environment=LISTEN_ADDR=${LISTEN_ADDR}
 Environment=WG_SERVER_NET=${WG_SERVER_NET}
 Environment=WG_CLIENT_DNS=${WG_CLIENT_DNS}
