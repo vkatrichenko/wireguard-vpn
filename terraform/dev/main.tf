@@ -33,7 +33,7 @@ module "wireguard" {
 
   client_management_mode = local.client_management_mode
 
-  dashboard_release_tag = "v0.0.14"
+  dashboard_release_tag = "v0.0.15"
   github_repo = "vkatrichenko/wireguard-vpn"
 
   # The boot seed is ALWAYS the full canonical peer set — in BOTH local and cloud

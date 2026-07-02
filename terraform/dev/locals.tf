@@ -14,9 +14,9 @@ locals {
   # clients_config input.
   clients_config = [
     {
-      name       = "vkatrychenko"
-      address    = "172.16.15.6/32"
-      public_key = "LmvqUY/F0ix8y5Xhn1HOJ+7wrhbggSa6zn6Eggh90Rg="
+      name       = "laptop"
+      address    = "172.16.15.2/32"
+      public_key = "OYR4niUZ/Ay5KAxwyvfAVOjgKo4NwQb0wRSyqRblPF4="
     },
     {
       name       = "test1"

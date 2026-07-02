@@ -2,7 +2,7 @@
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
 - **Technical Considerations:** [technical-considerations.md](./technical-considerations.md)
-- **Status:** In Progress (re-planned 2026-07-02 around the S3-bridge design; supersedes the interim `ui`/`declared` + instance-replace implementation)
+- **Status:** Completed (2026-07-02 — S3-bridge design implemented, deployed to EC2 as dashboard v0.0.15, owner-validated live; two post-deploy bugs found & fixed: empty-S3 wipe (PR #53) and the `aws`-not-in-PATH / storeReady latch (PR #54))
 
 ---
 
@@ -55,7 +55,7 @@
 
 ## Slice 5 — Owner-run live end-to-end validation (cannot be done in-session)
 
-- [ ] **Owner-run** (after `aws sso login --profile csm`, one dashboard release with the Slice-2/4 binary): `cloud` mode — deploy → S3 object seeded from `clients_config`, operator connects; add a peer in the UI → applies live (no instance replacement), S3 object updates; replace the instance → re-reads S3, keeps the UI-added peer; edit `clients_config` to differ → `terraform plan` shows the drift **warning**, `apply` does **not** revert. `local` mode — spec-015 behavior unchanged, no S3 usage **(owner)**
+- [x] **Owner-run** (validated live 2026-07-02, dashboard v0.0.15): `cloud` mode — deployed, S3 object seeded, operator connected; add/remove a peer in the UI → applies live (no instance replacement), S3 object updates; instance replaced on the v0.0.15 upgrade → re-read S3, kept the UI-managed peers; `clients_config` edit → `terraform plan` surfaces the warn-only drift `check` (deferred/"known after apply" on non-noop plans), `apply` does **not** revert. `local` mode — spec-015 behavior unchanged, no S3 usage. _(Bugs found & fixed during this validation: empty-S3 wipe → PR #53; `aws`-not-in-PATH + storeReady latch → PR #54.)_ **(owner)**
 
 ---
 
