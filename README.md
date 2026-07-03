@@ -36,6 +36,8 @@ It also ships something most guides don't: a **lightweight observability dashboa
 - 💻 **Standalone install** — the same WireGuard + dashboard bootstrap as a portable, env-driven `scripts/install.sh` for any Ubuntu VPS (no AWS/Terraform).
 - ♻️ **Install / update / remove lifecycle** — re-run to update **in place** (reuses the server key, preserves the live peer set, no tunnel drop); `--uninstall` (keep data) / `--purge` (full wipe) / `--dashboard-only` to tear down cleanly.
 - 🧬 **arm64 by default** — a single `cpu_architecture` toggle (Graviton `t4g.micro` default, or `x86_64`); architecture-agnostic boot picks the right dashboard binary.
+- 🔑 **Zero-touch server key** — no manual key step: the instance generates and self-manages its WireGuard server key in SSM (reused across rebuilds), and the private key never touches Terraform state or the launch template. Only the public key is published (SSM + installer output).
+- 🔒 **Hardened by default** — no SSH (shell via SSM Session Manager only), IMDSv2 required, encrypted root volume, and a KMS-encrypted state bucket that holds no private keys.
 - 📦 **Reproducible & pinned** — Terraform, providers, and the AMI are pinned to exact versions; remote state in S3 with native locking.
 
 **Live client management**
@@ -65,8 +67,8 @@ It also ships something most guides don't: a **lightweight observability dashboa
                     │     ├─ wg-quick@wg0  (172.16.15.1/24, NAT to internet)              │
                     │     ├─ wireguard-dashboard.service  ──▶ http://172.16.15.1:8080     │
                     │     │     (bound to the tunnel IP — reachable ONLY over the VPN)     │
-                    │     └─ IAM role: read server key from SSM (+ SSM Session Manager)    │
-                    │  S3: Terraform remote state (native locking)                         │
+                    │     └─ IAM role: self-manage server key in SSM (+ Session Manager)   │
+                    │  S3: Terraform remote state (native locking, KMS-encrypted)          │
                     │  S3: client-list backup (clients.json) — cloud mode only             │
                     └─────────────────────────────────────────────────────────────────────┘
 
@@ -364,15 +366,16 @@ LISTEN_ADDR=127.0.0.1:8080 DB_PATH=/tmp/wgd.db go run ./cmd/wireguard-dashboard
 ## Security model
 
 - **Access is the tunnel.** The dashboard binds to `172.16.15.1:8080` (the WireGuard interface), so it's unreachable except over the VPN. There is no in-band auth — connecting to the VPN *is* the authentication. The write surfaces (webhook management + client management) inherit this VPN-only trust.
-- **No SSH (on AWS).** Instance access is via SSM Session Manager; port 22 is not exposed.
-- **Secrets stay out of the repo.** The server key is an SSM SecureString (AWS) or a `0600` `server.key` (VPS); the alert secrets are env/SSM-supplied and never logged in full or rendered in the UI.
+- **No SSH (on AWS).** Port 22 is not exposed and there is **no SSH key material at all** — the keypair, EC2 key pair, and its SSM parameter are gone. Instance shell access is via SSM Session Manager (`aws ssm start-session`), which is IAM-gated and CloudTrail-audited.
+- **The server key never leaves the box's control.** The instance **self-manages** its WireGuard server private key — it reads it from SSM at boot, or generates one (`wg genkey`) and stores it if absent. The private key **never appears in Terraform state or the EC2 launch template**; only the non-secret **public** key is published (to an SSM String param + the installer's stdout) so you can build a client config before your first connection. On a VPS the key is a `0600` `/etc/wireguard/server.key`.
+- **Hardened instance + state.** IMDSv2 is required (token-only, hop limit 1); the root EBS volume is encrypted; the Terraform state bucket is KMS-encrypted (so object-read alone can't disclose it) and, with the server + SSH keys now out of state, holds no private keys. Alert secrets are env/SSM-supplied and never logged in full or rendered in the UI.
 - **The dashboard holds no client private keys** and makes **no outbound requests** for its own operation (embedded map + GeoIP, no CDNs) — the only egress it adds is the opt-in alert transports and the off-AWS public-IP lookup (skippable via `WG_PUBLIC_ENDPOINT`).
 
 ---
 
 ## Status & roadmap
 
-The deployable AWS environment, the standalone installer, and the full dashboard feature set — including **UI-first client management** (dashboard + `wg-peer` as the sole peer authority, an `admin_peer` bootstrap seed, and `local` / `cloud` S3-backup storage modes) and the **install/update/remove lifecycle** — are implemented and in use (specs 002–019; current dashboard release **`v0.0.16`**). Detailed product / architecture / roadmap notes live under [`context/product/`](context/product/), and per-feature specs under [`context/spec/`](context/spec/).
+The deployable AWS environment, the standalone installer, and the full dashboard feature set — including **UI-first client management** (dashboard + `wg-peer` as the sole peer authority, an `admin_peer` bootstrap seed, and `local` / `cloud` S3-backup storage modes), **automatic server-key management** (instance self-manages its key in SSM — no manual bootstrap, key never in Terraform state), a **security-hardening pass** (SSH removed → SSM Session Manager only, IMDSv2-required, encrypted root volume + KMS state bucket), and the **install/update/remove lifecycle** — are implemented and in use (specs 002–020; current dashboard release **`v0.0.16`**, with spec 020's dashboard fixes shipping in the next release). Detailed product / architecture / roadmap notes live under [`context/product/`](context/product/), and per-feature specs under [`context/spec/`](context/spec/).
 
 ---
 
