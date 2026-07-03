@@ -33,7 +33,7 @@ module "wireguard" {
 
   client_management_mode = "cloud"
 
-  dashboard_release_tag = "v0.0.16"
+  dashboard_release_tag = "v0.0.17"
   github_repo           = "vkatrichenko/wireguard-vpn"
 
   # Single admin bootstrap peer (spec 019) — the ONLY peer Terraform seeds, for

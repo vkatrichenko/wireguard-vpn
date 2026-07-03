@@ -107,7 +107,7 @@ It also ships something most guides don't: a **lightweight observability dashboa
 ## Prerequisites
 
 - **WireGuard tools** (`wg`, `wg-quick`) on your client machine.
-- **For the AWS path:** an AWS account + credentials (exported `AWS_PROFILE`); **[Terraform](https://developer.hashicorp.com/terraform/install) `1.14.8`** (exact — versions are pinned); a server private key in **SSM** (created out-of-band, below).
+- **For the AWS path:** an AWS account + credentials (exported `AWS_PROFILE`); **[Terraform](https://developer.hashicorp.com/terraform/install) `1.14.8`** (exact — versions are pinned). The server's WireGuard key is generated and self-managed by the instance — there's no manual key step.
 - **For the standalone path:** a plain **Ubuntu** VPS with a public IP, root/sudo, and **inbound UDP 51820** open in the provider firewall.
 - For the dashboard: a **public GitHub Release** that publishes the `wireguard-dashboard-<arch>` asset (the bundled CI does this), pinned via a release tag. **The dashboard is always installed** alongside WireGuard (the release tag is required) — it's how you manage peers.
 
@@ -152,15 +152,9 @@ Generate a peer keypair off-host and paste the **public** key above (keep the pr
 wg genkey | tee privatekey | wg pubkey > publickey
 ```
 
-**2. Create the server's WireGuard private key in SSM** (one-time, not managed by Terraform):
+> **You don't create a server key.** The instance generates and self-manages its own WireGuard server private key at first boot — it reads the key from SSM if present, or generates one (`wg genkey`) and stores it there if absent. There's no manual `aws ssm put-parameter` step, and the private key never appears in Terraform state or the launch template. After deploy, read the server **public** key from the SSM String param `/config/<project>-<env>/server-public-key` (or the dashboard's server card once connected).
 
-```bash
-aws ssm put-parameter \
-  --name "/config/wireguard-vpn-test/default-private-key" \
-  --type SecureString --value "$(wg genkey)"
-```
-
-**3. Bootstrap the Terraform state bucket** (one-time, on a fresh clone):
+**2. Bootstrap the Terraform state bucket** (one-time, on a fresh clone):
 
 ```bash
 cd terraform/dev/backend
@@ -168,7 +162,7 @@ terraform init
 terraform plan -out=tfplan && terraform apply tfplan
 ```
 
-**4. Deploy the VPN.** From `terraform/dev/`:
+**3. Deploy the VPN.** From `terraform/dev/`:
 
 ```bash
 cd ..
@@ -205,7 +199,7 @@ sudo DASHBOARD_RELEASE_TAG="v0.0.16" \
 
 This installs in **`local` mode** by default (peers in on-box SQLite — the natural fit for a standalone VPS) and also installs the **`wg-peer`** helper. Useful env vars: `WG_SERVER_NET` (default `172.16.15.1/24`), `WG_SERVER_PORT` (`51820`), `WG_CLIENT_DNS` (`1.1.1.1`), `WG_PUBLIC_ENDPOINT` (your VPS public IP, to skip auto-discovery). To use `cloud` mode on a VPS (S3 backup), also pass `CLIENT_MANAGEMENT_MODE=cloud CLIENT_STORE_S3_BUCKET=… CLIENT_STORE_S3_KEY=clients.json` with AWS credentials available to the host. The installer prints the **server public key** and an **example client config** when it finishes.
 
-> **You don't pass a server key.** On a standalone VPS the installer **generates the server's WireGuard private key automatically** (`wg genkey`) on first run and persists it to `/etc/wireguard/server.key` (`0600`); every later re-run reuses that same key, so the server identity stays stable. Pass `WG_SERVER_PRIVATE_KEY` only if you want to supply a specific key (e.g. restoring from a backup) — and once chosen, **don't change it on re-runs**, or you'll invalidate every existing client config. _(This differs from the AWS path, where the server key comes from the SSM parameter you create in [Option A, step 2](#install--option-a-aws-terraform).)_
+> **You don't pass a server key.** On a standalone VPS the installer **generates the server's WireGuard private key automatically** (`wg genkey`) on first run and persists it to `/etc/wireguard/server.key` (`0600`); every later re-run reuses that same key, so the server identity stays stable. Pass `WG_SERVER_PRIVATE_KEY` only if you want to supply a specific key (e.g. restoring from a backup) — and once chosen, **don't change it on re-runs**, or you'll invalidate every existing client config. _(The AWS path behaves the same way — the instance self-manages its key in SSM — so neither path needs you to supply a server key.)_
 
 **4. Add your first client.** The dashboard is VPN-only, so before you're a peer you have two options:
 
@@ -322,7 +316,7 @@ Deployable AWS config lives in [`terraform/dev/locals.tf`](terraform/dev/locals.
 | Dashboard version | `main.tf` → `dashboard_release_tag` | Single source of truth for the running build; **required** (the dashboard is always installed). |
 | GitHub repo | `main.tf` → `github_repo` | One slug feeding both the `install.sh` fetch and the release download (must be public). |
 | CPU architecture | `main.tf` → `cpu_architecture` | `"arm64"` (default, `t4g.micro`) or `"x86_64"` (`t3a.micro`). |
-| Server key | SSM `/config/<project>-<env>/default-private-key` | Created out-of-band; read at boot. On a VPS it's persisted to `/etc/wireguard/server.key`. |
+| Server key | SSM `/config/<project>-<env>/default-private-key` (private, instance-owned) + `/config/<project>-<env>/server-public-key` (public, TF-managed shell) | Instance-managed: read-from-SSM or generate-and-store at boot; never in Terraform state or the launch template. The public key is published to SSM for pre-connect retrieval. On a VPS the key is persisted to `/etc/wireguard/server.key`. |
 
 ### Alerting (optional)
 

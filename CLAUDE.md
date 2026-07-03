@@ -44,9 +44,9 @@ These override any general defaults:
 
 Claude should **not** try to create or manage these — assume they exist:
 
-- SSM parameter `/config/wireguard/default-private-key` — the server's WireGuard private key, created manually via `aws ssm put-parameter`.
+- SSM parameter `/config/<project>-<env>/default-private-key` — the server's WireGuard **private** key. **Instance-owned** (spec 020): the EC2 instance reads it at boot, or generates + stores it (`wg genkey`) if absent. No manual `aws ssm put-parameter`, and it never enters Terraform state or the launch template. (The matching **public** key at `/config/<project>-<env>/server-public-key` *is* a Terraform-managed shell the instance overwrites, so it is not "external".)
 - S3 state bucket `wireguard-vpn-test-tf-states` — bootstrapped separately via [terraform/dev/backend/](terraform/dev/backend/). Has `prevent_destroy = true`.
-- WireGuard **client** public keys — added by hand to the `clients_config` list in [main.tf](terraform/dev/main.tf). Generated off-host with `wg genkey | tee privatekey | wg pubkey > publickey`.
+- WireGuard **client** peers — managed via the dashboard UI (or the on-box `wg-peer` script), not Terraform (spec 019). Terraform seeds only the single `admin_peer` (name + public key) for anti-lockout; every other peer is added at runtime. Client keypairs are generated off-host with `wg genkey | tee privatekey | wg pubkey > publickey`.
 
 ## Commands
 
@@ -160,7 +160,7 @@ Do not claim "done" without plan output. If infra can't be end-to-end tested in 
 
 ## Gotchas
 
-- The WireGuard EC2 instance reads its private key from SSM at boot via [user-data](terraform/modules/wireguard/templates/user-data.txt). If the SSM parameter is missing or the IAM role lacks access, the service will fail silently — check `/var/log/cloud-init-output.log` on the instance.
+- The WireGuard EC2 instance self-manages its server key at boot via [user-data](terraform/modules/wireguard/templates/user-data.txt) (spec 020): it reads the private key from SSM, or generates one and stores it if absent, then publishes the public key to SSM. A **missing** param is fine (it generates); but if the **IAM role lacks SSM access** the `put-parameter` fails and the boot aborts before the S3 `.ready` signal — check `/var/log/cloud-init-output.log` on the instance.
 - Cloud-init runs user-data as root. Do not add `sudo` inside user-data scripts.
 - `locals.environment = "test"` — the `dev/` directory name and the `Environment` tag value intentionally differ. Tag value is the source of truth.
 
