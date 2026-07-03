@@ -2,7 +2,7 @@
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
 - **Technical Considerations:** [technical-considerations.md](./technical-considerations.md)
-- **Status:** In Progress
+- **Status:** Completed
 
 ---
 
@@ -69,7 +69,7 @@
 
 ## Slice 6 — Owner-run live end-to-end validation (cannot be done in-session)
 
-- [ ] **Owner-run** (after `aws sso login --profile csm`, one dashboard release with the Slice-1 binary): fresh AWS deploy with **no** manual SSM key → WireGuard comes up, public key present in the SSM String param and printed by the installer; **rebuild the instance** → same server identity, existing client configs still connect; `aws ssm start-session --target <id>` gives a shell; SSH to :22 is refused; a **UI-added** client's detail + history render; force `storeReady=false` (revoke S3 access) → the About badge / `/api/health` shows offline, restore access → recovers within one retention tick **without** a restart or a peer edit. **(owner)**
+- [x] **Owner-run** (after `aws sso login --profile csm`, one dashboard release with the Slice-1 binary): fresh AWS deploy with **no** manual SSM key → WireGuard comes up, public key present in the SSM String param and printed by the installer; **rebuild the instance** → same server identity, existing client configs still connect; `aws ssm start-session --target <id>` gives a shell; SSH to :22 is refused; a **UI-added** client's detail + history render; force `storeReady=false` (revoke S3 access) → the About badge / `/api/health` shows offline, restore access → recovers within one retention tick **without** a restart or a peer edit. **(owner)** — verified live 2026-07-03: "fully deployed and checked, worked okay".
 
 ---
 

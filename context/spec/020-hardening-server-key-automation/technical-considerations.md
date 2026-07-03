@@ -6,7 +6,7 @@ Structures & contracts, not implementations.
 # Technical Specification: Hardening & Server-Key Automation
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
-- **Status:** Draft
+- **Status:** Completed
 - **Author(s):** Vladyslav Katrychenko
 
 ---
