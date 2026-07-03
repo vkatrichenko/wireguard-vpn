@@ -5,9 +5,10 @@
 # (the script is NOT embedded — that blew past EC2's 16 KB user-data cap). All
 # the WireGuard server + dashboard provisioning logic lives in that script; this
 # wrapper only handles the AWS-specific glue: IMDSv2 metadata, mapping the
-# Terraform-substituted values onto the script's env contract, fetching + running
-# the script as an isolated subprocess, installing the AWS CLI, and signalling
-# readiness to S3 for the health check.
+# Terraform-substituted values onto the script's env contract, installing the
+# AWS CLI and using it to resolve/publish the instance-owned WireGuard server
+# key via SSM, fetching + running the script as an isolated subprocess, and
+# signalling readiness to S3 for the health check.
 
 # Wait for background updates to finish (unattended-upgrades) before our own
 # apt work below. The fetched install.sh waits again internally before its
@@ -18,7 +19,7 @@ while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
 done
 
 # curl is needed for the IMDSv2 reads just below; unzip for the AWS CLI install
-# at the tail. Both are AWS-wrapper concerns, separate from install.sh's own
+# further down. Both are AWS-wrapper concerns, separate from install.sh's own
 # package set (wireguard/wireguard-tools, and curl only on the dashboard path).
 apt-get update -y
 apt-get install -y curl unzip
@@ -31,6 +32,12 @@ TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-meta
 INSTANCE_ID=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/instance-id)
 echo $INSTANCE_ID > /tmp/instance-id
 
+# 3. Use the token to get the region, and export it as the default so every
+# `aws` call below (the SSM key resolve/publish and the S3 .ready signal) is
+# region-correct without depending on a region being preconfigured on the box.
+AWS_REGION=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/placement/region)
+export AWS_DEFAULT_REGION="$AWS_REGION"
+
 # --- install.sh env contract ------------------------------------------------
 # One export per Terraform-substituted value, mapped onto the UPPER_CASE env
 # names install.sh reads. Scalars are single tokens, double-quoted so any
@@ -39,7 +46,6 @@ echo $INSTANCE_ID > /tmp/instance-id
 # its own default (8080) — matching the previous hardcoded 172.16.15.1:8080.
 export WG_SERVER_NET="${wg_server_net}"
 export WG_SERVER_PORT="${wg_server_port}"
-export WG_SERVER_PRIVATE_KEY="${wg_server_private_key}"
 export DASHBOARD_RELEASE_TAG="${dashboard_release_tag}"
 export INSTALL_SCRIPT_REF="${install_script_ref}"
 export CLIENT_MANAGEMENT_MODE="${client_management_mode}"
@@ -76,22 +82,9 @@ CLIENTS_EOF
 )"
 export CLIENTS_JSON
 
-# --- Fetch and run the shared installer as a subprocess ---------------------
-# install.sh is pulled from raw GitHub at the Terraform-pinned repo + ref
-# (github_repo / install_script_ref are templatefile substitutions, so a
-# single-brace interpolation is correct). A download failure aborts the boot so
-# a missing or wrong-ref script never reaches the run step. Running it with
-# `bash <file>` (not sourced) isolates its `set -euo pipefail` from this wrapper,
-# while the `|| { ...; exit 1; }` propagates a hard failure so the .ready signal
-# below is never emitted on a failed install.
-mkdir -p /opt/wg-install
-if ! curl -fsSL "https://raw.githubusercontent.com/${github_repo}/${install_script_ref}/scripts/install.sh" -o /opt/wg-install/install.sh; then
-  echo "FATAL: failed to download install.sh" >&2
-  exit 1
-fi
-bash /opt/wg-install/install.sh || { echo "FATAL: install.sh failed" >&2; exit 1; }
-
 # --- AWS CLI (arch-aware: AWS publishes one installer per `uname -m` value) --
+# Installed here — before the key-resolve step below — because both that step
+# and the post-install publish step need a working `aws` binary.
 case "$(uname -m)" in
   x86_64)
     AWSCLI_ARCH=x86_64
@@ -107,6 +100,73 @@ esac
 curl "https://awscli.amazonaws.com/awscli-exe-linux-$AWSCLI_ARCH.zip" -o "awscliv2.zip"
 unzip -q awscliv2.zip
 ./aws/install
+
+# --- Resolve the WireGuard server private key from SSM (instance-owned) -----
+# Terraform no longer supplies the private key — this instance is the source
+# of truth for it. Check SSM first: a rebuilt box, or a rerun of user-data on
+# the same box, will find its previously-published key here and must reuse it
+# rather than generate a new one (a new key would silently orphan every
+# existing client). A missing parameter (ParameterNotFound — the expected
+# fresh-box case) must NOT abort the boot: get-parameter's failure is swallowed
+# with `|| true` and the resulting empty string is treated as absent, same as
+# any value that doesn't look like a real WireGuard key (base64, 44 chars,
+# always ending in `=`).
+KEY_FROM_SSM=0
+SSM_PRIVATE_KEY="$(aws ssm get-parameter --name "${wg_server_private_key_param_name}" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null || true)"
+if [[ "$SSM_PRIVATE_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+  echo "Found an existing WireGuard private key in SSM — reusing it."
+  export WG_SERVER_PRIVATE_KEY="$SSM_PRIVATE_KEY"
+  KEY_FROM_SSM=1
+else
+  echo "No valid WireGuard private key in SSM yet — install.sh will generate one."
+fi
+
+# --- Fetch and run the shared installer as a subprocess ---------------------
+# install.sh is pulled from raw GitHub at the Terraform-pinned repo + ref
+# (github_repo / install_script_ref are templatefile substitutions, so a
+# single-brace interpolation is correct). A download failure aborts the boot so
+# a missing or wrong-ref script never reaches the run step. Running it with
+# `bash <file>` (not sourced) isolates its `set -euo pipefail` from this wrapper,
+# while the `|| { ...; exit 1; }` propagates a hard failure so the .ready signal
+# below is never emitted on a failed install. install.sh honors the
+# WG_SERVER_PRIVATE_KEY env var set above when present (reuse) and otherwise
+# generates a fresh key, persisting whichever one it used to
+# /etc/wireguard/server.key (0600 root).
+mkdir -p /opt/wg-install
+if ! curl -fsSL "https://raw.githubusercontent.com/${github_repo}/${install_script_ref}/scripts/install.sh" -o /opt/wg-install/install.sh; then
+  echo "FATAL: failed to download install.sh" >&2
+  exit 1
+fi
+bash /opt/wg-install/install.sh || { echo "FATAL: install.sh failed" >&2; exit 1; }
+
+# --- Publish the server key(s) back to SSM ----------------------------------
+# install.sh has now settled on a private key (reused from SSM or freshly
+# generated) and persisted it to /etc/wireguard/server.key. Only push the
+# private key to SSM when it was freshly generated this boot (KEY_FROM_SSM=0)
+# — when reused, the SSM copy already matches and a rewrite would be a no-op.
+# The public key is always republished, since it must match whichever private
+# key install.sh ended up using. `wg` is available here because install.sh
+# (which installs wireguard-tools) has already run. Both puts are fatal on
+# failure — a missing IAM grant must abort the boot before the .ready signal
+# below, not silently leave SSM out of sync with the running server. Only the
+# public key is ever echoed to the log.
+if [ "$KEY_FROM_SSM" -eq 0 ]; then
+  aws ssm put-parameter \
+    --name "${wg_server_private_key_param_name}" \
+    --type SecureString \
+    --value "$(cat /etc/wireguard/server.key)" \
+    --overwrite \
+    || { echo "FATAL: failed to publish private key to SSM" >&2; exit 1; }
+fi
+
+PUBKEY="$(wg pubkey < /etc/wireguard/server.key)"
+echo "WireGuard server public key: $PUBKEY"
+aws ssm put-parameter \
+  --name "${wg_server_public_key_param_name}" \
+  --type String \
+  --value "$PUBKEY" \
+  --overwrite \
+  || { echo "FATAL: failed to publish public key to SSM" >&2; exit 1; }
 
 # --- Health-check signal ----------------------------------------------------
 # Check WireGuard status twice with a 10s delay; on success copy a .ready marker

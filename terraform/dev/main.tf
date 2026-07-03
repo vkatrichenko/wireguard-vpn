@@ -1,11 +1,9 @@
 module "network" {
-  source       = "../modules/network/vpc"
-  project_name = local.project_name
-  env          = local.environment
-  vpc_name     = local.vpc_name
-  vpc_cidr     = local.vpc_cidr
-  tags         = local.default_tags
-  ports        = [22]
+  source   = "../modules/network/vpc"
+  env      = local.environment
+  vpc_name = local.vpc_name
+  vpc_cidr = local.vpc_cidr
+  tags     = local.default_tags
 }
 
 module "wireguard" {
@@ -15,10 +13,12 @@ module "wireguard" {
   env          = local.environment
 
 
-  vpc_id                      = module.network.vpc_id
-  subnet_id                   = module.network.public_subnets[0]
-  wg_server_net               = "172.16.15.1/24"
-  wg_server_private_key_param = "/config/${local.project_name}-${local.environment}/default-private-key"
+  vpc_id        = module.network.vpc_id
+  subnet_id     = module.network.public_subnets[0]
+  wg_server_net = "172.16.15.1/24"
+  # The server WireGuard key is no longer threaded through Terraform (spec 020
+  # slice 3): the module owns two SSM parameter shells and the instance
+  # self-manages the real key at boot. See modules/wireguard/server_key.tf.
   # $ wg genkey | tee privatekey | wg pubkey > publickey
   # [Interface]
   # PrivateKey = // user private key

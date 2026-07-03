@@ -46,15 +46,17 @@ Affected areas: `dashboard/internal/{server,clients,poller,clientstore}`, `dashb
 3. **Install:** run `install.sh` unchanged — its existing precedence (`env → /etc/wireguard/server.key → wg genkey`, [install.sh:327-341](../../../scripts/install.sh#L327)) reuses the SSM key when supplied, or generates + persists one when not. `install.sh` stays cloud-agnostic (no AWS calls).
 4. **Publish (post-install):** read the effective private key from `/etc/wireguard/server.key`; if step 2 found no real key in SSM, `aws ssm put-parameter --overwrite` it (SecureString). Always derive the public key (`wg pubkey < /etc/wireguard/server.key`) and `put-parameter --overwrite` the String public param. A failed private-key `put-parameter` must be **fatal before** the S3 `.ready` signal, so a missing IAM grant surfaces loudly instead of silently leaving an unpersisted key.
 
-**Terraform — new resources** (module, e.g. a new `server_key.tf`):
+**Terraform — the private param is instance-owned; only the public param is TF-managed.**
 
-| Resource | Type | Key attributes |
-|---|---|---|
-| `aws_ssm_parameter.wg_server_private_key` | SecureString | name from `${project}-${env}`; `value = "UNINITIALIZED"`; `lifecycle { ignore_changes = [value] }` |
-| `aws_ssm_parameter.wg_server_public_key` | String | same name stem `.../server-public-key`; `value = "UNINITIALIZED"`; `ignore_changes = [value]` |
+> **Design decision (supersedes the earlier TF-owned-sentinel plan):** `aws_ssm_parameter` always stores `value` in state as plaintext, and `ignore_changes = [value]` only suppresses *plan diffs* — `terraform refresh`/`import` still read the decrypted remote value back into state. So a TF-managed private param would reintroduce the key into state, defeating B2. The write-only `value_wo` primitive keeps it out of state but forces a one-time key rotation to migrate the pre-existing param. We instead make the **private key instance-owned**: Terraform does not declare it at all, so the key never enters state, and the instance naturally adopts the existing param with no rotation.
 
-- State only ever holds the sentinel; the instance overwrites the real values. Clean `destroy` (no orphan); ARNs known at plan time for IAM scoping.
-- Thread both param **names** into `user-data.txt` via the existing `templatefile()` call ([locals.tf:63](../../../terraform/modules/wireguard/locals.tf#L63)).
+| Param | Owner | Type | Details |
+|---|---|---|---|
+| private key `/config/${project}-${env}/default-private-key` | **Instance** (no TF resource) | SecureString | Created/read by the boot wrapper via the `aws` CLI. IAM references it by a **constructed ARN** (`arn:aws:ssm:${region}:${account}:parameter/config/${project}-${env}/default-private-key`, using `data.aws_caller_identity` + the region). Orphaned on `destroy` (accepted — the key survives teardown). |
+| public key `/config/${project}-${env}/server-public-key` | **Terraform** | String | `aws_ssm_parameter.wg_server_public_key`, `value = "UNINITIALIZED"`, `lifecycle { ignore_changes = [value] }` (non-secret, so state is fine). Gives a plan-time ARN for the Put grant, clean destroy, and a stable read location. |
+
+- The private param **name** is a module `local` (deterministic string); the public param name is the resource `.name`. Thread both **names** into `user-data.txt` via the existing `templatefile()` call ([locals.tf:63](../../../terraform/modules/wireguard/locals.tf#L63)).
+- No `terraform import` needed: the instance's boot `get-parameter` finds the existing real key and reuses it (no rotation, clients keep working).
 
 **Terraform — removals (the TF read path):**
 - `data.aws_ssm_parameter.wg_server_private_key` ([datasource.tf:1-3](../../../terraform/modules/wireguard/datasource.tf#L1)).

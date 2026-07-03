@@ -101,6 +101,17 @@ type DiskReader interface {
 	Sample(ctx context.Context) ([]disk.Mount, error)
 }
 
+// StoreRechecker is the seam the poller uses to self-heal the cloud-mode
+// client-store's storeReady latch on the existing hourly retention tick (spec
+// 020, Slice 1). *clients.Service satisfies it; tests inject a fake so this
+// package doesn't need to import internal/clients (which would be a cycle-risk
+// dependency this leaf package has otherwise avoided) or exercise real S3.
+// nil is a valid value — local mode passes nil and runRetentionLoop nil-guards
+// the call, matching Disk/Service/Evaluator's own "optional dependency" posture.
+type StoreRechecker interface {
+	RecheckStore(ctx context.Context) error
+}
+
 // Poller is the long-running background sampler. Construct with New for
 // production wiring, or as a struct literal in same-package tests with
 // fakes substituted into DB / Proc / WG / ClientsFile / Now.
@@ -127,6 +138,15 @@ type Poller struct {
 	Disk      DiskReader
 	Evaluator *alerts.Evaluator
 	Notifier  notify.Notifier
+
+	// ClientStore is the OPTIONAL cloud-mode client-store self-heal seam (spec
+	// 020, Slice 1): when non-nil, runRetentionLoop calls RecheckStore right
+	// after each hourly prune sweep so a storeReady=false latch (set by a hard
+	// ReconcileFromStore boot error) heals without waiting for the next UI
+	// mutation. nil in local mode (and in every pre-Slice-1 test/Poller{}
+	// literal) — the retention tick simply skips the call, identical to how a
+	// nil Evaluator disables alerting without any other behavioural change.
+	ClientStore StoreRechecker
 
 	// StatusHolder is the optional seam to the in-UI active-alerts view (spec
 	// 007, Slice 5). When non-nil, evaluateAlerts writes the evaluator's current
@@ -339,9 +359,14 @@ func (p *Poller) recordDiskMetrics(mounts []disk.Mount) {
 // evaluator's firing set + transition events each tick; nil disables the in-UI
 // view without affecting evaluation or delivery.
 //
+// storeRecheck (spec 020, Slice 1) is the trailing param: the cloud-mode
+// client-store self-heal seam (see the ClientStore field doc). Pass nil in
+// local mode (or from any test that doesn't exercise it) — the retention loop
+// nil-guards the call, matching every other optional dep New wires.
+//
 // Tests in this package construct a Poller{} literal directly; New is
 // exclusively for cmd/wireguard-dashboard.
-func New(database *db.DB, p *proc.Service, w *wg.Service, c *clientsfile.Service, svc ServiceReader, diskReader DiskReader, evaluator *alerts.Evaluator, notifier notify.Notifier, holder *alerts.StatusHolder) *Poller {
+func New(database *db.DB, p *proc.Service, w *wg.Service, c *clientsfile.Service, svc ServiceReader, diskReader DiskReader, evaluator *alerts.Evaluator, notifier notify.Notifier, holder *alerts.StatusHolder, storeRecheck StoreRechecker) *Poller {
 	return &Poller{
 		DB:             database,
 		Proc:           p,
@@ -352,6 +377,7 @@ func New(database *db.DB, p *proc.Service, w *wg.Service, c *clientsfile.Service
 		Evaluator:      evaluator,
 		Notifier:       notifier,
 		StatusHolder:   holder,
+		ClientStore:    storeRecheck,
 		SampleEvery:    DefaultSampleEvery,
 		RetentionEvery: DefaultRetentionEvery,
 		Retention:      DefaultRetention,
@@ -452,6 +478,19 @@ func (p *Poller) runRetentionLoop(ctx context.Context) {
 				continue
 			}
 			slog.Info("poller: pruned rows", "cutoff", cutoff, "deleted", n)
+
+			// Client-store self-heal (spec 020, Slice 1): piggybacks on this
+			// existing hourly tick rather than a new ticker/goroutine. nil in
+			// local mode (ClientStore unset) — RecheckStore itself is also a
+			// no-op once storeReady is already true, so this is a cheap
+			// no-op in the overwhelmingly common case.
+			if p.ClientStore != nil {
+				if err := p.ClientStore.RecheckStore(ctx); err != nil {
+					if !errors.Is(err, context.Canceled) {
+						slog.Warn("poller: client store recheck failed", "err", err)
+					}
+				}
+			}
 		}
 	}
 }

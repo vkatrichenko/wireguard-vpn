@@ -437,6 +437,19 @@ type aboutTabData struct {
 	ServerInfo      serverinfo.ServerInfo
 	ServerInfoError string
 	Webhook         aboutWebhookCardData
+	// ClientStore is the cloud-mode-only client-store health row (spec 020,
+	// Slice 1). nil in local mode — about.html omits the card entirely rather
+	// than render a health signal that's meaningless without an S3 bridge.
+	ClientStore *aboutClientStoreCardData
+}
+
+// aboutClientStoreCardData is the view-model for cards/about-store.html.
+// Ready mirrors clients.Service.StoreReady() live at render time: false means
+// the last ReconcileFromStore (boot) or RecheckStore (hourly self-heal) found
+// the S3 backup unreachable, so write-through is currently paused (peer edits
+// still apply locally — see saveStoreLocked's doc for the full story).
+type aboutClientStoreCardData struct {
+	Ready bool
 }
 
 // aboutWebhookCardData is the view-model for cards/webhook.html (spec 008,
@@ -518,6 +531,12 @@ func (s *server) handleGetPartialAbout(w http.ResponseWriter, r *http.Request) {
 		},
 		// Masked-only holder view; the tab tick carries no outcome message.
 		Webhook: aboutWebhookCardData{Status: s.webhookStatus()},
+	}
+
+	// Client-store health row (spec 020, Slice 1) — cloud mode only; see the
+	// ClientStore field doc.
+	if s.clientManagementMode == "cloud" {
+		data.ClientStore = &aboutClientStoreCardData{Ready: s.clientsSvc.StoreReady()}
 	}
 
 	var (

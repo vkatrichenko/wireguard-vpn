@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"wireguard-dashboard/internal/clientsfile"
 	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/history"
 	"wireguard-dashboard/internal/p95"
@@ -130,12 +129,16 @@ func (s *server) handleGetClients(w http.ResponseWriter, r *http.Request) {
 // handleGetPartialClientDetail renders the inline expand fragment for one
 // client row: a chart canvas wrapper (JS hydrates it in Slice 5 sub-task 6)
 // plus the 24h p95 throughput figure. The pubkey path-param is validated
-// against the clientsfile manifest — unknown / empty keys return 404 so a
-// stale link or a typo doesn't render a chart against nothing.
+// against the runtime clients DB (spec 020 Slice 1) — unknown / empty keys
+// return 404 so a stale link or a typo doesn't render a chart against
+// nothing. Resolving against clientsSvc rather than the clientsfile manifest
+// is what lets a UI-added client (which only ever exists in the DB, never in
+// the Terraform-rendered manifest) reach this fragment — mirrors
+// handleGetClientConfig's spec 015 migration in handlers_config.go.
 //
 // Error model:
-//   - clientsfile load failure prevents the pubkey-validity check, so we
-//     500 the request (we can't safely confirm or deny the key).
+//   - clients list failure prevents the pubkey-validity check, so we 500 the
+//     request (we can't safely confirm or deny the key).
 //   - DB query failure is logged and falls through to a P95Bps=0 render
 //     rather than a 500; htmx would otherwise leave the previous swap
 //     content in place, which is a worse UX than a brief "0 B/s" cell.
@@ -148,15 +151,15 @@ func (s *server) handleGetPartialClientDetail(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	clients, err := s.clientsfileSvc.Load(r.Context())
+	dbClients, err := s.clientsSvc.List(r.Context())
 	if err != nil {
-		slog.Error("GET /partial/clients/.../detail: clientsfile load failed", "err", err)
+		slog.Error("GET /partial/clients/.../detail: clients list failed", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	found := false
-	for _, c := range clients {
+	for _, c := range dbClients {
 		if c.PublicKey == pubkey {
 			found = true
 			break
@@ -267,16 +270,18 @@ func handshakeTimes(events []db.HandshakeEvent) []time.Time {
 
 // handleGetClientHistory serves the per-client connection history JSON for the
 // timeline view (spec 006 §2.1). The {name} path-param is resolved against the
-// clientsfile manifest — matching the sibling /api/clients/{name}/config route
-// — so the public URL stays friendly; the handshake_events query then runs on
-// the resolved public key. Range is validated against the shared four-value
-// enum (1h/6h/24h/7d, default 24h); any other value is a 400.
+// runtime clients DB (spec 020 Slice 1) — matching the sibling
+// /api/clients/{name}/config route's spec 015 migration in handlers_config.go
+// — so a UI-added client (DB-only, never in the Terraform-rendered manifest)
+// resolves here too, and the public URL stays friendly; the handshake_events
+// query then runs on the resolved public key. Range is validated against the
+// shared four-value enum (1h/6h/24h/7d, default 24h); any other value is a 400.
 //
 // Status model mirrors the other /api/clients handlers:
 //   - 404 — empty or unknown name (a stale link must not render history for a
-//     peer that isn't in the manifest).
+//     peer that no longer exists).
 //   - 400 — out-of-enum ?range=.
-//   - 500 — manifest read or DB query failure (we can't produce a correct
+//   - 500 — clients list or DB query failure (we can't produce a correct
 //     answer, and unlike the inline panel there's no partial render to fall
 //     back to).
 //
@@ -299,14 +304,22 @@ func (s *server) handleGetClientHistory(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	clients, err := s.clientsfileSvc.Load(r.Context())
+	dbClients, err := s.clientsSvc.List(r.Context())
 	if err != nil {
-		slog.Error("GET /api/clients/{name}/history: clientsfile load failed", "err", err)
+		slog.Error("GET /api/clients/{name}/history: clients list failed", "err", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	client, ok := clientsfile.ByName(clients)[name]
-	if !ok {
+	var client db.Client
+	found := false
+	for _, c := range dbClients {
+		if c.Name == name {
+			client = c
+			found = true
+			break
+		}
+	}
+	if !found {
 		http.NotFound(w, r)
 		return
 	}

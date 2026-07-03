@@ -1,9 +1,11 @@
 package clientstore
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -143,6 +145,73 @@ func TestS3Store_Save_RunnerErrorPropagates(t *testing.T) {
 	if err := store.Save(context.Background(), []Entry{{Name: "a", Address: "172.16.15.2/32", PublicKey: "AAAA"}}); err == nil {
 		t.Fatal("Save err = nil, want a propagated error")
 	}
+}
+
+// TestIsNoSuchKey_CodeVsBareFallback locks in the C6c tightening: the
+// documented "NoSuchKey" code (and its English prose form) must be
+// recognised without any log noise, while a message that matches ONLY the
+// bare "404" substring — never the real code — still classifies as
+// object-absent (unchanged fallback behaviour) but now logs the raw stderr at
+// WARN so an unexpected match is visible in journald. AccessDenied (no code,
+// no "404") must not match at all.
+func TestIsNoSuchKey_CodeVsBareFallback(t *testing.T) {
+	captureWarn := func(t *testing.T, fn func()) string {
+		t.Helper()
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+		defer slog.SetDefault(prev)
+		fn()
+		return buf.String()
+	}
+
+	t.Run("NoSuchKey code matches without logging", func(t *testing.T) {
+		_, err := runShim("An error occurred (NoSuchKey) when calling the GetObject operation: The specified key does not exist.", 254)
+		var got bool
+		logged := captureWarn(t, func() { got = isNoSuchKey(err) })
+		if !got {
+			t.Error("isNoSuchKey() = false, want true for the NoSuchKey code")
+		}
+		if strings.Contains(logged, "bare") {
+			t.Errorf("unexpected WARN log for a real NoSuchKey code match: %s", logged)
+		}
+	})
+
+	t.Run("prose form matches without logging", func(t *testing.T) {
+		_, err := runShim("no such key: clients.json", 254)
+		var got bool
+		logged := captureWarn(t, func() { got = isNoSuchKey(err) })
+		if !got {
+			t.Error("isNoSuchKey() = false, want true for the 'no such key' prose form")
+		}
+		if strings.Contains(logged, "bare") {
+			t.Errorf("unexpected WARN log for the prose-form match: %s", logged)
+		}
+	})
+
+	t.Run("bare 404 matches AND logs a warning", func(t *testing.T) {
+		_, err := runShim("An error occurred (404) when calling the GetObject operation: Not Found", 254)
+		var got bool
+		logged := captureWarn(t, func() { got = isNoSuchKey(err) })
+		if !got {
+			t.Error("isNoSuchKey() = false, want true for the bare \"404\" fallback")
+		}
+		if !strings.Contains(logged, "bare") || !strings.Contains(logged, "404") {
+			t.Errorf("WARN log missing for the bare \"404\" fallback match: %s", logged)
+		}
+	})
+
+	t.Run("AccessDenied does not match", func(t *testing.T) {
+		_, err := runShim("An error occurred (AccessDenied) when calling the GetObject operation: Access Denied", 254)
+		var got bool
+		logged := captureWarn(t, func() { got = isNoSuchKey(err) })
+		if got {
+			t.Error("isNoSuchKey() = true, want false for AccessDenied")
+		}
+		if logged != "" {
+			t.Errorf("unexpected log output for a non-matching error: %s", logged)
+		}
+	})
 }
 
 func argsContain(args []string, flag, value string) bool {

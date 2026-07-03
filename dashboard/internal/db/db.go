@@ -31,7 +31,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -921,12 +920,3 @@ func b2i(b bool) int64 {
 	}
 	return 0
 }
-
-// ErrNotInitialised is returned by callers that try to use a *DB before
-// Open completed. Reserved for future use — kept exported so dependent
-// packages can errors.Is against it without relying on string matching.
-//
-// (Currently unused; Open returns the wrapped sql.Open / Ping / schema
-// error directly. Defined here so the package's error surface is
-// discoverable in one place.)
-var ErrNotInitialised = errors.New("db: not initialised")

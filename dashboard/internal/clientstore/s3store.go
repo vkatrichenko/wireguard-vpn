@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -118,23 +119,35 @@ func (s *S3Store) Save(ctx context.Context, entries []Entry) error {
 //
 //	An error occurred (NoSuchKey) when calling the GetObject operation: The specified key does not exist.
 //
-// We match on the "NoSuchKey" error CODE (the stable, documented part of that
-// message) plus a couple of defensive fallbacks ("no such key", "404") so a
-// botocore wording tweak across CLI versions doesn't silently reclassify a
-// real 404 as a generic failure — which would then incorrectly refuse to
-// cold-seed a brand-new bucket. This only ever inspects stderr from a command
-// that actually RAN and exited non-zero (*exec.ExitError); a missing `aws`
-// binary produces a different error type (*exec.Error) and is correctly
-// treated as a generic failure, not a 404.
+// The "object absent" decision is keyed on the "NoSuchKey" error CODE (the
+// stable, documented part of that message) plus its English prose form ("no
+// such key") — those are the two spellings botocore has actually shipped. A
+// bare "404" substring is kept ONLY as a defensive fallback for a botocore
+// wording tweak we haven't seen yet: it still counts as object-absent (so a
+// real 404 doesn't get misclassified as a hard failure and refuse to
+// cold-seed a brand-new bucket), but since "404" alone is not a documented
+// error code — it could just as easily appear inside an unrelated message —
+// we log the raw stderr at WARN when ONLY this fallback matched, so an
+// operator can see in journald that an unexpected error shape hit the
+// fallback path rather than the real NoSuchKey code. This only ever inspects
+// stderr from a command that actually RAN and exited non-zero
+// (*exec.ExitError); a missing `aws` binary produces a different error type
+// (*exec.Error) and is correctly treated as a generic failure, not a 404.
 func isNoSuchKey(err error) bool {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
 		return false
 	}
 	msg := strings.ToLower(string(exitErr.Stderr))
-	return strings.Contains(msg, "nosuchkey") ||
-		strings.Contains(msg, "no such key") ||
-		strings.Contains(msg, "404")
+	if strings.Contains(msg, "nosuchkey") || strings.Contains(msg, "no such key") {
+		return true
+	}
+	if strings.Contains(msg, "404") {
+		slog.Warn("clientstore: get-object failed matched only the bare \"404\" fallback (no NoSuchKey code) — treating as object-absent",
+			"stderr", string(exitErr.Stderr))
+		return true
+	}
+	return false
 }
 
 // defaultRunner is the production runFunc: exec.CommandContext + .Output(),

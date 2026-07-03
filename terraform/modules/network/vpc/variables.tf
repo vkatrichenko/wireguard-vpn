@@ -19,16 +19,6 @@ variable "tags" {
   type        = map(string)
 }
 
-variable "project_name" {
-  description = "Name of the project"
-  type        = string
-}
-
-variable "ports" {
-  description = "List of ports to be used for security group ingress rules"
-  type        = list(number)
-}
-
 variable "enable_nat_gateway" {
   description = "Enable a single NAT gateway for private subnet outbound internet access"
   type        = bool

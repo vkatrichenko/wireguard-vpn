@@ -2,6 +2,12 @@
 {{ template "about-ec2" .EC2 }}
 {{ template "about-binary" .Binary }}
 {{ template "about-os" .OS }}
+{{/* Cloud-mode-only client-store health row (spec 020, Slice 1). ClientStore
+     is nil in local mode — there is no S3 bridge to report on, so the card
+     is omitted entirely rather than rendering a meaningless always-OK row. */}}
+{{ if .ClientStore }}
+{{ template "about-store" .ClientStore }}
+{{ end }}
 {{/* Fourth card: the existing Server endpoint card from Overview. Re-used
      here so the WireGuard public-key copy button is reachable from the
      About tab without a separate widget. Public IP shows in both this card

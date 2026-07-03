@@ -1,9 +1,3 @@
-variable "preconfigured_ssh_key_id" {
-  description = "A SSH public key ID to add to the VPN instance."
-  type        = string
-  default     = null
-}
-
 variable "project_name" {
   description = "Name of the project"
   type        = string
@@ -84,11 +78,6 @@ variable "env" {
   type        = string
 }
 
-variable "wg_server_private_key_param" {
-  description = "The SSM parameter containing the WG server private key."
-  type        = string
-}
-
 variable "ami_id" {
   description = "Optional explicit AMI override for the WG server. When set (non-null), it takes precedence over the cpu_architecture-derived AMI lookup. When null (default), the module resolves the latest Ubuntu 24.04 AMI for the selected cpu_architecture via the aws_ami data source."
   type        = string
@@ -128,13 +117,13 @@ variable "install_script_ref" {
 }
 
 variable "dashboard_webhook_url_param" {
-  description = "SSM parameter NAME holding the Slack-compatible alert webhook URL. Created out-of-band (like wg_server_private_key_param), not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_WEBHOOK_URL. The value is a secret and is never output. Empty string (default) disables the webhook seed — alerts.env is still written with the non-secret knobs, but no DASHBOARD_WEBHOOK_URL line, so the dashboard's alerting stays dormant until the operator creates the SSM param and sets this name."
+  description = "SSM parameter NAME holding the Slack-compatible alert webhook URL. Created out-of-band by the operator, not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_WEBHOOK_URL. The value is a secret and is never output. Empty string (default) disables the webhook seed — alerts.env is still written with the non-secret knobs, but no DASHBOARD_WEBHOOK_URL line, so the dashboard's alerting stays dormant until the operator creates the SSM param and sets this name."
   type        = string
   default     = ""
 }
 
 variable "dashboard_slack_bot_token_param" {
-  description = "SSM parameter NAME holding the Slack bot token used with chat.postMessage. Created out-of-band (like wg_server_private_key_param), not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_SLACK_BOT_TOKEN. The value is a secret and is never output. Empty string (default) disables the Slack-bot transport — no DASHBOARD_SLACK_BOT_TOKEN line is written. Pair with dashboard_slack_channel."
+  description = "SSM parameter NAME holding the Slack bot token used with chat.postMessage. Created out-of-band by the operator, not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_SLACK_BOT_TOKEN. The value is a secret and is never output. Empty string (default) disables the Slack-bot transport — no DASHBOARD_SLACK_BOT_TOKEN line is written. Pair with dashboard_slack_channel."
   type        = string
   default     = ""
 }
@@ -146,7 +135,7 @@ variable "dashboard_slack_channel" {
 }
 
 variable "dashboard_telegram_token_param" {
-  description = "SSM parameter NAME holding the Telegram bot token. Created out-of-band (like wg_server_private_key_param), not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_TELEGRAM_TOKEN. The value is a secret and is never output. Empty string (default) disables the Telegram transport — no DASHBOARD_TELEGRAM_TOKEN line is written. Pair with dashboard_telegram_chat_id."
+  description = "SSM parameter NAME holding the Telegram bot token. Created out-of-band by the operator, not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_TELEGRAM_TOKEN. The value is a secret and is never output. Empty string (default) disables the Telegram transport — no DASHBOARD_TELEGRAM_TOKEN line is written. Pair with dashboard_telegram_chat_id."
   type        = string
   default     = ""
 }
@@ -158,7 +147,7 @@ variable "dashboard_telegram_chat_id" {
 }
 
 variable "dashboard_discord_webhook_url_param" {
-  description = "SSM parameter NAME holding the Discord incoming-webhook URL. Created out-of-band (like wg_server_private_key_param), not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_DISCORD_WEBHOOK_URL. The value is a secret and is never output. Empty string (default) disables the Discord transport — no DASHBOARD_DISCORD_WEBHOOK_URL line is written."
+  description = "SSM parameter NAME holding the Discord incoming-webhook URL. Created out-of-band by the operator, not by Terraform; read at apply with `with_decryption = true` and seeded into /etc/wireguard-dashboard/alerts.env as DASHBOARD_DISCORD_WEBHOOK_URL. The value is a secret and is never output. Empty string (default) disables the Discord transport — no DASHBOARD_DISCORD_WEBHOOK_URL line is written."
   type        = string
   default     = ""
 }

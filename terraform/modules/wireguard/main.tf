@@ -14,14 +14,64 @@ resource "aws_s3_bucket" "health_check" {
   tags = var.tags
 }
 
+# Health-check bucket posture (spec 020 slice 5, C5) — mirrors the client_list
+# bucket in client_store.tf but UNCONDITIONAL: the health-check bucket always
+# exists (no cloud/local gating), so these carry no count/[0].
+resource "aws_s3_bucket_public_access_block" "health_check" {
+  bucket = aws_s3_bucket.health_check.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "health_check" {
+  bucket = aws_s3_bucket.health_check.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      # SSE-S3 (AES256): the bucket only holds empty <instance-id>.ready signal
+      # files — nothing sensitive — so S3-managed encryption is sufficient and
+      # avoids a KMS key + grants, matching the client_list posture.
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_versioning" "health_check" {
+  bucket = aws_s3_bucket.health_check.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
 resource "aws_launch_template" "wireguard" {
   name = "wireguard-${var.env}"
 
   image_id = local.effective_ami_id
-  key_name = var.preconfigured_ssh_key_id != null ? var.preconfigured_ssh_key_id : aws_key_pair.ssh[0].id
 
   iam_instance_profile {
-    name = aws_iam_instance_profile.wireguard_profile[0].name
+    name = aws_iam_instance_profile.wireguard_profile.name
+  }
+
+  # Require IMDSv2 (spec 020 slice 5, C2). The user-data wrapper already uses the
+  # IMDSv2 token flow, so enforcing http_tokens = "required" won't break boot.
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
+  # Encrypt the root EBS volume (spec 020 slice 5, C4). device_name must match the
+  # AMI's root device — see local.root_device_name for how it's resolved.
+  block_device_mappings {
+    device_name = local.root_device_name
+
+    ebs {
+      encrypted = true
+    }
   }
 
   network_interfaces {
@@ -52,7 +102,6 @@ resource "aws_instance" "wireguard" {
 
   lifecycle {
     create_before_destroy = true
-    ignore_changes        = [user_data, user_data_base64]
   }
 
   tags = {
