@@ -22,10 +22,6 @@ output "database_subnets" {
   value = var.create_database_subnets == true ? module.vpc.database_subnets : null
 }
 
-output "general_security_group_id" {
-  value = aws_security_group.this.id
-}
-
 output "private_route_table_ids" {
   value = module.vpc.private_route_table_ids
 }

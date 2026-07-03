@@ -16,7 +16,12 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "s3_encryption" {
   bucket = aws_s3_bucket.terraform_state.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      # SSE-KMS with the AWS-managed `aws/s3` key (spec 020 slice 5, C1): setting
+      # sse_algorithm = "aws:kms" WITHOUT kms_master_key_id selects the managed
+      # key — no custom CMK to own or pay for. This is an in-place bucket-config
+      # update; existing state objects keep their old encryption until the next
+      # state write re-encrypts them.
+      sse_algorithm = "aws:kms"
     }
   }
 }

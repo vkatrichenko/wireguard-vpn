@@ -102,3 +102,66 @@ func TestHandleIndex_OffAWS(t *testing.T) {
 		t.Errorf("Overview off-AWS surfaced an IMDS error; want clean card\n--- body ---\n%s", body)
 	}
 }
+
+// TestHandleGetPartialAbout_ClientStoreRow proves the cloud-mode-only
+// client-store health row (spec 020, Slice 1): absent entirely in local mode,
+// rendered as "OK" when clientsSvc.StoreReady() is true in cloud mode, and
+// "OFFLINE" when false.
+func TestHandleGetPartialAbout_ClientStoreRow(t *testing.T) {
+	systemdSvc := systemdRunnerActive(time.Now().Add(-time.Hour))
+	infoSvc := offAWSInfoSvc("192.0.2.60", "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK=")
+
+	t.Run("local mode: card absent", func(t *testing.T) {
+		handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local", nil)
+		if err != nil {
+			t.Fatalf("server.New: %v", err)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/partial/about", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), `id="about-store"`) {
+			t.Errorf("local mode unexpectedly rendered the client-store card:\n%s", rec.Body.String())
+		}
+	})
+
+	t.Run("cloud mode ready: OK", func(t *testing.T) {
+		handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "cloud", nil)
+		if err != nil {
+			t.Fatalf("server.New: %v", err)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/partial/about", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, `id="about-store"`) {
+			t.Fatalf("cloud mode missing the client-store card:\n%s", body)
+		}
+		if !strings.Contains(body, "OK") {
+			t.Errorf("cloud mode (ready) missing 'OK':\n%s", body)
+		}
+	})
+
+	t.Run("cloud mode offline: OFFLINE", func(t *testing.T) {
+		clientsSvc := emptyClientsSvc(t)
+		clientsSvc.SetStore(failingStore{})
+		_ = clientsSvc.ReconcileFromStore(context.Background(), nil)
+
+		handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), newTestDB(t), nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, clientsSvc, "cloud", nil)
+		if err != nil {
+			t.Fatalf("server.New: %v", err)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/partial/about", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "OFFLINE") {
+			t.Errorf("cloud mode (offline) missing 'OFFLINE':\n%s", body)
+		}
+	})
+}

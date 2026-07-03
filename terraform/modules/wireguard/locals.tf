@@ -59,6 +59,24 @@ locals {
   dashboard_discord_webhook_url = var.dashboard_discord_webhook_url_param != "" ? data.aws_ssm_parameter.dashboard_discord_webhook_url[0].value : ""
 }
 
+# Instance-owned server private-key SSM param (spec 020 slice 3). The param is
+# deliberately NOT a Terraform resource — declaring it would pull the secret
+# value into state on every refresh — so we keep only its NAME here and build its
+# ARN by hand for the IAM grant. Name matches the historical value the root used
+# to pass as wg_server_private_key_param, so the existing operator-created param
+# is adopted by the instance as-is (no import, no rotation).
+locals {
+  wg_server_private_key_param_name = "/config/${var.project_name}-${var.env}/default-private-key"
+
+  # SSM parameter ARN shape: arn:<partition>:ssm:<region>:<account>:parameter<name>.
+  # The resource segment is the literal "parameter" immediately followed by the
+  # parameter name, and because the name already starts with "/" it supplies the
+  # separator → "parameter/config/...". (Verified against the aws_ssm_parameter
+  # docs for provider 6.41.0.) aws_region.region is used instead of the deprecated
+  # .name attribute (v6 deprecation).
+  wg_server_private_key_arn = "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter${local.wg_server_private_key_param_name}"
+}
+
 locals {
   user_data = templatefile("${path.module}/templates/user-data.txt", {
     # Shared portable installer, fetched at boot from raw GitHub at a pinned ref
@@ -68,7 +86,13 @@ locals {
     github_repo        = var.github_repo
     install_script_ref = var.install_script_ref
 
-    wg_server_private_key  = data.aws_ssm_parameter.wg_server_private_key.value
+    # Param NAMES (not values) threaded to the user-data wrapper. The instance
+    # resolves/publishes the real key values at boot via these names (spec 020
+    # slice 3); Terraform never handles the key material. The wrapper references
+    # ${wg_server_private_key_param_name} / ${wg_server_public_key_param_name}.
+    wg_server_private_key_param_name = local.wg_server_private_key_param_name
+    wg_server_public_key_param_name  = aws_ssm_parameter.wg_server_public_key.name
+
     wg_server_net          = var.wg_server_net
     wg_server_port         = var.wg_server_port
     peers                  = join("\n", local.wg_client_data_json)
@@ -118,6 +142,16 @@ locals {
 
   # An explicit ami_id override wins; otherwise resolve from the arch-aware lookup.
   effective_ami_id = var.ami_id != null ? var.ami_id : data.aws_ami.ubuntu_2404[0].id
+
+  # Root EBS device name for the launch template's encryption mapping (spec 020
+  # slice 5, C4). When the AMI is resolved via the data-source lookup
+  # (var.ami_id == null) we use its ACTUAL root_device_name. When an explicit
+  # ami_id override is set the lookup is count-gated to zero, so the [0] index
+  # errors and try() falls back to Ubuntu Noble's root device "/dev/sda1" (stable
+  # across amd64 + arm64). Caveat: a non-Ubuntu override AMI whose root device is
+  # named differently would leave its root volume unencrypted — override users
+  # must verify their AMI's root device name and set it here if it differs.
+  root_device_name = try(data.aws_ami.ubuntu_2404[0].root_device_name, "/dev/sda1")
 
   # An explicit instance_type override wins; otherwise use the architecture default.
   effective_instance_type = var.instance_type != null ? var.instance_type : local.arch_config[var.cpu_architecture].default_instance_type

@@ -293,14 +293,6 @@ func main() {
 		}
 	}()
 
-	// Start the poller in the background. Run blocks until ctx is
-	// cancelled, then waits for both internal loops to drain — so by the
-	// time `<-ctx.Done()` fires below and we head into Shutdown, the
-	// poller is also winding down in parallel. The deferred metricsDB.Close
-	// runs after both the HTTP server and the poller have stopped writing.
-	pollerSvc := poller.New(metricsDB, procSvc, wgSvc, clientsfileSvc, systemdSvc, diskSvc, alertEvaluator, notifier, alertStatus)
-	go pollerSvc.Run(ctx)
-
 	// Runtime client management (spec 015). The DB is now the source of truth
 	// for peers; clients.json (clientsfileSvc) is demoted to the first-boot seed
 	// and the drift baseline. WG_SERVER_NET drives IP allocation — an empty or
@@ -309,14 +301,13 @@ func main() {
 	// restart never re-imports or clobbers runtime-added clients; a manifest
 	// read failure is non-fatal (start with an empty table rather than refuse to
 	// boot).
+	//
+	// Constructed BEFORE the poller below (rather than in its original
+	// post-poller spot) because poller.New's trailing StoreRechecker param
+	// (spec 020, Slice 1) needs clientsSvc — and, in cloud mode, clientManagementMode
+	// — to already exist. SetApplier/SetStore/Seed/Reconcile still run further
+	// down, unchanged.
 	clientsSvc := clients.NewService(metricsDB, getenv("WG_SERVER_NET", ""))
-
-	// Live-apply hook (spec 015, Slice 4). The applier stages a PEERS-ONLY
-	// fragment (no [Interface], no private key — the dashboard runs unprivileged
-	// and cannot read 0600-root wg0.conf) and invokes the sudo wg-sync helper to
-	// merge-and-syncconf. Injected before Seed/Reconcile so the first apply path
-	// uses the real applier, not the no-op default.
-	clientsSvc.SetApplier(wgsync.New())
 
 	// Spec 018: client-management mode. "local" (default) is spec 015's
 	// SQLite-only behaviour, no external store. "cloud" bridges the client
@@ -326,6 +317,33 @@ func main() {
 	// invalid value is logged and falls back to the default rather than
 	// silently doing something unexpected.
 	clientManagementMode := envMode("CLIENT_MANAGEMENT_MODE", "local")
+
+	// storeRecheck is the poller's cloud-mode client-store self-heal seam (spec
+	// 020, Slice 1 — see poller.StoreRechecker / Poller.ClientStore). Left as
+	// the interface's zero value (nil) in local mode — declaring it via `var`
+	// rather than assigning a typed-nil *clients.Service is deliberate: an
+	// interface holding a nil *clients.Service would be a NON-nil interface
+	// (the classic Go nil-interface gotcha), which would defeat
+	// runRetentionLoop's `p.ClientStore != nil` guard and panic on first call.
+	var storeRecheck poller.StoreRechecker
+	if clientManagementMode == "cloud" {
+		storeRecheck = clientsSvc
+	}
+
+	// Start the poller in the background. Run blocks until ctx is
+	// cancelled, then waits for both internal loops to drain — so by the
+	// time `<-ctx.Done()` fires below and we head into Shutdown, the
+	// poller is also winding down in parallel. The deferred metricsDB.Close
+	// runs after both the HTTP server and the poller have stopped writing.
+	pollerSvc := poller.New(metricsDB, procSvc, wgSvc, clientsfileSvc, systemdSvc, diskSvc, alertEvaluator, notifier, alertStatus, storeRecheck)
+	go pollerSvc.Run(ctx)
+
+	// Live-apply hook (spec 015, Slice 4). The applier stages a PEERS-ONLY
+	// fragment (no [Interface], no private key — the dashboard runs unprivileged
+	// and cannot read 0600-root wg0.conf) and invokes the sudo wg-sync helper to
+	// merge-and-syncconf. Injected before Seed/Reconcile so the first apply path
+	// uses the real applier, not the no-op default.
+	clientsSvc.SetApplier(wgsync.New())
 
 	// clientStore is the injectable seam behind the S3 bridge (Slice 4). In
 	// local mode it stays the default clientstore.NoopStore{} — SetStore below

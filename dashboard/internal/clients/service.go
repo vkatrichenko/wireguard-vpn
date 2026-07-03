@@ -484,10 +484,7 @@ func (s *Service) applyLocked(ctx context.Context) error {
 // a genuine no-op Save, no behavioural change from spec 015.
 func (s *Service) saveStoreLocked(ctx context.Context) error {
 	if !s.storeReady {
-		if _, err := s.store.Load(ctx); err == nil || errors.Is(err, clientstore.ErrNotFound) {
-			s.storeReady = true
-			slog.Info("clients: client store reachable again; resuming S3 write-through")
-		} else {
+		if err := s.attemptStoreHealLocked(ctx); err != nil {
 			slog.Warn("clients: client store offline; change applied locally but NOT persisted to S3", "err", err)
 			return nil
 		}
@@ -505,6 +502,57 @@ func (s *Service) saveStoreLocked(ctx context.Context) error {
 		slog.Warn("clients: client store save failed; change applied locally but NOT persisted to S3", "err", err)
 	}
 	return nil
+}
+
+// attemptStoreHealLocked is the self-heal probe shared by saveStoreLocked's
+// lazy re-check and RecheckStore's poller-driven recheck (spec 020, Slice 1):
+// a fresh store.Load — success OR clientstore.ErrNotFound both mean S3 itself
+// is reachable again (ErrNotFound just means the object hasn't been created
+// yet, which a subsequent Save fixes) — flips storeReady true and logs the
+// recovery. Callers must already hold s.mu; this never locks it itself so it
+// can be called from a path that already does (saveStoreLocked) without
+// deadlocking, matching setStoreReady's own doc note on that hazard.
+//
+// Returns nil when storeReady is now true; otherwise the Load error, for the
+// caller to log/handle as it sees fit (saveStoreLocked logs and continues
+// best-effort; RecheckStore just propagates it).
+func (s *Service) attemptStoreHealLocked(ctx context.Context) error {
+	_, err := s.store.Load(ctx)
+	if err == nil || errors.Is(err, clientstore.ErrNotFound) {
+		s.storeReady = true
+		slog.Info("clients: client store reachable again; resuming S3 write-through")
+		return nil
+	}
+	return err
+}
+
+// RecheckStore is a Load-only probe the poller's hourly retention tick calls
+// (spec 020, Slice 1) so a latched-offline store self-heals even on a box that
+// goes a long stretch without a peer Add/Update/Delete. Before this existed,
+// saveStoreLocked's lazy re-check (see attemptStoreHealLocked) was the ONLY
+// thing that ever re-tested storeReady after a hard ReconcileFromStore boot
+// error — a cloud-mode dashboard that nobody touches for hours stayed latched
+// storeReady=false long after the underlying S3 problem (e.g. a transient
+// permissions issue, or `aws` briefly missing from $PATH) had resolved
+// itself, silently skipping every write-through in the meantime.
+//
+// No-op (no I/O, returns nil) when the store is already ready, or when the
+// store is the local-mode clientstore.NoopStore — a NoopStore's Load always
+// reports ErrNotFound and never carries a real "is S3 reachable" signal, so
+// probing it would be a false positive if storeReady somehow got set false
+// against it (never happens in production, but guarding here matches
+// saveStoreLocked's implicit assumption that the self-heal branch is only
+// ever meaningful for a real Store).
+func (s *Service) RecheckStore(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.storeReady {
+		return nil
+	}
+	if _, ok := s.store.(clientstore.NoopStore); ok {
+		return nil
+	}
+	return s.attemptStoreHealLocked(ctx)
 }
 
 // ReconcileFromStore is the cloud-mode boot path (spec 018, Slice 4, revised

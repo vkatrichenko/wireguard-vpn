@@ -10,6 +10,7 @@ import (
 	"time"
 
 	dashboard "wireguard-dashboard"
+	"wireguard-dashboard/internal/clients"
 	"wireguard-dashboard/internal/db"
 	"wireguard-dashboard/internal/server"
 	"wireguard-dashboard/internal/serverinfo"
@@ -53,18 +54,32 @@ const (
 	histFakeKey = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK="
 )
 
-// newHistoryServer builds a handler wired with a one-entry manifest (histName /
-// histPubKey) and the supplied DB, so each test controls exactly which
-// handshake_events exist. The wg/proc/disk/etc. seams use the package's shared
-// fakes — this suite only exercises the manifest+DB path.
+// newHistoryServer builds a handler wired with a one-entry runtime clients DB
+// row (histName / histPubKey) on the supplied DB, so each test controls
+// exactly which handshake_events exist. The clientsfile manifest is left
+// EMPTY (fakeClientsfileSvc) — both handleGetPartialClientDetail and
+// handleGetClientHistory resolve against the DB, not clients.json (spec 020
+// Slice 1), so an empty manifest here proves the lookup isn't secretly still
+// falling back to it. The wg/proc/disk/etc. seams use the package's shared
+// fakes — this suite only exercises the DB-resolution + history path.
 func newHistoryServer(t *testing.T, testDB *db.DB) http.Handler {
 	t.Helper()
 	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
+
+	clientsSvc := clients.NewService(testDB, "172.16.15.1/24")
+	now := time.Now().UTC()
+	if err := testDB.InsertClient(context.Background(), db.Client{
+		Name: histName, Address: histAddr, PublicKey: histPubKey,
+		Enabled: true, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed client: %v", err)
+	}
+
 	handler, err := server.New(
 		dashboard.WebFS(),
 		fakeServerinfoSvcHistory(),
 		&systemdSvc,
-		seededClientsfileSvc(histName, histAddr, histPubKey),
+		fakeClientsfileSvc(),
 		seededWgSvc(histPubKey, histEndpt, histAddr, 10*time.Second, 1, 2),
 		fakeProcSvc(),
 		testDB,
@@ -75,7 +90,7 @@ func newHistoryServer(t *testing.T, testDB *db.DB) http.Handler {
 		nil,
 		nil,
 		nil,
-		emptyClientsSvc(t), "local", nil)
+		clientsSvc, "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

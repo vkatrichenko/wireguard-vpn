@@ -292,7 +292,7 @@ func New(
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/health", handleHealth)
+	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/server", s.handleGetServer)
 	mux.HandleFunc("GET /api/service", s.handleGetService)
 	mux.HandleFunc("GET /api/clients", s.handleGetClients)
@@ -327,11 +327,23 @@ func New(
 
 // handleHealth serves the unauthenticated liveness probe consumed by the
 // systemd unit and (later) by the load-balancer-less VPN client.
-func handleHealth(w http.ResponseWriter, _ *http.Request) {
+//
+// client_store_ready (spec 020, Slice 1) is included ONLY in cloud mode —
+// local mode has no S3 bridge, so the field would be a meaningless always-true
+// noise value there and is omitted entirely rather than emitted as a fake
+// signal. In cloud mode it mirrors clientsSvc.StoreReady() live: false means
+// the last ReconcileFromStore/RecheckStore attempt found the client store
+// unreachable and write-through is currently paused (see
+// internal/clients.Service.StoreReady's doc).
+func (s *server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	// Body is hand-rolled rather than encoding/json-marshalled to keep the
-	// response byte-stable; this endpoint is on the hot path for monitoring.
-	_, _ = w.Write([]byte(`{"ok":true}`))
+	if s.clientManagementMode != "cloud" {
+		// Body is hand-rolled rather than encoding/json-marshalled to keep the
+		// response byte-stable; this endpoint is on the hot path for monitoring.
+		_, _ = w.Write([]byte(`{"ok":true}`))
+		return
+	}
+	_, _ = fmt.Fprintf(w, `{"ok":true,"client_store_ready":%t}`, s.clientsSvc.StoreReady())
 }
 
 // handleIndex renders the dashboard page with the server-info, service-status

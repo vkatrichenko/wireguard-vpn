@@ -587,6 +587,96 @@ func TestUpdate_NoteOnly_DoesNotWriteThroughToStore(t *testing.T) {
 	}
 }
 
+// --- RecheckStore: poller-driven self-heal (spec 020, Slice 1) --------------
+//
+// RecheckStore is the hourly-tick counterpart to saveStoreLocked's lazy
+// re-check: it lets a latched storeReady=false self-heal even on a box that
+// goes a long stretch without a peer Add/Update/Delete to trigger the
+// mutation-path recheck.
+
+func TestRecheckStore_Latched_RecoversOnLoadSuccess(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+	store := &fakeStore{loadEntries: []clientstore.Entry{{Name: "existing", Address: "172.16.15.5/32", PublicKey: "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG="}}}
+	svc.SetStore(store)
+	svc.storeReady = false // simulate a boot that hit a hard S3 error
+
+	if err := svc.RecheckStore(ctx); err != nil {
+		t.Fatalf("RecheckStore: %v, want nil (Load succeeded)", err)
+	}
+	if !svc.StoreReady() {
+		t.Error("StoreReady() = false, want true after a successful recheck Load")
+	}
+	if store.calls() != 0 {
+		t.Errorf("store.saveCalls = %d, want 0 (RecheckStore is Load-only, it must never Save)", store.calls())
+	}
+}
+
+func TestRecheckStore_Latched_RecoversOnErrNotFound(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+	store := &fakeStore{loadErr: clientstore.ErrNotFound}
+	svc.SetStore(store)
+	svc.storeReady = false
+
+	if err := svc.RecheckStore(ctx); err != nil {
+		t.Fatalf("RecheckStore: %v, want nil — ErrNotFound means S3 is reachable, just not seeded yet", err)
+	}
+	if !svc.StoreReady() {
+		t.Error("StoreReady() = false, want true after RecheckStore saw ErrNotFound")
+	}
+}
+
+func TestRecheckStore_Latched_StillOfflinePropagatesError(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+	wantErr := errors.New("s3: connection reset")
+	store := &fakeStore{loadErr: wantErr}
+	svc.SetStore(store)
+	svc.storeReady = false
+
+	err := svc.RecheckStore(ctx)
+	if !errors.Is(err, wantErr) {
+		t.Errorf("RecheckStore err = %v, want it to wrap %v", err, wantErr)
+	}
+	if svc.StoreReady() {
+		t.Error("StoreReady() = true, want false — the recheck Load still failed")
+	}
+}
+
+func TestRecheckStore_AlreadyReady_NoOp(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+	// A store whose Load would fail if ever called — proves RecheckStore
+	// short-circuits on storeReady==true without touching the store at all.
+	store := &fakeStore{loadErr: errors.New("must not be called")}
+	svc.SetStore(store)
+	// storeReady defaults to true.
+
+	if err := svc.RecheckStore(ctx); err != nil {
+		t.Fatalf("RecheckStore: %v, want nil (already ready)", err)
+	}
+	if store.loadCalls != 0 {
+		t.Errorf("store.loadCalls = %d, want 0 — an already-ready store must not be probed", store.loadCalls)
+	}
+}
+
+func TestRecheckStore_NoopStore_NoOp(t *testing.T) {
+	svc, _ := newTestService(t)
+	ctx := context.Background()
+	// No SetStore call — svc.store is the default clientstore.NoopStore{}.
+	// Force storeReady false to prove the NoopStore guard (not the
+	// already-ready guard) is what makes this a no-op.
+	svc.storeReady = false
+
+	if err := svc.RecheckStore(ctx); err != nil {
+		t.Fatalf("RecheckStore: %v, want nil (NoopStore is never a real self-heal target)", err)
+	}
+	if svc.StoreReady() {
+		t.Error("StoreReady() = true, want false — RecheckStore must no-op against a NoopStore, not flip it true")
+	}
+}
+
 // --- default (unwired) Service behaves exactly like pre-Slice-4 -------------
 
 func TestService_WithoutSetStore_MutationsAreNoOps(t *testing.T) {

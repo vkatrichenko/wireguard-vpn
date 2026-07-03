@@ -1,6 +1,11 @@
-data "aws_ssm_parameter" "wg_server_private_key" {
-  name = var.wg_server_private_key_param
-}
+# Account + region context used ONLY to construct the instance-owned server
+# private-key SSM ARN for the IAM grant (spec 020 slice 3). That param is
+# deliberately NOT a Terraform resource (keeps the secret out of state), so its
+# ARN has no resource attribute to reference — we build it from these plus the
+# param name in locals (see local.wg_server_private_key_arn).
+data "aws_caller_identity" "current" {}
+
+data "aws_region" "current" {}
 
 # Ubuntu 24.04 (Noble) AMI lookup, resolved from cpu_architecture. Only queried
 # when no explicit ami_id override is set — the override short-circuits the lookup.
@@ -32,7 +37,7 @@ data "aws_ami" "ubuntu_2404" {
 }
 
 # Alert webhook URL — read only when the operator has wired a parameter name.
-# Same posture as wg_server_private_key: Terraform reads SSM at apply with the
+# Posture: Terraform reads the operator-created SSM param at apply with the
 # operator's creds (no instance IAM grant) and seeds the value into user-data.
 # .value is always sensitive, so it never appears in plan output.
 data "aws_ssm_parameter" "dashboard_webhook_url" {

@@ -1,0 +1,17 @@
+{{ define "about-store" }}
+<section id="about-store" class="card">
+  <h2>Client store</h2>
+  {{/* Cloud-mode-only health signal (spec 020, Slice 1): whether the S3
+       client-list backup is currently trusted for write-through. This card is
+       only ever rendered when the tab data's ClientStore is non-nil (cloud
+       mode) — see handleGetPartialAbout — so there is no "local mode" branch
+       to render here. */}}
+  {{ if .Ready }}
+  <p class="state-pill state-active">OK</p>
+  <p class="meta">S3 backup is reachable; peer changes are written through.</p>
+  {{ else }}
+  <p class="state-pill state-failed">OFFLINE</p>
+  <p class="meta">S3 backup is unreachable — peer changes still apply locally but are NOT persisted. Resolves automatically once the store recovers (checked hourly, or on the next peer edit).</p>
+  {{ end }}
+</section>
+{{ end }}

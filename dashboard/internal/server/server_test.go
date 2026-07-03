@@ -1281,6 +1281,10 @@ func TestHandleGetPartialClientDetail_404OnUnknown(t *testing.T) {
 // a non-empty input — we don't pin the rendered byte value, only that the
 // p95 line is present (Slice 5 sub-task 3 will extract p95 into its own
 // package and pin the math there).
+//
+// The pubkey resolves from the runtime clients DB (spec 020 Slice 1) rather
+// than clients.json — fakeClientsfileSvc() below returns an empty manifest to
+// prove the lookup isn't secretly still falling back to it.
 func TestHandleGetPartialClientDetail_RendersFragment(t *testing.T) {
 	const peerPublicKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
@@ -1292,8 +1296,6 @@ func TestHandleGetPartialClientDetail_RendersFragment(t *testing.T) {
 	}
 	systemdSvc := systemdRunnerActive(time.Now().Add(-2 * time.Hour))
 
-	clientsSvc := seededClientsfileSvc("alice", "172.16.15.5/32", peerPublicKey)
-
 	testDB := newTestDB(t)
 	t0 := time.Now().Add(-2 * time.Minute)
 	if err := testDB.InsertClientTraffic(context.Background(), []db.ClientTraffic{
@@ -1302,8 +1304,16 @@ func TestHandleGetPartialClientDetail_RendersFragment(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed client_traffic: %v", err)
 	}
+	clientsSvc := clients.NewService(testDB, "172.16.15.1/24")
+	now := time.Now().UTC()
+	if err := testDB.InsertClient(context.Background(), db.Client{
+		Name: "alice", Address: "172.16.15.5/32", PublicKey: peerPublicKey,
+		Enabled: true, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed client: %v", err)
+	}
 
-	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, clientsSvc, fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, emptyClientsSvc(t), "local", nil)
+	handler, err := server.New(dashboard.WebFS(), infoSvc, &systemdSvc, fakeClientsfileSvc(), fakeWgSvc(), fakeProcSvc(), testDB, nil, fakeDiskSvc(), fakeProcessesSvc(), fakeNetdevSvc(), nil, nil, nil, clientsSvc, "local", nil)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
