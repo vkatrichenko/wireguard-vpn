@@ -113,6 +113,14 @@ _GitOps peer management — declare the peer set in Terraform and reconcile it l
 
 ---
 
+### Phase 11
+
+_UI-first peer management — collapse to a single authority and make first-peer onboarding shell-native._
+
+- [x] **UI-First Client Management (spec 019):** Supersede spec-018's declarative-`clients_config` + S3-bridge with a single UI-authoritative model. Remove `clients_config` and the warn-only S3 drift `check` entirely — the dashboard UI (and an equivalent on-box `wg-peer` script) is the **only** peer-management authority, so peer add/edit/remove never replaces the instance nor shows as `terraform plan` drift. Terraform seeds exactly one `admin_peer` (name + **public** key, nullable) for anti-lockout, only when the store is empty. `local` = SQLite-only; `cloud` = SQLite + S3 as a **pure durable backup** (write-through + boot restore, no TF reads, no drift), keeping the PR #53/#54 hardening (empty ≠ authoritative, `storeReady` guard, best-effort write-through, self-heal). The installer always deploys the dashboard with WireGuard (WG-only path removed); the spec-015/016 drift badge + HCL/tfvars export are gone. New optional `scripts/wg-peer` CLI (`add`/`remove`/`update`) drives the local dashboard API (script ≡ UI), with server-side ephemeral keygen and a `--show-config` flag for first-peer onboarding on a manual VPS. _(Deployed & operator-verified live 2026-07-03, dashboard v0.0.16. One cold-seed bug found & fixed during deploy: the dashboard now creates `clients.json` itself, so a first-boot `get-object` on the missing key returned 403 (not 404) without `s3:ListBucket`, latching `storeReady=false` and silently disabling the backup — fixed by granting `s3:ListBucket` on the bucket.)_
+
+---
+
 ### Future / Under Consideration
 
 _Not yet specified; captured so the direction isn't lost._

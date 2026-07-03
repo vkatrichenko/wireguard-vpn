@@ -25,11 +25,11 @@ data "aws_iam_policy_document" "wireguard_policy_doc" {
     resources = ["${aws_s3_bucket.health_check.arn}/*"]
   }
 
-  # S3 client-list backup (spec 019). CLOUD-ONLY: the statement is emitted only
+  # S3 client-list backup (spec 019). CLOUD-ONLY: the statements are emitted only
   # when the store is enabled (cloud mode) — in local mode there is no bucket and
-  # no grant. Least-privilege: read + write the SINGLE clients.json object only —
-  # no ListBucket, no bucket-level or wildcard grant. The [0] index is safe here
-  # because the dynamic block iterates only when the bucket exists.
+  # no grant. Least-privilege: read + write the SINGLE clients.json object. The
+  # [0] index is safe here because the dynamic blocks iterate only when the
+  # bucket exists.
   dynamic "statement" {
     for_each = local.client_store_enabled ? [1] : []
 
@@ -39,6 +39,27 @@ data "aws_iam_policy_document" "wireguard_policy_doc" {
         "s3:PutObject",
       ]
       resources = ["${aws_s3_bucket.client_list[0].arn}/clients.json"]
+    }
+  }
+
+  # s3:ListBucket is REQUIRED, not optional, even though the dashboard only ever
+  # touches one key. Since spec 019 the dashboard (not Terraform) creates
+  # clients.json — so on a fresh box the very first `aws s3api get-object` hits a
+  # key that does NOT exist yet. S3 only returns 404 NoSuchKey for a missing
+  # object when the caller holds s3:ListBucket; WITHOUT it, S3 returns 403
+  # AccessDenied instead (it refuses to confirm or deny the key's existence).
+  # The dashboard's clientstore classifies a 403 as a hard error (not "absent"),
+  # latches storeReady=false, and then skips every write-through — so clients.json
+  # is never created and the backup silently never works. Granting ListBucket on
+  # the bucket makes the missing-object read return a proper 404, which the
+  # cold-seed path handles by writing the object. Scoped to this single dedicated
+  # bucket (it holds only clients.json), so listing leaks nothing meaningful.
+  dynamic "statement" {
+    for_each = local.client_store_enabled ? [1] : []
+
+    content {
+      actions   = ["s3:ListBucket"]
+      resources = [aws_s3_bucket.client_list[0].arn]
     }
   }
 

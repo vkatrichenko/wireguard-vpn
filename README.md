@@ -40,9 +40,10 @@ It also ships something most guides don't: a **lightweight observability dashboa
 
 **Live client management**
 
-- 👥 **Manage peers from the dashboard** — add / remove / edit / enable-disable clients at runtime (paste a public key; tunnel IP auto-assigned), applied instantly with `wg syncconf` — **no instance replacement, no downtime, no dropped tunnels**.
-- 🌱 **Terraform as a seed** — `clients_config` seeds the client list on first boot; day-to-day changes happen in the UI. An **export** (HCL / tfvars) + a **drift badge** let you reconcile back to git when you choose.
-- ⬇️ **Client config download** — grab a ready-to-use peer config (full or split tunnel) for any client. The server **never holds client private keys**.
+- 👥 **The dashboard is the single source of truth for peers** — add / remove / edit / enable-disable clients at runtime (paste a public key; tunnel IP auto-assigned), applied instantly with `wg syncconf` — **no instance replacement, no downtime, no dropped tunnels**. Terraform doesn't manage the peer list; it just seeds **one admin peer** for first-connect, so editing peers never churns the instance and never shows up as `terraform plan` drift.
+- 🖥️ **Add clients from the server shell** — an optional on-box **`wg-peer`** CLI (`add` / `remove` / `update`) drives the same dashboard API as the UI; `wg-peer add <name> --show-config` generates a keypair and prints a ready-to-use client config, perfect for onboarding the first peer on a fresh VPS.
+- 💾 **Durable in the cloud, simple locally** — `local` mode keeps peers in on-box SQLite; `cloud` mode additionally mirrors them to a **versioned S3 backup** (write-through on every change, restore on boot) so a rebuilt instance keeps its peers.
+- ⬇️ **Client config download** — grab a ready-to-use peer config (full or split tunnel) for any client. The server **never holds client private keys** (except the `wg-peer --show-config` keygen, which prints once and discards).
 
 **Observability & alerting (Go, single static binary)**
 
@@ -66,6 +67,7 @@ It also ships something most guides don't: a **lightweight observability dashboa
                     │     │     (bound to the tunnel IP — reachable ONLY over the VPN)     │
                     │     └─ IAM role: read server key from SSM (+ SSM Session Manager)    │
                     │  S3: Terraform remote state (native locking)                         │
+                    │  S3: client-list backup (clients.json) — cloud mode only             │
                     └─────────────────────────────────────────────────────────────────────┘
 
    …or the same WireGuard + dashboard on any plain Ubuntu VPS via `scripts/install.sh`.
@@ -80,16 +82,18 @@ It also ships something most guides don't: a **lightweight observability dashboa
 
 ```
 .
-├── scripts/install.sh       # Portable WireGuard + dashboard installer (Ubuntu; the source of truth)
+├── scripts/
+│   ├── install.sh           # Portable WireGuard + dashboard installer (Ubuntu; the source of truth)
+│   └── wg-peer              # On-box CLI to add/remove/update a peer via the local dashboard API
 ├── terraform/
 │   ├── dev/                 # The deployable root module (the environment you apply)
 │   │   ├── backend/         #   one-time bootstrap: the S3 state bucket
 │   │   ├── locals.tf        #   environment config (region, name, CIDR, tags)
-│   │   ├── main.tf          #   composes the network + wireguard modules; client seed list
+│   │   ├── main.tf          #   composes the network + wireguard modules; admin_peer + mode
 │   │   └── …
 │   └── modules/
 │       ├── network/vpc/     # VPC, subnets, routing, default SG
-│       └── wireguard/       # EC2 + IAM + SG + SSM key + cloud-init wrapper (fetches install.sh)
+│       └── wireguard/       # EC2 + IAM + SG + SSM key + S3 client-list backup + cloud-init wrapper
 ├── dashboard/               # The Go observability + client-management dashboard
 │   ├── cmd/wireguard-dashboard/
 │   ├── internal/            # alerts, clients, db, geoip, history, poller, server, serverinfo, wgsync, …
@@ -105,7 +109,7 @@ It also ships something most guides don't: a **lightweight observability dashboa
 - **WireGuard tools** (`wg`, `wg-quick`) on your client machine.
 - **For the AWS path:** an AWS account + credentials (exported `AWS_PROFILE`); **[Terraform](https://developer.hashicorp.com/terraform/install) `1.14.8`** (exact — versions are pinned); a server private key in **SSM** (created out-of-band, below).
 - **For the standalone path:** a plain **Ubuntu** VPS with a public IP, root/sudo, and **inbound UDP 51820** open in the provider firewall.
-- For the dashboard: a **public GitHub Release** that publishes the `wireguard-dashboard-<arch>` asset (the bundled CI does this), pinned via a release tag. Leave it unset to install WireGuard only.
+- For the dashboard: a **public GitHub Release** that publishes the `wireguard-dashboard-<arch>` asset (the bundled CI does this), pinned via a release tag. **The dashboard is always installed** alongside WireGuard (the release tag is required) — it's how you manage peers.
 
 ---
 
@@ -121,17 +125,26 @@ export AWS_PROFILE=your-profile   # all terraform/aws commands assume this is se
 
 ```hcl
 # terraform/dev/main.tf
-# clients_config SEEDS the client list on first boot; after that, manage clients
-# live from the dashboard (see "Manage clients" below). Leave it empty to start
-# with zero peers and add everyone from the UI.
-clients_config = [
-  { name = "laptop", address = "172.16.15.2/32", public_key = "<peer-public-key>" },
-]
+# admin_peer seeds exactly ONE bootstrap peer so you can connect and open the
+# dashboard on a fresh deploy (anti-lockout). It's seeded only while the store is
+# empty; after that it's an ordinary, UI-editable peer. Every OTHER peer is added
+# from the dashboard (or the wg-peer script) — Terraform does not manage the list.
+# Set it to null to seed no peer and add everyone from the UI.
+admin_peer = {
+  name       = "laptop"
+  public_key = "<peer-public-key>"   # tunnel IP is auto-assigned (172.16.15.2/32)
+}
 
-dashboard_release_tag = "v0.0.11"                  # pin the dashboard version ("" disables it)
-github_repo           = "vkatrichenko/wireguard-vpn"  # public repo for install.sh + the release binary
-# cpu_architecture    = "arm64"                    # default; set "x86_64" for Intel/AMD
+client_management_mode = "cloud"                   # "cloud" = SQLite + S3 backup; "local" = SQLite only
+dashboard_release_tag  = "v0.0.16"                 # pin the dashboard version (required)
+github_repo            = "vkatrichenko/wireguard-vpn"  # public repo for install.sh + the release binary
+# cpu_architecture     = "arm64"                   # default; set "x86_64" for Intel/AMD
 ```
+
+**Pick a client-management mode** (details in [Client storage: `local` vs `cloud`](#client-storage-local-vs-cloud)):
+
+- **`cloud`** (recommended on AWS) — peers live in on-box SQLite **and** a versioned S3 backup, so a rebuilt/replaced instance restores its peer set. Terraform provisions the bucket + least-privilege IAM automatically; it never reads or reconciles the list (no drift).
+- **`local`** — peers live only in on-box SQLite. Simplest; a full instance rebuild starts from just the `admin_peer` seed.
 
 Generate a peer keypair off-host and paste the **public** key above (keep the private key on the client):
 
@@ -181,29 +194,37 @@ wg genkey | tee privatekey | wg pubkey > publickey
 cat publickey      # you'll paste this into the dashboard in step 5
 ```
 
-**3. Download and run the installer (on the VPS).** With the dashboard:
+**3. Download and run the installer (on the VPS).** The dashboard is always installed alongside WireGuard, so the release tag + repo are required:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vkatrichenko/wireguard-vpn/main/scripts/install.sh -o install.sh
-sudo DASHBOARD_RELEASE_TAG="v0.0.11" \
+sudo DASHBOARD_RELEASE_TAG="v0.0.16" \
      DASHBOARD_RELEASE_REPO="vkatrichenko/wireguard-vpn" \
      bash install.sh
 ```
 
-For a **WireGuard-only** box, omit the two `DASHBOARD_*` vars: `sudo bash install.sh`. Useful env vars: `WG_SERVER_NET` (default `172.16.15.1/24`), `WG_SERVER_PORT` (`51820`), `WG_CLIENT_DNS` (`1.1.1.1`), `WG_PUBLIC_ENDPOINT` (your VPS public IP, to skip auto-discovery). The installer prints the **server public key** and an **example client config** when it finishes.
+This installs in **`local` mode** by default (peers in on-box SQLite — the natural fit for a standalone VPS) and also installs the **`wg-peer`** helper. Useful env vars: `WG_SERVER_NET` (default `172.16.15.1/24`), `WG_SERVER_PORT` (`51820`), `WG_CLIENT_DNS` (`1.1.1.1`), `WG_PUBLIC_ENDPOINT` (your VPS public IP, to skip auto-discovery). To use `cloud` mode on a VPS (S3 backup), also pass `CLIENT_MANAGEMENT_MODE=cloud CLIENT_STORE_S3_BUCKET=… CLIENT_STORE_S3_KEY=clients.json` with AWS credentials available to the host. The installer prints the **server public key** and an **example client config** when it finishes.
 
 > **You don't pass a server key.** On a standalone VPS the installer **generates the server's WireGuard private key automatically** (`wg genkey`) on first run and persists it to `/etc/wireguard/server.key` (`0600`); every later re-run reuses that same key, so the server identity stays stable. Pass `WG_SERVER_PRIVATE_KEY` only if you want to supply a specific key (e.g. restoring from a backup) — and once chosen, **don't change it on re-runs**, or you'll invalidate every existing client config. _(This differs from the AWS path, where the server key comes from the SSM parameter you create in [Option A, step 2](#install--option-a-aws-terraform).)_
 
-**4. Reach the dashboard to add the first client.** The dashboard is VPN-only, so before you're a peer, tunnel to it over SSH:
+**4. Add your first client.** The dashboard is VPN-only, so before you're a peer you have two options:
 
-```bash
-ssh -L 8080:172.16.15.1:8080 youruser@<vps-public-ip>
-# then open http://localhost:8080 in your browser
-```
+- **Simplest — the `wg-peer` script (no SSH tunnel):** on the VPS, generate a peer and print its config in one step:
 
-**5. Add your client** in the Clients tab: paste the **public key** from step 2 and a name. The tunnel IP auto-assigns (e.g. `172.16.15.2/32`).
+  ```bash
+  wg-peer add laptop --show-config       # generates a keypair, prints the full client config
+  ```
 
-**6. Build your client config and connect** (see [Connect a client](#connect-a-client)). Once the tunnel is up you're a peer — from then on, reach the dashboard **directly at http://172.16.15.1:8080** and add every future client from the UI (no SSH tunnel needed).
+  Copy the printed config to your device as `wg0.conf` and bring it up (step 5). This is the whole point of `wg-peer` — first-peer onboarding from the shell. (Bring-your-own key instead: `wg-peer add laptop --pubkey "$(cat publickey)"`.)
+
+- **Or the dashboard UI over an SSH tunnel:**
+
+  ```bash
+  ssh -L 8080:172.16.15.1:8080 youruser@<vps-public-ip>
+  # open http://localhost:8080 → Clients tab → paste the public key from step 2 + a name
+  ```
+
+**5. Connect** (see [Connect a client](#connect-a-client)). Once the tunnel is up you're a peer — from then on, reach the dashboard **directly at http://172.16.15.1:8080** and manage every future client from the UI or `wg-peer` (no SSH tunnel needed).
 
 ---
 
@@ -235,11 +256,40 @@ Tip: the dashboard's **Config → Full / Split** download fills in everything ex
 
 ## Manage clients
 
-After first boot, the **dashboard is the day-to-day surface** for peers (its on-box SQLite DB is the source of truth):
+The **dashboard is the sole source of truth** for peers (its on-box SQLite DB), so peers are managed only through the UI or the `wg-peer` script — never through Terraform. Adding, editing, or removing a peer applies live via `wg syncconf` with **no instance replacement and no `terraform plan` drift**. Terraform seeds only the one `admin_peer` (and only while the store is empty).
 
-- **Add / edit / remove / enable-disable** from the Clients tab — applied live via `wg syncconf`, no downtime, other tunnels untouched.
-- A **drift badge** flags clients that exist on the box but aren't in your Terraform seed; **Export (HCL / tfvars)** gives you a paste-ready block to reconcile `clients_config` in git so a rebuild keeps them.
-- The server never sees a client private key — you always paste a public key.
+**From the dashboard UI (Clients tab):** add / edit / remove / enable-disable — paste a public key and a name; the tunnel IP auto-assigns. Applied instantly, other tunnels untouched.
+
+**From the server shell (`wg-peer` script):** an on-box CLI that drives the *same* dashboard API as the UI (so they never diverge). Run it on the VPN host (directly, or via `ssh youruser@<host> 'wg-peer …'`, or `aws ssm start-session` on EC2):
+
+```bash
+# Add a peer, server-generate its keypair, and print a ready-to-use client config.
+# The private key is shown ONCE and never written to disk/SQLite/S3 — copy it now.
+wg-peer add alice --show-config
+
+# Add a peer with your OWN public key (server never sees the private key):
+wg-peer add bob --pubkey "$(cat publickey)"
+
+# Rename a peer or rotate its key:
+wg-peer update alice --name alice-laptop
+wg-peer update alice --pubkey "<new-public-key>"
+
+# Remove a peer:
+wg-peer remove bob
+```
+
+`wg-peer` needs the dashboard running (it always is) and reaches it at `172.16.15.1:8080` by default (override with `WG_PEER_API_ADDR`). The server never sees a client private key — the only exception is the `--show-config` keygen, which prints the private key once for copy-paste and then discards it.
+
+### Client storage: `local` vs `cloud`
+
+`client_management_mode` (AWS: `main.tf`; VPS: `CLIENT_MANAGEMENT_MODE`) selects where the UI-managed peer list is stored:
+
+| Mode | Storage | Survives instance rebuild? | Notes |
+|---|---|---|---|
+| **`local`** | On-box SQLite only | No — reseeds from `admin_peer` | Default for a standalone VPS; no AWS needed. |
+| **`cloud`** | SQLite **+ versioned S3 backup** | **Yes** — restored from S3 on boot | Every change write-throughs to `s3://…/clients.json`; Terraform provisions the bucket + least-privilege IAM but never reads it (no drift). |
+
+> **Cloud-mode IAM note:** the instance role needs `s3:GetObject` + `s3:PutObject` on `clients.json` **and `s3:ListBucket` on the bucket**. `ListBucket` is required so the dashboard's first-boot read of the not-yet-created object returns a clean `404` (which triggers the cold-seed) instead of a `403` that silently disables the backup. The Terraform module wires all three automatically in `cloud` mode.
 
 ---
 
@@ -249,7 +299,7 @@ Re-running the installer is a **safe in-place update** — it reuses the existin
 
 ```bash
 # update: bump the tag and re-run (don't pass WG_SERVER_PRIVATE_KEY — the persisted key is reused)
-sudo DASHBOARD_RELEASE_TAG="v0.0.12" DASHBOARD_RELEASE_REPO="vkatrichenko/wireguard-vpn" bash install.sh
+sudo DASHBOARD_RELEASE_TAG="v0.0.16" DASHBOARD_RELEASE_REPO="vkatrichenko/wireguard-vpn" bash install.sh
 
 sudo bash install.sh --uninstall        # stop + remove services/artifacts, KEEP data (key, conf, client DB)
 sudo bash install.sh --dashboard-only   # remove only the dashboard, leave the VPN up
@@ -267,8 +317,9 @@ Deployable AWS config lives in [`terraform/dev/locals.tf`](terraform/dev/locals.
 | Setting | Where | Notes |
 |---|---|---|
 | Region / project / CIDR / tags | `locals.tf` | Region is intentionally duplicated in the S3 backend block (Terraform can't reference locals there) — change both if you move regions. |
-| Peer **seed** | `main.tf` → `clients_config` | Seeds first boot only; manage clients in the dashboard afterward. |
-| Dashboard version | `main.tf` → `dashboard_release_tag` | Single source of truth for the running build (`""` = no dashboard). |
+| Admin **bootstrap peer** | `main.tf` → `admin_peer` | One `{ name, public_key }` (or `null`) seeded only while the store is empty; every other peer is managed in the dashboard / `wg-peer`. |
+| Client storage mode | `main.tf` → `client_management_mode` | `"local"` (SQLite only) or `"cloud"` (SQLite + S3 backup). See [above](#client-storage-local-vs-cloud). |
+| Dashboard version | `main.tf` → `dashboard_release_tag` | Single source of truth for the running build; **required** (the dashboard is always installed). |
 | GitHub repo | `main.tf` → `github_repo` | One slug feeding both the `install.sh` fetch and the release download (must be public). |
 | CPU architecture | `main.tf` → `cpu_architecture` | `"arm64"` (default, `t4g.micro`) or `"x86_64"` (`t3a.micro`). |
 | Server key | SSM `/config/<project>-<env>/default-private-key` | Created out-of-band; read at boot. On a VPS it's persisted to `/etc/wireguard/server.key`. |
@@ -327,7 +378,7 @@ LISTEN_ADDR=127.0.0.1:8080 DB_PATH=/tmp/wgd.db go run ./cmd/wireguard-dashboard
 
 ## Status & roadmap
 
-The deployable AWS environment, the standalone installer, and the full dashboard feature set — including **runtime client management** and the **install/update/remove lifecycle** — are implemented and in use (specs 002–016). Detailed product / architecture / roadmap notes live under [`context/product/`](context/product/), and per-feature specs under [`context/spec/`](context/spec/).
+The deployable AWS environment, the standalone installer, and the full dashboard feature set — including **UI-first client management** (dashboard + `wg-peer` as the sole peer authority, an `admin_peer` bootstrap seed, and `local` / `cloud` S3-backup storage modes) and the **install/update/remove lifecycle** — are implemented and in use (specs 002–019; current dashboard release **`v0.0.16`**). Detailed product / architecture / roadmap notes live under [`context/product/`](context/product/), and per-feature specs under [`context/spec/`](context/spec/).
 
 ---
 
