@@ -138,7 +138,7 @@ admin_peer = {
 }
 
 client_management_mode = "cloud"                   # "cloud" = SQLite + S3 backup; "local" = SQLite only
-dashboard_release_tag  = "v0.0.16"                 # pin the dashboard version (required)
+dashboard_release_tag  = "v0.0.17"                 # pin the dashboard version (required)
 github_repo            = "vkatrichenko/wireguard-vpn"  # public repo for install.sh + the release binary
 # cpu_architecture     = "arm64"                   # default; set "x86_64" for Intel/AMD
 ```
@@ -194,12 +194,13 @@ cat publickey      # you'll paste this into the dashboard in step 5
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vkatrichenko/wireguard-vpn/main/scripts/install.sh -o install.sh
-sudo DASHBOARD_RELEASE_TAG="v0.0.16" \
+sudo DASHBOARD_RELEASE_TAG="v0.0.17" \
      DASHBOARD_RELEASE_REPO="vkatrichenko/wireguard-vpn" \
+     CLIENT_MANAGEMENT_MODE="local" \
      bash install.sh
 ```
 
-This installs in **`local` mode** by default (peers in on-box SQLite — the natural fit for a standalone VPS) and also installs the **`wg-peer`** helper. Useful env vars: `WG_SERVER_NET` (default `172.16.15.1/24`), `WG_SERVER_PORT` (`51820`), `WG_CLIENT_DNS` (`1.1.1.1`), `WG_PUBLIC_ENDPOINT` (your VPS public IP, to skip auto-discovery). To use `cloud` mode on a VPS (S3 backup), also pass `CLIENT_MANAGEMENT_MODE=cloud CLIENT_STORE_S3_BUCKET=… CLIENT_STORE_S3_KEY=clients.json` with AWS credentials available to the host. The installer prints the **server public key** and an **example client config** when it finishes.
+`CLIENT_MANAGEMENT_MODE` is **required** — the installer refuses to guess (it hard-fails if unset, so a local-vs-cloud mix can't happen silently). Use **`local`** (peers in on-box SQLite — the natural fit for a standalone VPS) or **`cloud`** for the S3 backup (which also needs `CLIENT_STORE_S3_BUCKET=… CLIENT_STORE_S3_KEY=clients.json` and AWS credentials on the host). The command also installs the **`wg-peer`** helper. Other useful env vars: `WG_SERVER_NET` (default `172.16.15.1/24`), `WG_SERVER_PORT` (`51820`), `WG_CLIENT_DNS` (`1.1.1.1`), `WG_PUBLIC_ENDPOINT` (your VPS public IP, to skip auto-discovery). The installer prints the **server public key** and an **example client config** when it finishes.
 
 > **You don't pass a server key.** On a standalone VPS the installer **generates the server's WireGuard private key automatically** (`wg genkey`) on first run and persists it to `/etc/wireguard/server.key` (`0600`); every later re-run reuses that same key, so the server identity stays stable. Pass `WG_SERVER_PRIVATE_KEY` only if you want to supply a specific key (e.g. restoring from a backup) — and once chosen, **don't change it on re-runs**, or you'll invalidate every existing client config. _(The AWS path behaves the same way — the instance self-manages its key in SSM — so neither path needs you to supply a server key.)_
 
@@ -295,7 +296,7 @@ Re-running the installer is a **safe in-place update** — it reuses the existin
 
 ```bash
 # update: bump the tag and re-run (don't pass WG_SERVER_PRIVATE_KEY — the persisted key is reused)
-sudo DASHBOARD_RELEASE_TAG="v0.0.16" DASHBOARD_RELEASE_REPO="vkatrichenko/wireguard-vpn" bash install.sh
+sudo DASHBOARD_RELEASE_TAG="v0.0.17" DASHBOARD_RELEASE_REPO="vkatrichenko/wireguard-vpn" bash install.sh
 
 sudo bash install.sh --uninstall        # stop + remove services/artifacts, KEEP data (key, conf, client DB)
 sudo bash install.sh --dashboard-only   # remove only the dashboard, leave the VPN up
@@ -375,7 +376,7 @@ LISTEN_ADDR=127.0.0.1:8080 DB_PATH=/tmp/wgd.db go run ./cmd/wireguard-dashboard
 
 ## Status & roadmap
 
-The deployable AWS environment, the standalone installer, and the full dashboard feature set — including **UI-first client management** (dashboard + `wg-peer` as the sole peer authority, an `admin_peer` bootstrap seed, and `local` / `cloud` S3-backup storage modes), **automatic server-key management** (instance self-manages its key in SSM — no manual bootstrap, key never in Terraform state), a **security-hardening pass** (SSH removed → SSM Session Manager only, IMDSv2-required, encrypted root volume + KMS state bucket), and the **install/update/remove lifecycle** — are implemented and in use (specs 002–020; current dashboard release **`v0.0.16`**, with spec 020's dashboard fixes shipping in the next release). Detailed product / architecture / roadmap notes live under [`context/product/`](context/product/), and per-feature specs under [`context/spec/`](context/spec/).
+The deployable AWS environment, the standalone installer, and the full dashboard feature set — including **UI-first client management** (dashboard + `wg-peer` as the sole peer authority, an `admin_peer` bootstrap seed, and `local` / `cloud` S3-backup storage modes), **automatic server-key management** (instance self-manages its key in SSM — no manual bootstrap, key never in Terraform state), a **security-hardening pass** (SSH removed → SSM Session Manager only, IMDSv2-required, encrypted root volume + KMS state bucket), and the **install/update/remove lifecycle** — are implemented and in use (specs 002–020; current dashboard release **`v0.0.17`**, with spec 020's dashboard fixes shipping in the next release). Detailed product / architecture / roadmap notes live under [`context/product/`](context/product/), and per-feature specs under [`context/spec/`](context/spec/).
 
 ---
 
