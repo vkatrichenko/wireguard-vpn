@@ -3,6 +3,10 @@
     "awos-recruitment": {
       "type": "http",
       "url": "https://recruitment.awos.provectus.pro/mcp"
+    },
+    "praxis": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:7865/stream"
     }
   }
 }

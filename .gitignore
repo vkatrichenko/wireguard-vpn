@@ -277,3 +277,6 @@ product_docs
 .praxis/assets
 scripts/enable-hooks.sh
 project-context/config/files_tree.md
+.praxis/api
+.praxis/context
+.praxis/chat
