@@ -1,4 +1,4 @@
-module wireguard-mcp
+module github.com/vkatrichenko/wireguard-vpn/mcp
 
 go 1.25.5
 

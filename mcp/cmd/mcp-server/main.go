@@ -24,8 +24,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"wireguard-mcp/internal/dashboard"
-	"wireguard-mcp/internal/tools"
+	"github.com/vkatrichenko/wireguard-vpn/mcp/internal/dashboard"
+	"github.com/vkatrichenko/wireguard-vpn/mcp/internal/tools"
 )
 
 const (
@@ -42,6 +42,12 @@ const (
 	serverVersion = "0.1.0"
 )
 
+// version is stamped at build time via -ldflags "-X main.version=...";
+// go install and plain `go build` leave it at "dev". Distinct from the
+// serverVersion const above, which is the MCP protocol Implementation
+// version reported to the host, not the distribution/packaging version.
+var version = "dev"
+
 func main() {
 	// -addr takes precedence over MCP_DASHBOARD_ADDR, which takes precedence
 	// over the compiled-in default — same three-tier precedence the
@@ -49,7 +55,13 @@ func main() {
 	// with an extra flag tier since this is a CLI-invoked subprocess rather
 	// than a systemd-managed service.
 	addrFlag := flag.String("addr", "", "dashboard host:port to wrap (overrides MCP_DASHBOARD_ADDR; defaults to "+defaultDashboardAddr+")")
+	versionFlag := flag.Bool("version", false, "print the build version and exit")
 	flag.Parse()
+
+	if *versionFlag {
+		os.Stdout.WriteString(version + "\n")
+		return
+	}
 
 	addr := *addrFlag
 	if addr == "" {

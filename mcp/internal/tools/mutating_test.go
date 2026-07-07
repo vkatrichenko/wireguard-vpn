@@ -13,7 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"wireguard-mcp/internal/dashboard"
+	"github.com/vkatrichenko/wireguard-vpn/mcp/internal/dashboard"
 )
 
 // recordedRequest captures one request the fake dashboard received, so tests
