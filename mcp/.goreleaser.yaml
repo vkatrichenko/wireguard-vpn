@@ -28,14 +28,25 @@ version: 2
 #      without Pro. The workflow works around this by exporting
 #      GORELEASER_CURRENT_TAG with the `mcp/` prefix stripped (so
 #      `.Version`/`.Tag` parse as valid semver for ldflags, archive names,
-#      and checksums). The GitHub Release itself still publishes against the
-#      real, literal pushed tag (`mcp/vX.Y.Z`) because that's the OSS default
-#      (`{{ .PrefixedCurrentTag }}`, i.e. the tag as it actually exists in
-#      git) — overriding it to anything else (`release.tag`) is itself a
-#      GoReleaser Pro-only field, so this config relies on the OSS default
-#      rather than setting it explicitly. This also means the release never
-#      collides with the plain `vX.Y.Z` tags dashboard-release.yml already
-#      owns in this repo.
+#      and checksums). BUT GoReleaser's release-mode `validate` step then
+#      requires a real git tag literally named `v0.1.0` (etc.) at HEAD to
+#      exist — which it never does, since the actual tag is `mcp/v0.1.0` —
+#      so `release --clean` always failed with "git tag v0.1.0 was not made
+#      against commit ...". Publishing a GitHub Release against the stripped
+#      tag isn't an option either: it would auto-create a plain `vX.Y.Z` tag,
+#      colliding with dashboard-release.yml's `v*.*.*` namespace and NOT
+#      being the `mcp/vX.Y.Z` ref `go install` needs.
+#
+#      The fix: `release.disable` below means GoReleaser NEVER publishes a
+#      GitHub Release at all — it only builds, archives, checksums, and
+#      signs. mcp-release.yml runs GoReleaser with `--skip=validate` (safe,
+#      since nothing here depends on the validate step once publish is
+#      disabled) and then publishes the actual GitHub Release itself via
+#      `gh release create "${GITHUB_REF_NAME}" ...`, which attaches to the
+#      real, literal `mcp/vX.Y.Z` tag exactly like dashboard-release.yml does
+#      for its own `vX.Y.Z` tags. This also means the release never collides
+#      with the plain `vX.Y.Z` tags dashboard-release.yml already owns in
+#      this repo.
 project_name: wireguard-mcp
 
 # Changelog diffing between tags is disabled: with the prefix-stripping
@@ -79,6 +90,13 @@ archives:
 checksum:
   name_template: "checksums.txt"
   algorithm: sha256
+
+# GoReleaser never publishes a GitHub Release itself — see the header comment
+# above. mcp-release.yml runs `release --clean --skip=validate` purely to get
+# GoReleaser's build/archive/checksum/sign pipeline, then publishes the real
+# release via `gh release create` against the literal `mcp/vX.Y.Z` tag.
+release:
+  disable: true
 
 # Keyless (OIDC) cosign signing of the checksum file, which transitively
 # covers every archive since checksums.txt hashes them all. Requires
