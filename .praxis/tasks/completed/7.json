@@ -2,7 +2,7 @@
   "id": 7,
   "assignee": "jarvis.json",
   "priority": "medium",
-  "status": "to_review",
+  "status": "completed",
   "title": "[7] MCP Server Phase 5 — Wiring + Packaging",
   "why_we_need_this": "Phase 4 (task #5, completed) plus its same-day bug fix (task #6) proved all 19 MCP tools work correctly against the live dashboard over the real WireGuard tunnel (`project-context/routes/mcp-server/README.md` L4-5). Phase 5 is the final phase of the owner-approved 5-phase roadmap: turn the validated, working binary into something actually callable from the operator's day-to-day MCP host, and leave a documented path for reusing this pattern on a future project. Without this phase the MCP server exists as a validated binary but nothing wires it into an actual MCP host session.",
   "acceptance_criteria": "- Read `project-context/routes/mcp-server/README.md` in full (current STATUS, all resolved decisions: wrapper-only architecture, stdio transport, single hardcoded-with-override target `172.16.15.1:8080`, laptop-side placement, no Docker, in-repo `mcp/` placement, confirmation-gate mechanics) plus `mcp/docs/tool-surface.md`, `mcp/docs/confirmation-gates.md`, and the Phase 4 validation results doc under `mcp/docs/` to confirm exactly which 19 tools ship and their final names/signatures. Use `search_project_context` to cross-check — do not derive the tool list solely from re-reading the Go source.\n- Build/confirm a release build process for the `mcp/` Go module producing a single static binary (document the exact build command, e.g. `go build -o mcp-server ./cmd/mcp-server`, under `mcp/README.md` or similar — no new build tooling/CI, this repo has no CI per CLAUDE.md).\n- Write a concrete MCP host config example (e.g. a `mcpServers` JSON block suitable for Claude Code / Claude Desktop) showing how to point the host at the built binary, including how to set the `MCP_DASHBOARD_ADDR` env var/flag override established in Phase 2. Place this example in `mcp/README.md`.\n- Document, in the same `mcp/README.md`, how to adapt this exact pattern to a different project's WireGuard tunnel IP (per the owner's stated usage pattern of running one MCP server per project) — i.e. what specifically needs to change (target address) versus what stays identical (transport, no-Docker, tool set), so this build is a repeatable template rather than a one-off.\n- Confirm no Docker, no always-on HTTP/SSE listener is introduced anywhere in this task — packaging must remain a stdio-spawned subprocess consistent with Phases 1-4.\n- Do not add any application-layer auth — the no-auth-at-the-dashboard-boundary model remains a settled, owner-accepted risk; this task is packaging/wiring only.\n- This task closes the roadmap: once complete, the overall MCP server initiative (Phases 1-5) should read as DONE, not just individual phases.",
@@ -17,5 +17,5 @@
   "contextRouterIncluded": false,
   "PRDIncluded": false,
   "created_at": 1783431727424,
-  "column_entered_at": 1783432491281
+  "column_entered_at": 1783432942828
 }

@@ -111,22 +111,83 @@ go build -o wireguard-mcp ./cmd/mcp-server
 
 No cross-compilation flags are required — unlike the dashboard, this binary runs on the operator's own
 laptop (whatever OS/arch that is), not on the EC2 host, so there's no `CGO_ENABLED=0 GOOS=linux
-GOARCH=amd64` constraint here. There is no CI build or release pipeline for this binary and none is
-planned — build it locally when you need it.
+GOARCH=amd64` constraint here.
+
+## Installation
+
+Tagged releases (`mcp/vX.Y.Z`) are built and published by `.github/workflows/mcp-release.yml` via
+GoReleaser, producing signed, checksummed binaries for `linux/amd64`, `linux/arm64`, `darwin/amd64`,
+`darwin/arm64`, and `windows/amd64`. Two install paths are supported; pick one.
+
+**A note on binary names**: the two paths below produce a binary with a **different name**. `go install`
+always names the binary after its package directory (`cmd/mcp-server` → `mcp-server`). The GoReleaser
+release build (and the `make`-style local `go build -o wireguard-mcp ./cmd/mcp-server` above) explicitly
+names it `wireguard-mcp` instead. Same binary, two names, depending on how you got it — make sure your
+`mcpServers` `command` matches whichever one you actually installed.
+
+### Path 1: `go install` (primary)
+
+Requires only a Go toolchain — no download, no checksum verification step, works identically on every
+OS/arch Go itself supports:
+
+```sh
+go install github.com/vkatrichenko/wireguard-vpn/mcp/cmd/mcp-server@mcp/v0.1.0
+```
+
+The `mcp/v0.1.0` version suffix (not just `v0.1.0`) is required because this module lives in the `mcp/`
+subdirectory of the repo, not at its root — Go's module-in-subdirectory convention tags the module path
+prefix onto the version. Always pin an exact tag here; never `@latest` or `@mcp` (floating branch), so a
+`go install` from one machine reproduces the same binary as another.
+
+The installed binary lands in `$GOBIN` if set, otherwise `$(go env GOPATH)/bin` — and per the naming note
+above, it is named **`mcp-server`**, not `wireguard-mcp`.
+
+### Path 2: prebuilt release binary
+
+Download the archive matching your OS/arch from
+[GitHub Releases](https://github.com/vkatrichenko/wireguard-vpn/releases), then verify it against the
+release's `checksums.txt` before running anything:
+
+```sh
+shasum -a 256 -c checksums.txt --ignore-missing
+```
+
+On macOS, Gatekeeper quarantines anything downloaded via a browser or `curl` from a non-notarized source;
+clear it before running the extracted binary:
+
+```sh
+xattr -d com.apple.quarantine wireguard-mcp
+```
+
+(A Homebrew tap would strip the quarantine attribute automatically as part of `brew install` — Homebrew
+distribution is deliberately deferred for this project; see "GoReleaser and future distribution" below.)
+The extracted binary is named **`wireguard-mcp`** (per the naming note above), matching the `Building`
+section's local `go build -o wireguard-mcp` convention.
+
+Each release's checksums are additionally signed keylessly (Sigstore/cosign, OIDC — no key management) as
+part of `mcp-release.yml`; this is exercised for real only in CI on a tagged run, not in local snapshot
+builds.
+
+### GoReleaser and future distribution
+
+The release config is `mcp/.goreleaser.yaml`. A Homebrew tap (GoReleaser's `brews:` block) would remove the
+manual quarantine-clearing step above and is a natural next step, but is explicitly out of scope for now —
+add it later as its own change, not bundled into this packaging pass.
 
 ## Manual invocation (example MCP host config)
 
-Point an MCP host (Claude Code, Claude Desktop, etc.) at the built binary by absolute path. Both override
+Point an MCP host (Claude Code, Claude Desktop, etc.) at the installed or downloaded binary. Both override
 forms are shown below; precedence is `-addr` flag > `MCP_DASHBOARD_ADDR` env > the compiled-in default
 (`172.16.15.1:8080`), so only one is needed in practice — showing both here for reference.
 
-Override via env:
+**If installed via `go install`** (binary named `mcp-server`, on `PATH` if `$GOBIN`/`$(go env GOPATH)/bin`
+is on it):
 
 ```json
 {
   "mcpServers": {
     "wireguard-vpn": {
-      "command": "/absolute/path/to/wireguard-mcp/wireguard-mcp",
+      "command": "mcp-server",
       "env": {
         "MCP_DASHBOARD_ADDR": "172.16.15.1:8080"
       }
@@ -135,13 +196,14 @@ Override via env:
 }
 ```
 
-Override via flag (takes precedence over the env form above if both are somehow present):
+**If downloaded as a release binary** (named `wireguard-mcp`, referenced by absolute path — no `PATH`
+assumption):
 
 ```json
 {
   "mcpServers": {
     "wireguard-vpn": {
-      "command": "/absolute/path/to/wireguard-mcp/wireguard-mcp",
+      "command": "/absolute/path/to/wireguard-mcp",
       "args": ["-addr", "172.16.15.1:8080"]
     }
   }

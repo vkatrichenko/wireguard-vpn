@@ -20,7 +20,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"wireguard-mcp/internal/dashboard"
+	"github.com/vkatrichenko/wireguard-vpn/mcp/internal/dashboard"
 )
 
 // rangeArgs is the input shape for tools whose dashboard endpoint accepts an

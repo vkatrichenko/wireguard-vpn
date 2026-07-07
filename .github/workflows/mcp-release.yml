@@ -1,0 +1,94 @@
+# mcp-release
+#
+# THIS IS THE REPO'S FIRST NON-DASHBOARD CI WORKFLOW AND ITS FIRST USE OF ANY
+# THIRD-PARTY RELEASE TOOLING (GoReleaser, cosign). It requires explicit owner
+# sign-off before merging to main. It does not touch Terraform, does not
+# apply any infrastructure, and does not deploy anything to the EC2 host —
+# it only builds and publishes the mcp/ submodule's stdio MCP server binary
+# as a public, laptop-side GitHub Release artifact (see mcp/README.md's
+# Installation section). Release-only, same trigger philosophy as
+# dashboard-release.yml: a tag push is a deliberate, human-reviewed choice.
+#
+# Trigger semantics:
+#   - Tags matching `mcp/v*` only (e.g. `mcp/v0.1.0`). This mirrors Go's own
+#     module-in-subdirectory tagging convention (a module at mcp/ must be
+#     tagged mcp/vX.Y.Z for `go install .../mcp/cmd/mcp-server@mcp/vX.Y.Z`
+#     to resolve), and keeps this tag namespace disjoint from
+#     dashboard-release.yml's plain `v*.*.*` tags in the same repo.
+#   - No workflow_dispatch, for the same reason dashboard-release.yml has
+#     none: a manual run has no tag ref to derive a version from.
+#
+# GoReleaser Pro vs OSS: this repo has no GoReleaser Pro license, so
+# mcp/.goreleaser.yaml deliberately avoids the Pro-only `monorepo:` config
+# block (confirmed Pro-only via GoReleaser's own docs). Instead:
+#   - goreleaser-action's `workdir: mcp` input runs GoReleaser with mcp/ as
+#     its working directory, so mcp/.goreleaser.yaml's `main`/`binary`
+#     resolve against the submodule's own go.mod with no extra config.
+#   - GORELEASER_CURRENT_TAG is exported below with the `mcp/` prefix
+#     stripped, because GoReleaser's git-tag parsing (still repo-root-based
+#     regardless of workdir) can't treat a `/`-containing tag as semver
+#     without Pro. The GitHub Release itself still publishes against the
+#     real, literal `mcp/vX.Y.Z` tag (GoReleaser's OSS default release
+#     target), so this override only affects version stamping (ldflags,
+#     archive names, checksums), never which tag the release attaches to.
+#
+# Auth: GITHUB_TOKEN with `contents: write` to publish the release, plus
+# `id-token: write` for cosign's keyless (OIDC) signing of checksums.txt. No
+# AWS involvement at all — this binary never touches the EC2 host.
+
+name: mcp-release
+
+on:
+  push:
+    tags:
+      - 'mcp/v*'
+
+permissions:
+  contents: write   # required for GoReleaser to publish the GitHub Release
+  id-token: write    # required for cosign keyless (OIDC) signing
+
+concurrency:
+  # One in-flight run per tag; never cancel a release mid-publish.
+  group: mcp-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, sign, and publish mcp-server release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          # GoReleaser needs full tag history to compute changelog/previous-tag
+          # context even though this config disables the changelog pipe --
+          # a shallow clone would also break `git describe` for the fallback
+          # tag-detection path GoReleaser runs before GORELEASER_CURRENT_TAG
+          # is applied.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5.6.0
+        with:
+          go-version-file: mcp/go.mod
+          cache: true
+          cache-dependency-path: mcp/go.sum
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+
+      - name: Derive stripped version tag for GoReleaser
+        # GITHUB_REF_NAME is the real pushed tag, e.g. `mcp/v0.1.0`. Strip the
+        # `mcp/` prefix so GoReleaser's semver parser (OSS, no Pro monorepo
+        # support) accepts it for .Version/.Tag templating. See the header
+        # comment above and mcp/.goreleaser.yaml for why the release itself
+        # still targets the unstripped, real tag.
+        run: echo "GORELEASER_CURRENT_TAG=${GITHUB_REF_NAME#mcp/}" >> "$GITHUB_ENV"
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
+        with:
+          workdir: mcp
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
