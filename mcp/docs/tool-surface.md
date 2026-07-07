@@ -18,9 +18,12 @@ Endpoints below are confirmed against `dashboard/internal/server/server.go`'s mu
 | HTTP method + path | Proposed MCP tool name | Read-only / Mutating | One-line purpose |
 |---|---|---|---|
 | `GET /api/clients` | `list_clients` | Read-only | Joined peer list: manifest metadata + live `wg show wg0 dump` state (handshake, byte counters, endpoint) per client. |
-| `POST /api/clients` | `add_client` | Mutating | Add a new peer (name, public key, optional address/note); applied live via `wg-sync`, no tunnel drop. |
-| `PATCH /api/clients/{name}` | `update_client` | Mutating | Edit an existing peer's name/public_key/address/note, **and** enable/disable it — `enabled` is just another PATCH-able field, there is no separate enable/disable endpoint. |
-| `DELETE /api/clients/{name}` | `delete_client` | Mutating | Remove a peer by name. |
+| `POST /api/clients` | `add_client` | Mutating (confirm-gated) | Add a new peer (name, public key, optional address/note); applied live via `wg-sync`, no tunnel drop. |
+| `PATCH /api/clients/{name}` | `edit_client` | Mutating (confirm-gated) | Edit an existing peer's name/public_key/address/note. |
+| `PATCH /api/clients/{name}` (`{"enabled":true}`) | `enable_client` | Mutating (confirm-gated) | Enable a peer. |
+| `PATCH /api/clients/{name}` (`{"enabled":false}`) | `disable_client` | Mutating (confirm-gated) | Disable a peer. |
+| `GET /api/clients` (read-only lookup) | `preview_delete_client` | Read-only | Dry-run step ahead of `delete_client`: shows the peer's current state and issues the single-use token `delete_client` requires. |
+| `DELETE /api/clients/{name}` | `delete_client` | Mutating (token-gated) | Remove a peer by name. Requires a token from a prior `preview_delete_client` call for the same name. |
 | `GET /api/clients/{name}/config` | `get_client_config` | Read-only | Downloadable `wg-quick` config text for one client (spec 015 migration onto the runtime DB). |
 | `GET /api/clients/{name}/history` | `get_client_history` | Read-only | Per-client connection-history summary (sessions, online/offline, last-seen) over a `?range=` window (spec 006). |
 | `GET /api/metrics` | `get_metrics` | Read-only | Combined time-series feed powering the trend charts (system + traffic in one response). |
@@ -37,7 +40,8 @@ Endpoints below are confirmed against `dashboard/internal/server/server.go`'s mu
 ### Corrections against the mcp-server route's endpoint list
 
 - **Path-param precision.** The mcp-server route describes the peer-CRUD surface generically as `GET/POST/PATCH/DELETE /api/clients`. The actual mux registration (`server.go:298-303`) only has `GET` and `POST` on the bare `/api/clients` collection; `PATCH` and `DELETE` are scoped to `/api/clients/{name}`. The table above reflects the exact registered paths.
-- **No separate enable/disable endpoint.** The route's Core Concepts describe the mutating scope as "add/edit/delete/**enable/disable**" as if enable/disable were a distinct verb. Reading `handlers_clients_admin.go`'s `handleUpdateClient` doc comment confirms `enabled` is just one of the PATCH-able fields on `update_client` (name, public_key, address, note, enabled) — there is no `POST /api/clients/{name}/enable` or similar. One tool (`update_client`) covers both edit and enable/disable; this document does not propose a separate tool for it.
+- **No separate enable/disable endpoint, but there are separate tools.** The dashboard's `handleUpdateClient` (`handlers_clients_admin.go`) treats `enabled` as just one of the PATCH-able fields on the same `PATCH /api/clients/{name}` endpoint (name, public_key, address, note, enabled) — there is still no `POST /api/clients/{name}/enable` or similar at the HTTP layer. Phase 1 originally proposed one `update_client` tool covering edit and enable/disable together; the owner's 2026-07-06 Phase 3 resolution (see `mcp/docs/confirmation-gates.md`) split this into three tools — `edit_client`, `enable_client`, `disable_client` — all hitting the same endpoint with a different body shape, so each tool's purpose (and its confirm-gate framing in the LLM-facing description) stays unambiguous rather than bundling "rename this peer" and "kill this peer's access" behind one argument-driven branch.
+- **`delete_client` is now two tools, not one.** Phase 1 listed `delete_client` as a single mutating call. Phase 3 hardened it into a token-gated dry-run flow — `preview_delete_client(name)` (read-only, issues a short-lived single-use token) followed by `delete_client(name, token)` (redeems the token, then calls `DELETE`) — because delete is the sole irreversible verb on this surface. Full mechanics (token TTL, single-use, most-recent-wins) are in `mcp/docs/confirmation-gates.md`, not repeated here.
 - **`GET /api/health` is unnamed in the route but exists in code.** Registered at `server.go:295`, ahead of every other `/api/*` entry, and it is a natural low-risk Phase 2 candidate (it is how the wrapper would sanity-check tunnel connectivity to the dashboard before calling anything else). Included above as `get_health`; flagging its absence from the route's endpoint list as a gap for the owner to bless in Phase 2, not a routes/code contradiction that needs resolving now.
 
 ### Out-of-scope: `/api/webhook*` and `/metrics` (Prometheus)
@@ -55,7 +59,7 @@ Rationale:
 - **Read-only/mutating stays a per-tool property.** Phase 2 ships "read-only tools only" as a hard gate before any mutating tool exists. If peer CRUD were collapsed into a single `manage_client(action: "add"|"update"|"delete")` tool, that one tool would be mutating in its entirety — Phase 2 could not ship any part of it, and Phase 3 could not selectively enable, say, `add_client` without also exposing `delete_client`. One tool per endpoint means each tool's read-only/mutating classification is a fixed, inspectable fact of the tool itself, matching exactly how the phase gate is defined in the route ("Phase 2 — read-only tools only," "Phase 3 — mutating CRUD tools").
 - **LLM discoverability.** MCP tool descriptions are what the calling LLM uses to decide which tool to invoke. A single `manage_client` tool with an `action` enum pushes branching logic into the tool description and the argument schema, which is a worse fit for how models select tools than four narrowly-described tools (`list_clients`, `add_client`, `update_client`, `delete_client`) that each map onto one clear verb.
 - **Clean mapping onto REST verbs.** The dashboard's HTTP surface already separates concerns by verb (`GET` list vs. `POST` add vs. `PATCH` update vs. `DELETE` remove on the same `/api/clients*` path family). A one-tool-per-endpoint wrapper is a mechanical, low-risk translation with no new branching logic to get wrong — consistent with the route's "wrapper, not new business logic" framing.
-- **Exception carried forward explicitly:** the four verbs on the `/api/clients*` path family are deliberately four separate tools — `list_clients`, `add_client`, `update_client`, `delete_client` — rather than one `manage_client`, precisely so `list_clients` can ship in Phase 2 while the other three wait for Phase 3.
+- **Exception carried forward explicitly:** the `/api/clients*` path family is deliberately several separate tools rather than one `manage_client`. This document originally floated `list_clients` shipping ahead of the mutating verbs in Phase 2; the actual Phase 2/3 scope call (see the mcp-server route) went the other way — **all** of `list_clients`, `get_client_config`, `get_client_history`, `add_client`, `edit_client`, `enable_client`, `disable_client`, `preview_delete_client`, and `delete_client` shipped together in Phase 3, so the whole `/api/clients*` surface lands as one reviewable unit instead of being split across two phases.
 
 No exceptions beyond that are proposed: every read-only endpoint in the table above gets its own tool, and no two endpoints are merged into one tool.
 
@@ -65,9 +69,6 @@ Per the mcp-server route's roadmap (read-only before mutating is a deliberate ri
 
 | Tool | Endpoint | Phase |
 |---|---|---|
-| `list_clients` | `GET /api/clients` | Phase 2 |
-| `get_client_config` | `GET /api/clients/{name}/config` | Phase 2 |
-| `get_client_history` | `GET /api/clients/{name}/history` | Phase 2 |
 | `get_metrics` | `GET /api/metrics` | Phase 2 |
 | `get_system_metrics` | `GET /api/metrics/system` | Phase 2 |
 | `get_traffic_metrics` | `GET /api/metrics/traffic` | Phase 2 |
@@ -78,19 +79,23 @@ Per the mcp-server route's roadmap (read-only before mutating is a deliberate ri
 | `get_snapshot` | `GET /api/snapshot` | Phase 2 |
 | `get_geo` | `GET /api/geo` | Phase 2 |
 | `get_health` | `GET /api/health` | Phase 2 (pending owner sign-off on scope, per note above) |
-| `add_client` | `POST /api/clients` | Phase 3+ |
-| `update_client` | `PATCH /api/clients/{name}` | Phase 3+ |
-| `delete_client` | `DELETE /api/clients/{name}` | Phase 3+ |
+| `list_clients` | `GET /api/clients` | Phase 3 (read-only, but held back from Phase 2 to ship with the rest of `/api/clients*`) |
+| `get_client_config` | `GET /api/clients/{name}/config` | Phase 3 (read-only, held back — same reason) |
+| `get_client_history` | `GET /api/clients/{name}/history` | Phase 3 (read-only, held back — same reason) |
+| `add_client` | `POST /api/clients` | Phase 3 |
+| `edit_client` | `PATCH /api/clients/{name}` | Phase 3 |
+| `enable_client` | `PATCH /api/clients/{name}` | Phase 3 |
+| `disable_client` | `PATCH /api/clients/{name}` | Phase 3 |
+| `preview_delete_client` | `GET /api/clients` (read-only lookup) | Phase 3 |
+| `delete_client` | `DELETE /api/clients/{name}` | Phase 3 |
 
 Phase 4 (live validation over the real tunnel, checked against Clients & Connectivity route invariants) and Phase 5 (MCP host wiring/packaging, no Docker) apply across the whole tool set once Phases 2 and 3 have shipped — they are not per-tool phases and are not re-litigated here.
 
-## Open question (deferred to Phase 3) — do not resolve here
+## Confirmation-gate question — resolved 2026-07-06
 
-The mcp-server route carries forward an explicit, unresolved question from Phase 1 into Phase 3: **whether mutating tools (`add_client`, `update_client`, `delete_client`) require an explicit confirmation parameter (e.g. a `confirm: true` argument) before executing, or whether a separate dry-run tool should exist ahead of any destructive call.**
+Phase 1 carried an open question into Phase 3: whether mutating tools need an explicit confirmation parameter, a separate dry-run tool, or neither. The owner resolved this on 2026-07-06 with a split design rather than picking one option uniformly:
 
-Both options are named here only to frame the decision space for Phase 3 — this document takes no position and makes no recommendation:
+- `add_client`, `edit_client`, `enable_client`, `disable_client` use an inline `confirm: true` argument — reversible operations, single call once confirmed.
+- `delete_client` — the sole irreversible verb on this surface — uses the separate-dry-run-tool shape instead: `preview_delete_client` issues a short-lived, single-use token that `delete_client` must redeem.
 
-1. **Inline confirmation parameter** — each mutating tool accepts an argument (e.g. `confirm: true`) that must be explicitly set before the call is allowed to execute against the dashboard.
-2. **Separate dry-run tool** — a distinct read-only tool (e.g. `preview_client_change`) that reports what a mutating call would do, called before the corresponding mutating tool.
-
-This is unresolved as of 2026-07-06 and is owner-deferred to Phase 3. Nothing in this document should be read as picking between them.
+Full mechanics (token TTL, single-use, most-recent-wins, why the split by reversibility) are documented in `mcp/docs/confirmation-gates.md`, not repeated here.

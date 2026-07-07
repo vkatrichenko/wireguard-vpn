@@ -69,16 +69,72 @@ func (e *StatusError) Error() string {
 // never re-models the dashboard's JSON response shapes, so the body is
 // proxied through as-is for the tool handler to embed as text content.
 func (c *Client) Get(ctx context.Context, path string, query url.Values) ([]byte, error) {
-	u := url.URL{
-		Scheme:   "http",
-		Host:     c.BaseAddr,
-		Path:     path,
-		RawQuery: query.Encode(),
+	return c.do(ctx, http.MethodGet, path, query, nil)
+}
+
+// Post issues POST http://<BaseAddr><path> with body as the JSON request
+// payload (Content-Type: application/json) and returns the raw response body.
+// Used by add_client (POST /api/clients per mcp/docs/tool-surface.md).
+func (c *Client) Post(ctx context.Context, path string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, path, nil, body)
+}
+
+// Patch issues PATCH http://<BaseAddr><path> with body as the JSON request
+// payload and returns the raw response body. Used by edit_client,
+// enable_client, and disable_client (all PATCH /api/clients/{name} — the
+// dashboard's handleUpdateClient treats enabled as just another PATCH-able
+// field, per handlers_clients_admin.go).
+func (c *Client) Patch(ctx context.Context, path string, body []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPatch, path, nil, body)
+}
+
+// Delete issues DELETE http://<BaseAddr><path> with no body and returns the
+// raw response body. Used by delete_client (DELETE /api/clients/{name}).
+func (c *Client) Delete(ctx context.Context, path string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
+}
+
+// do is the shared request/response plumbing for every HTTP verb this client
+// issues. Get, Post, Patch, and Delete are all thin argument-shaping calls
+// into this one method so the StatusError mapping, the tunnel-aware dial-
+// failure message, and the timeout/base-addr wiring exist in exactly one
+// place — matching the package doc's "exactly one place a request could be
+// built wrong" invariant. body is the raw JSON payload (nil for a bodyless
+// request); a non-nil body sets Content-Type: application/json, matching the
+// dashboard's isJSONRequest sniff (handlers_clients_admin.go) so the mutating
+// handlers parse via their JSON branch rather than falling through to the
+// form-encoded path.
+//
+// path arrives already percent-encoded by the caller: every tool handler in
+// internal/tools that has a dynamic path segment (pubkey or name) calls
+// url.PathEscape on that segment exactly once before concatenating it onto a
+// literal prefix (see get_client_metrics/get_client_config/get_client_history
+// in tools.go). path-escaping is that caller's job, singly, and do() owns
+// only "send this path across the wire without touching it again". Do NOT
+// route path through url.URL's Path field here — url.URL.Path is the decoded
+// form, and u.String()/u.EscapedPath() would re-escape any "%" already in
+// path (e.g. turning a correct "%2F" into "%252F", which 404s against the
+// dashboard's mux). Building the request from a raw URL string instead lets
+// url.Parse (called internally by http.NewRequestWithContext) populate
+// RawPath from the already-escaped path we hand it, so EscapedPath() on the
+// resulting request reproduces path's encoding verbatim.
+func (c *Client) do(ctx context.Context, method, path string, query url.Values, body []byte) ([]byte, error) {
+	rawURL := "http://" + c.BaseAddr + path
+	if encoded := query.Encode(); encoded != "" {
+		rawURL += "?" + encoded
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = strings.NewReader(string(body))
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("building request for %s: %w", path, err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 
 	resp, err := c.HTTP.Do(req)
@@ -93,18 +149,18 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values) ([]byte
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("reading response body from %s: %w", path, err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		snippet := string(body)
+		snippet := string(respBody)
 		if len(snippet) > maxBodySnippet {
 			snippet = snippet[:maxBodySnippet] + "…"
 		}
 		return nil, &StatusError{Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(snippet)}
 	}
 
-	return body, nil
+	return respBody, nil
 }

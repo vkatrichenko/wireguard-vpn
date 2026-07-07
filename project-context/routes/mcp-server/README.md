@@ -1,26 +1,31 @@
 # MCP Server Route
 
 ## TL;DR
-- STATUS: Phase 1 (tool-surface design) and Phase 2 (read-only tool code) are both complete as of 2026-07-06.
-- Phase 2 code is unvalidated against a live dashboard — Phase 4 live-tunnel validation has not happened yet.
+- STATUS: ALL 5 PHASES DONE as of 2026-07-07 — the MCP server initiative is complete and shipped.
+- Phase 4 live-tunnel validation passed 18/19 tools, then 19/19 after the same-day Task #6 fix.
+- Phase 4 (2026-07-07) found and FIXED same-day (Task #6): `get_client_metrics` double-percent-encoded pubkeys, 404ing on keys containing `/`.
+- Phase 5 (2026-07-07, Task #7) shipped docs/packaging only in `mcp/README.md`: build command, host-config example, cross-project template — no code changed.
+- Phase 3 added all remaining `/api/clients*` tools: `add_client`, `edit_client`, `enable_client`, `disable_client`, plus the read-only `list_clients`, `get_client_config`, `get_client_history`.
+- The confirmation-gate open question is RESOLVED: `confirm=true` for reversible mutations, a token-gated preview/delete flow for the sole irreversible one.
+- `add_client`/`edit_client`/`enable_client`/`disable_client` require an explicit `confirm=true` boolean arg or the call makes no HTTP request.
+- `delete_client` is gated by a separate `preview_delete_client` tool that mints a single-use, 5-minute, per-peer-name token.
 - `mcp/` holds a separate Go module `wireguard-mcp`, independent of the `dashboard/` Go module by design.
-- Ten read-only MCP tools now exist, each a thin HTTP GET wrapper around one dashboard `/api/*` endpoint.
 - The MCP server is a thin external wrapper translating MCP tool calls into HTTP calls against the dashboard's existing `/api/*` endpoints.
 - It runs laptop-side over the WireGuard tunnel like any client, never on the EC2 instance, and is never embedded in the dashboard binary.
 - Transport is MCP's native stdio subprocess with one hardcoded dashboard target per instance — no Docker, no always-on HTTP/SSE listener.
-- Key files: `mcp/cmd/mcp-server/main.go`, `mcp/internal/tools/tools.go`, `mcp/internal/dashboard/client.go`, `mcp/docs/tool-surface.md`.
+- Key files: `mcp/cmd/mcp-server/main.go`, `mcp/internal/tools/tools.go`, `mcp/internal/tools/mutating.go`, `mcp/internal/tools/tokens.go`, `mcp/docs/tool-surface.md`, `mcp/docs/confirmation-gates.md`, `mcp/docs/phase4-validation.md`.
 
-Rules for an MCP (Model Context Protocol) integration that lets an LLM agent operate the dashboard's REST API on the operator's behalf; Phase 2 of its roadmap has shipped code.
+Rules for an MCP (Model Context Protocol) integration that lets an LLM agent operate the dashboard's REST API on the operator's behalf; all 5 phases of its roadmap are done — code shipped, live-tunnel validated, and now packaged/wired — and the confirmation-gate design question is resolved.
 
 This file is the sub-router for the MCP Server route. It follows the same contract as the root context-router.md: it describes the business rules for this route, and if the route grows child routes, it will point to them so the agent can traverse deeper.
 
 ## Purpose
 
-This route owns the business rules for an MCP server that lets an LLM agent manage WireGuard peers and read metrics/status through the dashboard's already-implemented REST API, without touching the EC2-hosted dashboard binary or eroding this project's stability-first posture (see the root context-router.md STABILITY OVER FEATURES rule). The architectural decisions below came out of an owner planning conversation on 2026-07-06. As of that same date, Phase 1 (tool-surface design, `mcp/docs/tool-surface.md`) and Phase 2 (scaffold + ten read-only tools, the `mcp/` Go module) are implemented; Phase 2 code has not yet been exercised against a live dashboard over a real tunnel (that is Phase 4).
+This route owns the business rules for an MCP server that lets an LLM agent manage WireGuard peers and read metrics/status through the dashboard's already-implemented REST API, without touching the EC2-hosted dashboard binary or eroding this project's stability-first posture (see the root context-router.md STABILITY OVER FEATURES rule). The architectural decisions below came out of an owner planning conversation on 2026-07-06. Phase 1 (tool-surface design, `mcp/docs/tool-surface.md`), Phase 2 (scaffold + ten read-only tools), and Phase 3 (mutating `/api/clients*` tools + the confirmation-gate resolution, `mcp/docs/confirmation-gates.md`) shipped code on 2026-07-06. Phase 4 (`mcp/docs/phase4-validation.md`) closed the validation gap on 2026-07-07: all 19 shipped tools were exercised as a real stdio-spawned subprocess against the live dashboard over the connected tunnel, with 18/19 passing and one real bug found, fixed same-day in Task #6 (see Route-Specific Constraints). Phase 5 (Task #7, 2026-07-07) closed the roadmap: documentation/packaging only — no code, no Docker — bringing `mcp/README.md` to its final state as the operator-facing reference for the release build command and MCP host-config wiring. This completes the MCP server initiative end to end.
 
 ## Core Concepts
 
-- Wrapper architecture — MCP tool calls map onto the dashboard's existing `/api/*` endpoints (`/api/clients`, `/api/metrics*`, `/api/service`, `/api/server`, `/api/alerts`, `/api/snapshot`, `/api/geo`, all already implemented per specs 019/020) rather than any new dashboard code.
+- Wrapper architecture — MCP tool calls map onto the dashboard's existing `/api/*` endpoints (`/api/clients`, `/api/metrics*`, `/api/service`, `/api/server`, `/api/alerts`, `/api/snapshot`, `/api/geo`, `/api/health`, all already implemented per specs 019/020) rather than any new dashboard code.
 - Application vs Agent boundary — context-router.md's Application/Agent-LLM split is the explicit rationale for keeping MCP transport out of the Go binary: embedding it would blur that line for no functional gain, since a wrapper can already reach every endpoint it needs.
 - Placement — a local process on the operator's own laptop, reached over the WireGuard tunnel like any other tunnel client; it is never deployed to the EC2 instance.
 - Repo location — the code lives inside this repo, in `mcp/`, not a standalone repo, because the project is solo-maintained and planning to open-source with a single source of truth. It inherits this repo's existing git conventions (PR-based workflow, commit prefixes, branch naming).
@@ -29,17 +34,20 @@ This route owns the business rules for an MCP server that lets an LLM agent mana
 - Usage-pattern rationale — the owner runs several unrelated VPN servers for different projects and fully disconnects from one before connecting to another, so the usage window and the tunnel-connectivity window are the same window by construction; this is why a single hardcoded target is sufficient and no multi-target selector is planned.
 - Transport rationale — stdio subprocess (spawned on-demand by the MCP host's `mcpServers` config) was chosen over Docker or an always-on HTTP/SSE listener because this is a single-user, only-used-while-tunneled tool; Docker's isolation/reproducible-deps benefits were judged not worth the added complexity.
 - Scope — full CRUD was chosen over read-only-only: both read-only tools (metrics, service/server status, alerts, snapshot, geo) and mutating tools (add/edit/delete/enable/disable peer via `/api/clients*`).
-- Phased roadmap (low-risk-first, read-only before mutating) — status as of 2026-07-06:
+- Phased roadmap (low-risk-first, read-only before mutating) — ALL 5 PHASES DONE as of 2026-07-07; the MCP server initiative is complete:
   - Phase 1 — tool-surface definition: map confirmed `/api/*` endpoints to discrete MCP tool names. DONE — `mcp/docs/tool-surface.md`.
-  - Phase 2 — scaffold and ship read-only tools only (metrics/status/service/server/alerts/snapshot/geo), validating the MCP-to-dashboard round trip with zero mutation risk. DONE — code shipped, but unvalidated against a live dashboard.
-  - Phase 3 — add mutating CRUD tools (add/edit/delete/enable/disable peer), gated per however Phase 1's confirmation-gate question resolves. NOT STARTED.
-  - Phase 4 — live validation of every tool against the real dashboard over the actual tunnel (not mocked), checked against Clients & Connectivity route invariants. NOT STARTED.
-  - Phase 5 — wiring and packaging: MCP host config entry, no Docker. NOT STARTED.
-- Implementation module — the shipped Phase 2 code lives in `mcp/`, a separate Go module named `wireguard-mcp` (bare local-style name, mirroring the dashboard's `wireguard-dashboard` module) with no import dependency on `dashboard/`.
+  - Phase 2 — scaffold and ship read-only tools only (metrics/status/service/server/alerts/snapshot/geo), validating the MCP-to-dashboard round trip with zero mutation risk. DONE — code shipped 2026-07-06, live-tunnel validated in Phase 4 on 2026-07-07 (9/10 passed live; `get_client_metrics` failed, fixed same-day in Task #6, see Route-Specific Constraints).
+  - Phase 3 — add mutating CRUD tools (add/edit/delete/enable/disable peer) plus the deferred read-only `/api/clients*` tools, gated per the confirmation-gate resolution below. DONE — code shipped 2026-07-06 (`mcp/internal/tools/mutating.go`, `mcp/internal/tools/tokens.go`), live-tunnel validated in Phase 4 on 2026-07-07: confirm-gate and delete-token flows both proven end-to-end against the real dashboard.
+  - Phase 4 — live validation of every tool against the real dashboard over the actual tunnel (not mocked), checked against Clients & Connectivity route invariants. DONE 2026-07-07 — 18/19 tools passed against the live dashboard at `172.16.15.1:8080` over the connected tunnel, driven through a real stdio-spawned subprocess (go-sdk `CommandTransport` exec'ing the built binary), not mocks. One real bug found, fixed same-day in Task #6 — all 19 tools now pass (see Route-Specific Constraints). Record: `mcp/docs/phase4-validation.md`.
+  - Phase 5 — wiring and packaging: MCP host config entry, no Docker. DONE 2026-07-07 (Task #7) — documentation/packaging only, no code changed. `mcp/README.md` brought to its final state: release build command (`cd mcp && go build -o wireguard-mcp ./cmd/mcp-server`, single static binary, no CI, no cross-compile), a concrete `mcpServers` host-config example for Claude Code/Claude Desktop showing both the `MCP_DASHBOARD_ADDR` env and `-addr` flag override forms, and a cross-project "one MCP server per project" adaptation guide.
+- Implementation module — the shipped code lives in `mcp/`, a separate Go module named `wireguard-mcp` (bare local-style name, mirroring the dashboard's `wireguard-dashboard` module) with no import dependency on `dashboard/`.
 - SDK choice — the official `github.com/modelcontextprotocol/go-sdk`, pinned exactly at `v1.6.1` per this repo's exact-version-pin convention; chosen because it is the official SDK (maintained with Google), matches the Go stack, compiles to a single static binary, and has built-in stdio transport.
 - Entry point — `mcp/cmd/mcp-server/main.go` resolves the dashboard target via `-addr` flag → `MCP_DASHBOARD_ADDR` env → compiled-in default `172.16.15.1:8080`, then runs the stdio server until SIGINT/SIGTERM triggers graceful shutdown.
 - Ten Phase 2 tools shipped, each a thin GET wrapper proxying the dashboard's raw JSON response as text: `get_metrics`, `get_system_metrics`, `get_traffic_metrics`, `get_client_metrics`, `get_service_status`, `get_server_info`, `get_alerts`, `get_snapshot`, `get_geo`, `get_health`.
-- Scope decision (Phase 2 vs. Phase 3 for `/api/clients*`) — the read-only client endpoints (`list_clients`, `get_client_config`, `get_client_history`) were deliberately deferred out of Phase 2 into Phase 3, even though they are read-only, so the entire `/api/clients*` surface (read-only and mutating) ships together in one reviewable unit instead of being split across two phases.
+- Nine Phase 3 tools shipped, covering the rest of `/api/clients*`: `list_clients`, `get_client_config`, `get_client_history` (read-only), `add_client`, `edit_client`, `enable_client`, `disable_client` (confirm-gated mutating), `preview_delete_client`, `delete_client` (token-gated mutating pair).
+- Scope decision (Phase 2 vs. Phase 3 for `/api/clients*`) — the read-only client endpoints (`list_clients`, `get_client_config`, `get_client_history`) were deliberately deferred out of Phase 2 into Phase 3, even though they are read-only, so the entire `/api/clients*` surface (read-only and mutating) shipped together in one reviewable unit instead of being split across two phases.
+- All mutating tools remain thin wrappers over `dashboard/internal/server/handlers_clients_admin.go` and `handlers_clients.go` — a rejected add/edit surfaces to the caller as the dashboard's own `dashboard.StatusError` body, never re-validated MCP-side.
+- Verification: `go build`/`go vet`/`go test` httptest-backed unit tests (confirm-gate makes zero calls when unset; token flow rejects wrong/expired/replayed tokens), PLUS Phase 4 live-dashboard round-trip validation (2026-07-07, `mcp/docs/phase4-validation.md`) — 18/19 tools passed against the real dashboard over the real tunnel; the 19th (`get_client_metrics`) now passes after the Task #6 fix.
 
 ## Invariants
 
@@ -55,13 +63,32 @@ These rules must never be violated:
 - stdout MUST be reserved exclusively for the MCP JSON-RPC wire — all logging MUST go to stderr, so protocol framing is never corrupted.
 - Tool response bodies MUST be passed through as raw JSON text, never re-modeled or re-typed, so a dashboard response-shape change never forces a matching MCP-side change.
 - All of `/api/clients*` (both read-only and mutating tools) MUST ship together in Phase 3 — the three read-only client endpoints are not to be pulled forward into Phase 2 individually.
+- `add_client`, `edit_client`, `enable_client`, `disable_client` MUST reject the call before making any HTTP request when `confirm` is missing or `false`.
+- `delete_client` MUST require a token minted by a prior `preview_delete_client` call for the exact same peer name.
+- Delete tokens MUST be in-memory only, per-process, single-use, and expire after 5 minutes.
+- Delete-token comparison MUST use constant-time comparison (`crypto/subtle.ConstantTimeCompare`), never `==`.
+- Confirmation gates are a client-side safety mechanism against LLM over-eagerness, never an authentication or authorization boundary.
+- The confirmation-gate shape MUST be chosen by reversibility: inline `confirm` for reversible ops, token-gated dry run only for the sole irreversible op (`delete_client`).
+- The dashboard target MUST be retargetable via `-addr` flag or `MCP_DASHBOARD_ADDR` env with no recompile — this is what makes the cross-project template copy-paste-able.
 
 ## Route-Specific Constraints
 
-- OPEN QUESTION (unresolved as of 2026-07-06): whether mutating tools need an explicit confirmation parameter or a separate dry-run tool before a destructive call (delete/edit peer). Carried from Phase 1 into Phase 3 — not yet decided, do not assume an answer.
+- CONFIRMATION-GATE QUESTION — RESOLVED by the owner on 2026-07-06 (was previously open): `add_client`/`edit_client`/`enable_client`/`disable_client` use an inline `confirm=true` argument; `delete_client` alone uses a token-gated `preview_delete_client` → `delete_client` dry-run pair.
+- Resolution rationale: the four `confirm`-gated tools are all trivially reversible (re-add, re-edit, re-toggle), while `delete_client` is the only irreversible verb on this surface (a deleted peer's keypair and history are gone for good) — the harder two-tool gate is reserved for that one case, not applied uniformly.
+- Full gate mechanics (token TTL, single-use, most-recent-wins, constant-time compare) live in `mcp/docs/confirmation-gates.md` — read it before touching `mutating.go` or `tokens.go`.
 - No application-layer auth exists on the dashboard API today (see Service & Host Health route); the MCP wrapper inherits this and adds none by design — document this as a settled, owner-accepted risk, never as an open gap to flag or fix.
 - The single-hardcoded-target design depends on the operator's own usage pattern (one VPN tunnel connected at a time, never concurrent/split-tunnel across projects); if that usage pattern ever changes, this design should be revisited.
-- Phase 4 live validation must be checked against Clients & Connectivity route invariants (SQLite as live source of truth, parity with the `wg-peer` CLI), not against mocks.
-- Phase 2 code has been built, vetted, and smoke-tested in isolation only — it has NOT been exercised against a live dashboard over a real WireGuard tunnel; treat any round-trip behavior as unverified until Phase 4.
-- `get_health`'s inclusion in Phase 2 is pending owner sign-off on scope — this route's endpoint list never names `/api/health`, even though the dashboard registers it; do not treat its presence in code as a settled scope decision.
-- Phase 3 (mutating tools) and the confirmation-gate open question above are both still unstarted/unresolved — nothing in the shipped Phase 2 code should be read as resolving them.
+- Phase 4 live validation (2026-07-07, `mcp/docs/phase4-validation.md`) confirmed the Clients & Connectivity route's "live apply via `wg-sync`, no tunnel drop" invariant held for every mutating call — `/api/health` returned 200 with `client_store_ready:true` after each add/edit/enable/disable/delete.
+- Confirm-gate rejection is proven at two independent layers: the go-sdk JSON-schema layer rejects `confirm` omitted entirely; the handler's `requireConfirm` rejects explicit `confirm:false`. Both make zero HTTP calls to the dashboard.
+- The `delete_client` 5-minute token TTL was proven with a real (non-mocked) 305-second wait in the same live process — not simulated or time-mocked.
+- FIXED BUG (found in Phase 4, 2026-07-07; fixed same-day in Task #6): `get_client_metrics` double-percent-encoded the pubkey path segment, 404ing on any pubkey containing `/` — a large fraction of real WireGuard keys.
+- Root cause: `mcp/internal/dashboard/client.go`'s `do()` re-escaped an already-`url.PathEscape`d path by building a `url.URL{Path: ...}` and calling `.String()`, turning `%2F` into `%252F`.
+- Fix (single layer, `client.go`'s `do()` only): `do()` now builds the request from a raw URL string (`"http://" + BaseAddr + path` plus encoded query) passed to `http.NewRequestWithContext`, so `url.Parse` preserves the caller's escaping verbatim.
+- ESCAPING-OWNERSHIP INVARIANT: tool handlers `url.PathEscape` their dynamic path segment exactly once; `do()` MUST NOT re-encode it — this contract is now stated explicitly in `do()`'s doc comment.
+- `get_client_config`/`get_client_history` share the same code path through `do()` and were latently affected for names containing `/`-like characters, even though they passed live validation with typical peer names; the `do()` fix covers all three handlers without any handler-side change.
+- Verified: `go build`/`go vet`/`go test`/`gofmt` clean, a new httptest regression test proves a `/`-and-`+`-containing segment reaches the server singly-encoded (fails pre-fix), and live re-validation against the real dashboard confirms a real pubkey containing `/` now returns HTTP 200 with a real time-series (was 404 before).
+- `get_health` SCOPE — RESOLVED by the owner on 2026-07-06: kept in scope as an approved, intentional exception to Phase 1's tool-surface doc (`mcp/docs/tool-surface.md`), which did not originally list `/api/health`; do not treat it as unplanned or pending.
+- Resolution rationale: `get_health` is a thin read-only GET wrapper around an already-unauthenticated liveness probe (`/api/health`), the same risk profile as the other nine Phase 2 read-only tools, and it is the cheapest tool to sanity-check the MCP-to-dashboard round trip during Phase 4 live-tunnel validation.
+- PHASE 5 PACKAGING (Task #7, 2026-07-07) — documentation/packaging only: no code, no Docker, no always-on listener, no auth added; the release build command and MCP host-config JSON live in `mcp/README.md`, not duplicated here.
+- Cross-project reuse: `mcp/README.md`'s "one MCP server per project" section documents retargeting a copy of this server to a different WireGuard project by changing only the address override (`-addr`/`MCP_DASHBOARD_ADDR`) and the `mcpServers` config key name — transport (stdio), no-Docker, the 19-tool set, wrapper-only design, and no-auth all stay identical, and no recompile is needed.
+- This was the final phase of the roadmap — the MCP server initiative (Phases 1–5) is now DONE end to end: designed, built, live-tunnel validated (Phase 4), bug-fixed same-day (Task #6), and packaged/wired (Phase 5).

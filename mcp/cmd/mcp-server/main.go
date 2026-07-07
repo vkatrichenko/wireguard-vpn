@@ -1,13 +1,16 @@
 // Command mcp-server is a stdio MCP server that wraps the wireguard-dashboard's
-// read-only /api/* endpoints as MCP tools. This is Phase 2 of the mcp-server
-// route (project-context/routes/mcp-server/README.md): scaffold + read-only
-// tools only, to validate the MCP-to-dashboard round trip with zero mutation
-// risk before Phase 3 adds any peer-CRUD tool.
+// /api/* endpoints as MCP tools. Phase 2 (mcp-server route,
+// project-context/routes/mcp-server/README.md) shipped the read-only tools
+// first, with zero mutation risk, to validate the MCP-to-dashboard round
+// trip; Phase 3 adds the mutating peer-CRUD tools (see
+// internal/tools/mutating.go and docs/confirmation-gates.md for the
+// confirm-gate / delete-token design).
 //
 // It is spawned on-demand by an MCP host (e.g. an `mcpServers` config entry),
 // talks to the dashboard over the WireGuard tunnel like any other tunnel
-// client, and holds no state of its own — every tool call is a fresh HTTP GET
-// via internal/dashboard.Client. It is never deployed to the EC2 instance and
+// client, and holds no state of its own beyond the in-process delete-token
+// Store constructed below — every tool call is a fresh HTTP request via
+// internal/dashboard.Client. It is never deployed to the EC2 instance and
 // never embedded in the dashboard's own binary (see the route's Invariants).
 package main
 
@@ -57,6 +60,13 @@ func main() {
 
 	server := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: serverVersion}, nil)
 	tools.Register(server, client)
+
+	// One Store per process, shared by every delete_client/preview_delete_client
+	// call — a per-call Store would mean a preview's token is never visible to
+	// the delete call that's supposed to redeem it. See tokens.go's Store doc
+	// comment for why per-process (not persisted) is correct here.
+	store := tools.NewStore()
+	tools.RegisterMutating(server, client, store)
 
 	// Mirrors the dashboard's own signal.NotifyContext idiom (main.go) so a
 	// Ctrl-C or host-initiated SIGTERM tears the stdio session down cleanly

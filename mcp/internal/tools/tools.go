@@ -1,10 +1,11 @@
-// Package tools registers the Phase 2 read-only MCP tools. Each tool is a
-// thin GET wrapper around one dashboard /api/* endpoint — see
-// mcp/docs/tool-surface.md for the endpoint-to-tool mapping this mirrors, and
-// mcp/README.md for the Phase 2 scope decision (why list_clients,
-// get_client_config, and get_client_history are NOT registered here despite
-// being read-only — they're deferred to ship alongside Phase 3's
-// /api/clients* mutating tools).
+// Package tools registers the dashboard-wrapping MCP tools. Each read-only
+// tool in this file is a thin GET wrapper around one dashboard /api/*
+// endpoint — see mcp/docs/tool-surface.md for the endpoint-to-tool mapping
+// this mirrors. list_clients, get_client_config, and get_client_history are
+// read-only but were deliberately held back from the Phase 2 batch and ship
+// here alongside Phase 3's mutating tools (internal/tools/mutating.go) so the
+// entire /api/clients* surface lands as one reviewable unit — see
+// mcp/docs/tool-surface.md and project-context/routes/mcp-server/README.md.
 //
 // Handlers never re-model the dashboard's JSON response shapes: the raw body
 // is proxied through as the tool's text content (see internal/dashboard.Get).
@@ -35,11 +36,23 @@ type noArgs struct{}
 
 // clientMetricsArgs is get_client_metrics' input. Pubkey is required because
 // that endpoint is keyed by WireGuard public key, not client name (unlike
-// get_client_config/get_client_history, which are name-keyed but out of scope
-// for Phase 2 — see the package doc comment above).
+// get_client_config/get_client_history below, which are name-keyed).
 type clientMetricsArgs struct {
-	Pubkey string `json:"pubkey" jsonschema:"the WireGuard public key identifying the client, as returned by list_clients (deferred to Phase 3) or the dashboard UI"`
+	Pubkey string `json:"pubkey" jsonschema:"the WireGuard public key identifying the client, as returned by list_clients or the dashboard UI"`
 	Range  string `json:"range,omitempty" jsonschema:"optional time range window (e.g. '1h', '24h'), passed through verbatim to the dashboard"`
+}
+
+// clientNameArgs is get_client_config's input: just the peer name used as the
+// {name} path segment.
+type clientNameArgs struct {
+	Name string `json:"name" jsonschema:"the client's name, as returned by list_clients"`
+}
+
+// clientNameRangeArgs is get_client_history's input: the peer name plus the
+// same optional ?range= passthrough as the metrics tools above.
+type clientNameRangeArgs struct {
+	Name  string `json:"name" jsonschema:"the client's name, as returned by list_clients"`
+	Range string `json:"range,omitempty" jsonschema:"optional time range window (e.g. '1h', '24h', '7d'), passed through verbatim to the dashboard"`
 }
 
 // Register adds every Phase 2 read-only tool to server, wired against client.
@@ -70,6 +83,35 @@ func Register(server *mcp.Server, client *dashboard.Client) {
 		// way, but PathEscape is the semantically correct escaper here since
 		// this is a path segment, not a query value).
 		path := "/api/metrics/client/" + url.PathEscape(in.Pubkey)
+		return get(ctx, client, path, q)
+	})
+
+	addNoArgTool(server, client, "list_clients", "/api/clients",
+		"Joined peer list: manifest metadata (name, address, note, enabled) plus live `wg show wg0 dump` state (status, handshake, byte counters, endpoint, geo) per client.")
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_client_config",
+		Description: "Downloadable wg-quick config text for one client, keyed by name.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in clientNameArgs) (*mcp.CallToolResult, any, error) {
+		if in.Name == "" {
+			return nil, nil, fmt.Errorf("name is required")
+		}
+		path := "/api/clients/" + url.PathEscape(in.Name) + "/config"
+		return get(ctx, client, path, nil)
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_client_history",
+		Description: "Per-client connection-history summary (sessions, online/offline, last-seen) over an optional ?range= window, keyed by name.",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in clientNameRangeArgs) (*mcp.CallToolResult, any, error) {
+		if in.Name == "" {
+			return nil, nil, fmt.Errorf("name is required")
+		}
+		q := url.Values{}
+		if in.Range != "" {
+			q.Set("range", in.Range)
+		}
+		path := "/api/clients/" + url.PathEscape(in.Name) + "/history"
 		return get(ctx, client, path, q)
 	})
 
