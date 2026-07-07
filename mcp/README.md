@@ -127,33 +127,31 @@ names it `wireguard-mcp` instead. Same binary, two names, depending on how you g
 
 ### Path 1: `go install` (primary)
 
-Requires only a Go toolchain — no download, no checksum verification step, works identically on every
-OS/arch Go itself supports:
+Requires only a Go toolchain matching `mcp/go.mod` (currently `go 1.25.5`) — no download, no checksum
+verification step, works identically on every OS/arch Go itself supports:
 
 ```sh
-go install github.com/vkatrichenko/wireguard-vpn/mcp/cmd/mcp-server@mcp/v0.1.0
+go install github.com/vkatrichenko/wireguard-vpn/mcp/cmd/mcp-server@v0.0.3
 ```
 
-The `mcp/v0.1.0` version suffix (not just `v0.1.0`) is required because this module lives in the `mcp/`
-subdirectory of the repo, not at its root — Go's module-in-subdirectory convention tags the module path
-prefix onto the version. Always pin an exact tag here; never `@latest` or `@mcp` (floating branch), so a
-`go install` from one machine reproduces the same binary as another.
+The version selector is `@v0.0.3`, **not** `@mcp/v0.0.3`. The git tag itself is `mcp/v0.0.3` — Go's
+convention for tagging a module that lives in a repo subdirectory — but the `go install` version
+selector takes the plain semver; Go maps it onto the prefixed tag internally. Writing `@mcp/v0.0.3`
+fails with `invalid version: ... disallowed version string`. Always pin an exact tag here; never
+`@latest` (floating), so a `go install` from one machine reproduces the same binary as another.
 
-The installed binary lands in `$GOBIN` if set, otherwise `$(go env GOPATH)/bin` — and per the naming note
-above, it is named **`mcp-server`**, not `wireguard-mcp`.
+The installed binary lands in `$GOBIN` if set, otherwise `$(go env GOPATH)/bin` — make sure that
+directory is on your `PATH`. Per the naming note above, it is named **`mcp-server`**, not
+`wireguard-mcp`. Note also that `go install` does not stamp a version into the binary: it reports
+`dev` (`-version` flag), since only the GoReleaser release build applies
+`-ldflags "-X main.version=..."`.
 
 ### Path 2: prebuilt release binary
 
 Download the archive matching your OS/arch from
-[GitHub Releases](https://github.com/vkatrichenko/wireguard-vpn/releases), then verify it against the
-release's `checksums.txt` before running anything:
-
-```sh
-shasum -a 256 -c checksums.txt --ignore-missing
-```
-
-On macOS, Gatekeeper quarantines anything downloaded via a browser or `curl` from a non-notarized source;
-clear it before running the extracted binary:
+[GitHub Releases](https://github.com/vkatrichenko/wireguard-vpn/releases) and extract it. On macOS,
+Gatekeeper quarantines anything downloaded via a browser or `curl` from a non-notarized source; clear it
+before running the extracted binary:
 
 ```sh
 xattr -d com.apple.quarantine wireguard-mcp
@@ -164,9 +162,50 @@ distribution is deliberately deferred for this project; see "GoReleaser and futu
 The extracted binary is named **`wireguard-mcp`** (per the naming note above), matching the `Building`
 section's local `go build -o wireguard-mcp` convention.
 
-Each release's checksums are additionally signed keylessly (Sigstore/cosign, OIDC — no key management) as
-part of `mcp-release.yml`; this is exercised for real only in CI on a tagged run, not in local snapshot
-builds.
+Move it into place and point your MCP host at it (see "Manual invocation" below):
+
+```sh
+sudo mv wireguard-mcp /usr/local/bin/wireguard-mcp
+```
+
+That's the whole default flow — no checksum step required. If you want to confirm integrity/provenance
+before trusting the download, see "Verify the download (recommended)" below.
+
+### Verify the download (recommended)
+
+The release still publishes `checksums.txt`, plus a keyless Sigstore/cosign signature over it, for anyone
+who wants to verify the download before trusting it. This is optional — it's no longer part of the
+default flow above, but the artifacts are always there if you want them.
+
+Check the SHA-256 checksum:
+
+```sh
+shasum -a 256 -c checksums.txt --ignore-missing
+```
+
+Each release's `checksums.txt` is additionally signed keylessly (Sigstore/cosign, OIDC — no key
+management) as part of `mcp-release.yml`, producing a `checksums.txt.sig`/`checksums.txt.pem` pair
+alongside it (see the `signs:` block in `mcp/.goreleaser.yaml`); this is exercised for real only in CI on
+a tagged run, not in local snapshot builds. Verify the signature over the checksums file with:
+
+```sh
+cosign verify-blob \
+  --certificate checksums.txt.pem \
+  --signature checksums.txt.sig \
+  --certificate-identity-regexp 'https://github.com/vkatrichenko/wireguard-vpn/\.github/workflows/mcp-release\.yml@refs/tags/mcp/v.*' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  checksums.txt
+```
+
+The identity regexp asserts the signature came from this repo's `mcp-release.yml` workflow running on an
+`mcp/v*` tag, and the OIDC issuer asserts it was GitHub Actions — together they prove the checksums were
+signed by our release pipeline, not a third party. Requires cosign >= 2.0 (the release pins 2.6.x, which
+still emits the `.sig`/`.pem` sidecars these flags consume; cosign 3.x changed the default to bundle
+format).
+
+Skipping this section means trusting the GitHub release download as-is — the same trust model as any
+other GitHub Release binary. That's an acceptable trade-off for a solo-maintained project the owner
+controls directly; verify explicitly once this repo is open-sourced and installed by others.
 
 ### GoReleaser and future distribution
 

@@ -1,4 +1,4 @@
-# WireGuard VPN — on AWS *or any Ubuntu VPS* — with a built-in observability dashboard
+# WireGuard VPN — on AWS *or any Ubuntu VPS* — with a built-in observability dashboard and MCP server
 
 > A fully codified, self-hosted [WireGuard](https://www.wireguard.com/) VPN server — provision it end-to-end on AWS with Terraform, **or** stand it up on any plain Ubuntu VPS with a single script — plus a single-binary, VPN-only web dashboard for status, traffic, connection history, a peer map, **live client management**, and proactive alerting.
 
@@ -101,6 +101,12 @@ It also ships something most guides don't: a **lightweight observability dashboa
 │   ├── internal/            # alerts, clients, db, geoip, history, poller, server, serverinfo, wgsync, …
 │   ├── web/                 # html/template + static assets (htmx, Chart.js, fonts, world.svg)
 │   └── Makefile             # build / run / test
+├── mcp/                     # The stdio MCP server — lets an LLM agent drive the dashboard API
+│   ├── cmd/mcp-server/      #   binary entrypoint (`go install …/mcp/cmd/mcp-server@vX.Y.Z`)
+│   ├── internal/            #   dashboard API client + the 19 read-only/mutating tool handlers
+│   ├── .goreleaser.yaml     #   multi-platform release build (signed, checksummed)
+│   └── README.md            #   full install / usage / tool reference
+├── docs/                    # Supplementary guides (deployment-options, wireguard-mcp, design)
 └── Makefile                 # repo-wide pre-commit (fmt, tflint, trivy, docs) + shellcheck
 ```
 
@@ -287,6 +293,16 @@ wg-peer remove bob
 | **`cloud`** | SQLite **+ versioned S3 backup** | **Yes** — restored from S3 on boot | Every change write-throughs to `s3://…/clients.json`; Terraform provisions the bucket + least-privilege IAM but never reads it (no drift). |
 
 > **Cloud-mode IAM note:** the instance role needs `s3:GetObject` + `s3:PutObject` on `clients.json` **and `s3:ListBucket` on the bucket**. `ListBucket` is required so the dashboard's first-boot read of the not-yet-created object returns a clean `404` (which triggers the cold-seed) instead of a `403` that silently disables the backup. The Terraform module wires all three automatically in `cloud` mode.
+
+---
+
+## AI agent control — `wireguard-mcp`
+
+A stdio MCP server that lets an LLM agent (Claude Code, or any other MCP host) manage peers and read
+metrics/status/health through the same dashboard API, over the tunnel — the same capabilities as the UI or
+`wg-peer`, just driven by an AI assistant instead of a human. Mutating calls are confirmation-gated
+(inline `confirm` for add/edit/enable/disable; a token-gated preview step for delete). See
+[docs/wireguard-mcp.md](docs/wireguard-mcp.md) for the full install and usage guide.
 
 ---
 
