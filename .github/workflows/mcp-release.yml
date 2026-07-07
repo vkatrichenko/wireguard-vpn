@@ -27,10 +27,26 @@
 #   - GORELEASER_CURRENT_TAG is exported below with the `mcp/` prefix
 #     stripped, because GoReleaser's git-tag parsing (still repo-root-based
 #     regardless of workdir) can't treat a `/`-containing tag as semver
-#     without Pro. The GitHub Release itself still publishes against the
-#     real, literal `mcp/vX.Y.Z` tag (GoReleaser's OSS default release
-#     target), so this override only affects version stamping (ldflags,
-#     archive names, checksums), never which tag the release attaches to.
+#     without Pro.
+#
+# BUILD vs PUBLISH split (fixes a real failure on tag `mcp/v0.0.1`): GoReleaser's
+# `release` mode validates that a git tag literally named the stripped version
+# (e.g. `v0.0.1`) was made against HEAD — which never exists, since the real
+# tag is `mcp/v0.0.1` — so `release --clean` always failed with "git tag
+# v0.0.1 was not made against commit ...". Publishing against the stripped tag
+# instead isn't an option either: GoReleaser would auto-create a plain
+# `vX.Y.Z` tag, colliding with dashboard-release.yml's `v*.*.*` namespace and
+# NOT being the `mcp/vX.Y.Z` ref `go install .../mcp/cmd/mcp-server@mcp/vX.Y.Z`
+# needs. So the two concerns are now split:
+#   - GoReleaser (`release --clean --skip=validate`) only builds, archives,
+#     checksums, and signs — mcp/.goreleaser.yaml's `release.disable: true`
+#     means it never attempts to publish a GitHub Release at all, so
+#     `--skip=validate` is safe.
+#   - The workflow's own `gh release create "${GITHUB_REF_NAME}" ...` step
+#     (below) publishes the actual release against the real, literal
+#     `mcp/vX.Y.Z` tag — mirroring dashboard-release.yml's own `gh release
+#     create "${GITHUB_REF_NAME}"` pattern — and uploads GoReleaser's
+#     dist/ archives, checksums.txt, and cosign signature/cert files as assets.
 #
 # Auth: GITHUB_TOKEN with `contents: write` to publish the release, plus
 # `id-token: write` for cosign's keyless (OIDC) signing of checksums.txt. No
@@ -85,10 +101,40 @@ jobs:
         # still targets the unstripped, real tag.
         run: echo "GORELEASER_CURRENT_TAG=${GITHUB_REF_NAME#mcp/}" >> "$GITHUB_ENV"
 
-      - name: Run GoReleaser
+      - name: Run GoReleaser (build, archive, checksum, sign — no publish)
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
+        # `--skip=validate` is required because there is no plain-semver git
+        # tag (e.g. `v0.0.1`) at HEAD — only the real `mcp/v0.0.1` — and
+        # GoReleaser's release-mode validate step demands one. This is safe
+        # because mcp/.goreleaser.yaml sets `release.disable: true`, so
+        # GoReleaser never attempts to publish (and therefore never
+        # auto-creates a stray plain-semver tag); publishing is handled by
+        # the `gh release create` step below instead.
         with:
           workdir: mcp
-          args: release --clean
+          args: release --clean --skip=validate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GitHub Release
+        working-directory: mcp
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # GoReleaser only built artifacts into mcp/dist/ (release.disable:
+        # true in mcp/.goreleaser.yaml). This step publishes the actual
+        # release against the real, literal pushed tag (GITHUB_REF_NAME =
+        # `mcp/vX.Y.Z`), mirroring dashboard-release.yml's own `gh release
+        # create "${GITHUB_REF_NAME}"` pattern. Asset globs:
+        #   dist/*.tar.gz, dist/*.zip  — per-platform archives (archives.formats
+        #                                 / format_overrides in the config)
+        #   dist/checksums.txt         — checksum.name_template
+        #   dist/checksums.txt.sig     — cosign sign-blob --output-signature
+        #   dist/checksums.txt.pem     — cosign sign-blob --output-certificate
+        # The trailing `checksums.txt*` glob catches the checksum file plus
+        # its cosign `.sig`/`.pem` sidecars in one pattern; publishing the
+        # signature/cert is required or the signing step is pointless.
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            dist/*.tar.gz dist/*.zip dist/checksums.txt*
