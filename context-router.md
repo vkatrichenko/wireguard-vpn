@@ -60,6 +60,10 @@ Directory Path: project-context/routes/service-host-health/
 Rules for the HTTP surface, view-models, htmx partials, embedded assets, auto-refresh, and the responsive UI that presents the data routes and hosts the sanctioned client-management and webhook-management write endpoints.
 Directory Path: project-context/routes/web-delivery-ui/
 
+## MCP Server Route
+PLANNED, not yet implemented: rules for a laptop-side MCP server that wraps the dashboard's existing REST API so an LLM agent can manage peers and read metrics over the WireGuard tunnel.
+Directory Path: project-context/routes/mcp-server/
+
 ## AI Skills and Agents
 Available tools and automated skills for the AI agent (e.g., context-router initializer/actualizer setup scripts).
 Directory Path: .agents/skills/

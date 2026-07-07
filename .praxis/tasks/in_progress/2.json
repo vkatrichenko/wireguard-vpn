@@ -1,0 +1,20 @@
+{
+  "id": 2,
+  "assignee": "jarvis.json",
+  "priority": "medium",
+  "status": "to_review",
+  "title": "[2] MCP Server Phase 1 — Tool-Surface Definition",
+  "why_we_need_this": "We're planning an MCP server (documented, PLANNED-only, in `project-context/routes/mcp-server/README.md`) that lets an LLM agent manage WireGuard peers and read metrics/status by wrapping the dashboard's existing `/api/*` REST surface. The owner approved a 5-phase, low-risk-first roadmap (read-only before mutating) on 2026-07-06. Phase 1 is the first step: define which MCP tools will exist and which dashboard endpoint each one wraps, before any code is written. This unblocks Phase 2 (scaffold + read-only tools) with a concrete, agreed tool list instead of ad-hoc naming during implementation.",
+  "acceptance_criteria": "- Read `project-context/routes/mcp-server/README.md` (full route) plus `clients-connectivity/README.md`, `web-delivery-ui/README.md`, `metrics-monitoring/README.md`, and `service-host-health/README.md` to establish the confirmed, already-implemented `/api/*` endpoint surface. Use `search_project_context` for this — do not derive the endpoint list solely from re-reading `server.go`, so the tool list stays consistent with what's documented.\n- Enumerate every relevant endpoint and produce a proposed MCP tool name for each, at minimum covering: `GET/POST/PATCH/DELETE /api/clients`, `GET /api/clients/{name}/config`, `GET /api/clients/{name}/history` (peer CRUD, spec 019); `GET /api/metrics`, `/api/metrics/system`, `/api/metrics/traffic`, `/api/metrics/client/{pubkey}`; `/api/service`, `/api/server`, `/api/alerts`, `/api/snapshot`, `/api/geo`. Confirm this list against the routes above and correct/extend it if the routes show additional or renamed endpoints.\n- Classify each proposed tool as read-only or mutating (mutating = anything under `/api/clients*` that adds/edits/deletes/enables/disables a peer).\n- Decide and document the tool granularity: one MCP tool per endpoint vs. a coarser grouping (e.g. a single `manage_client` tool with an action param) — state the rationale for whichever is chosen.\n- Explicitly document, but do NOT resolve, the open question carried from planning into Phase 3: whether mutating tools require an explicit confirmation parameter or a separate dry-run tool before a destructive call. Mark it as unresolved, deferred to Phase 3.\n- Deliverable is a design document only — no working code, no MCP server implementation, no dashboard changes. Write it to `mcp/docs/tool-surface.md` (create the `mcp/` directory as the seed of the in-repo MCP server location per the route's \"repo location\" decision — directory + this one file only, nothing else).\n- Output must respect the route's invariants: wrapper-only design (tools call `/api/clients*` etc., never touch SQLite or `wg` directly), no embedding into the dashboard Go binary, laptop-side/stdio framing carried as context (not re-decided here).",
+  "important_constraints": "- This is Phase 1 of the approved 5-phase roadmap — explicitly no-code by design (see `project-context/routes/mcp-server/README.md` line 29). Do not scaffold the MCP server itself, do not write Go/TS code, do not add dependencies.\n- Do not modify the dashboard (`dashboard/`) or Terraform (`terraform/`) — this task touches only the new `mcp/docs/tool-surface.md` file.\n- Do not edit anything under `project-context/` directly — that's Praxis-managed via `update_project_context`, out of scope for this task.\n- Once `mcp/docs/tool-surface.md` is committed, follow this repo's git conventions: PR-based workflow, `docs:` commit prefix, `docs/`-prefixed branch name.\n- Do not attempt to resolve the confirmation-gate open question — it is explicitly owner-deferred to Phase 3, not this task.\n- No application-layer auth is being added or discussed here — that's a settled, owner-accepted risk documented in the mcp-server route; do not re-raise it.",
+  "labels": [
+    "mcp-server",
+    "planning",
+    "phase-1"
+  ],
+  "blocked_reason": "",
+  "contextRouterIncluded": false,
+  "PRDIncluded": false,
+  "created_at": 1783365334296,
+  "column_entered_at": 1783366704502
+}
