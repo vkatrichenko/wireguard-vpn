@@ -92,6 +92,17 @@ jobs:
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+        with:
+          # Pin cosign to the latest 2.x. cosign 3.0.0+ makes --new-bundle-format
+          # the DEFAULT, which deprecates and IGNORES the --output-signature /
+          # --output-certificate flags that goreleaser's `signs` block passes and
+          # instead demands --bundle <path>; with none given it fails on
+          # `create bundle file: open : no such file or directory`. cosign 2.6.x
+          # still honors the sidecar-file flags, so the .goreleaser.yaml `signs`
+          # block and the `dist/checksums.txt*` publish glob (which catches the
+          # .sig/.pem sidecars) work unchanged. Follow-up: migrate `signs` to
+          # `--bundle` and republish a single .bundle artifact to unpin cosign.
+          cosign-release: 'v2.6.3'
 
       - name: Derive stripped version tag for GoReleaser
         # GITHUB_REF_NAME is the real pushed tag, e.g. `mcp/v0.1.0`. Strip the
