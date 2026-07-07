@@ -23,16 +23,35 @@ Open `context-router.md` in the ROOT and replace the placeholders:
 4. "Project Terminology": Refine the Application vs Agent definitions in the `Project terminology` section to match the project's stack (e.g., "Application" might be a frontend SPA, a backend service, or a CLI tool).
 
 ## Step 3: Define Core Business Routes
-Transform the generic `[Route X Name]` sections into actual routes:
-1. Replace the placeholders with the core routes you identified in Step 1.
+MANDATORY FIRST ROUTE: The `about` route must always exist in every project. Before adding any project-specific routes:
+1. Create `project-context/routes/about/` if it does not exist.
+2. Create `project-context/routes/about/README.md` — following the standard route README contract (TL;DR section first) — and populate it with: the project name, a concise description of what it does, the target audience, the core tech stack, and the main value proposition, all derived from your Step 1 analysis.
+3. Add this entry first in the `# Core Business Routes (Behavioral Rules)` section of `context-router.md`, before any other routes:
+   ```
+   ## About
+   High-level overview of what this project is, who it is for, and its core tech stack.
+   Directory Path: project-context/routes/about/README.md
+   ```
+
+Then transform the generic `[Route X Name]` sections into project-specific routes:
+4. Replace the placeholders with the core routes you identified in Step 1.
 2. Write a brief 1-sentence description of the business logic each route governs.
-3. Assign a valid directory path for each (e.g., `project-context/routes/users/`). DIRECTORY PATH RULE: Every `Directory Path` MUST be relative to the repository root, never relative to the current file. This applies to context-router.md AND to every sub-router README.md that declares child routes.
+3. Assign a valid file path for each pointing to its README.md (e.g., `project-context/routes/users/README.md`). DIRECTORY PATH RULE: Every `Directory Path` MUST be relative to the repository root, never relative to the current file. This applies to context-router.md AND to every sub-router README.md that declares child routes.
 4. If these directories do not exist in the file system, CREATE them now.
+5. Keep route entries in context-router.md lean: name, description, and `Directory Path` only. All business-rule detail — key files, invariants, constraints — goes exclusively into the route's README.md. context-router.md is the compass; it points agents to the README, not duplicates it.
+6. ROADMAP ROUTE: If the project tracks planned milestones, features, or release phases, create a `project-context/routes/roadmap/` directory and add it to context-router.md:
+   ```
+   ## Roadmap
+   Planned and completed work items organized by phase and milestone.
+   Directory Path: project-context/routes/roadmap/README.md
+   ```
+   The Roadmap route README uses `- [ ]` for planned items and `- [x]` for completed items. See the Roadmap Route Template in the Reference Structure section.
 
 ## Step 4: Populate Route Documentation
 For each route directory created in Step 3, generate a `README.md` using the template at `templates/route-readme-template.md` (relative to this skill directory).
 1. Copy the template structure for each route.
 2. Replace all `[...]` placeholders with project-specific content derived from your Step 1 analysis:
+   - TL;DR: write 3-4 bullet points covering the most critical rules, data structures, and key implementation files for this route. Each TL;DR bullet must be a single declarative sentence of ≤ 25 words containing the key domain terms agents would search for. No compound sentences joining unrelated facts. No prose paragraphs. This is what agents read first — make it actionable.
    - Route Name: the actual route name (e.g., "Tasks", "Users", "Auth").
    - Purpose: a concise explanation of what the route owns and why it exists.
    - Core Concepts: list the key entities, states, or workflows the route manages based on your codebase scan.
@@ -40,16 +59,33 @@ For each route directory created in Step 3, generate a `README.md` using the tem
    - Route-Specific Constraints: add any data format, API boundary, or validation rules relevant to this route.
 3. Keep each README short and factual. Avoid speculative content; only document what you can confirm from the codebase.
 4. If a `README.md` already exists in a route directory, do NOT overwrite it.
+5. BM25 SEARCHABILITY CONTRACT: `search_project_context` scores individual lines using BM25 with field boosting (headings > body). Every behavioral rule, invariant, and business constraint must occupy its own dedicated line. Multi-rule sentences and prose paragraphs bury key terms and cause recall failures — agents searching for those terms will not find them. The format of the content IS the retrieval contract.
+6. PRUNE STALE CONTENT: Remove historical detail, resolved issue narratives, and redundant explanations that dilute term frequency for current rules. Every line should earn its place by being either a current behavioral rule or essential architectural context.
+7. ROADMAP ROUTE FORMAT: The Roadmap route README organizes work by phase or milestone using checkbox notation: `- [ ]` for planned items, `- [x]` for completed items. Phases are ordered chronologically (past to future). Completed items must not be removed — they serve as a completion log. See the Roadmap Route Template in the Reference Structure section for the expected structure.
 
-Also ensure the `project-context/config/` directory exists. If `project-context/config/files_tree.md` does not exist, create it with a placeholder heading `# Project File Tree` so the path referenced by the router is valid.
+## Step 5: Generate AI Agent Quick Start Protocol and Route Selection Guide
+In `context-router.md`, populate the two agent-orientation sections:
 
-## Step 5: Final Cleanup & Validation
+1. The `AI Agent Quick Start Protocol` section is already present in the template. Keep it as-is — it tells agents to read this file, identify relevant routes, read those READMEs (TL;DR first), then implement.
+
+2. Populate the `Route Selection Guide` table:
+   - For each route, identify 4-8 task keywords or phrases that would indicate the agent needs that route.
+   - Group related keywords into rows. When a task touches multiple routes, create a combined row.
+   - The goal: an agent should be able to scan this table and know exactly which README files to open, without reading all of them.
+
+## Step 6: Final Cleanup & Validation
 1. Remove any remaining `[...]` placeholders from `context-router.md`.
 2. Ensure there is absolutely NO "bold formatting" anywhere in `context-router.md`.
 3. Verify every `Directory Path` in `context-router.md` AND in sub-router README.md files has a matching directory with a `README.md` on disk, and is relative to the repository root (not relative to the current file).
-4. Save all files.
+4. Verify every route README.md starts with a `## TL;DR` section immediately after the `#` heading.
+5. Verify every route entry in context-router.md has a `Directory Path:` pointing to its README.md on disk, and contains NO `Key files:` or `Critical rules:` fields — those belong only in the README.md.
+6. Verify the Route Selection Guide table covers all routes.
+7. Verify all behavioral rules appear as standalone searchable lines (not embedded in multi-sentence prose).
+8. Verify each TL;DR bullet is a single declarative sentence of ≤ 25 words containing key domain terms that agents would query.
+9. Verify stale or redundant content has been pruned to avoid diluting BM25 term frequency for current rules.
+10. Save all files.
 
-## Step 6: Completion
+## Step 7: Completion
 Report back to the user with a brief summary of:
 - The routes identified and initialized.
 - The route READMEs created (list file paths).
@@ -58,7 +94,7 @@ Report back to the user with a brief summary of:
 # Scaling Guidelines
 
 ## When to split a route into child routes
-- The route's README.md exceeds ~100 lines because it documents multiple distinct rule sets.
+- The route's README.md exceeds ~1000 lines because it documents multiple distinct rule sets.
 - Two sub-areas have invariants that are independent or contradictory.
 - A sub-area has its own lifecycle (e.g., can be created/modified/deleted independently of the parent route's rules).
 
@@ -93,6 +129,14 @@ When writing or updating documentation, use these terms consistently:
   - "Implementation is the map, router is the compass"
   - Trigger rule
 
+# AI Agent Quick Start Protocol
+  - 6-step numbered protocol for agents to follow before coding
+  - Emphasizes: read this file -> identify routes -> read TL;DR -> read deeper if needed -> find files -> implement
+
+# Route Selection Guide
+  - Markdown table mapping task keywords to route names
+  - Helps agents skip irrelevant routes without reading them
+
 # context-router.md terminology
   - Context Router  (this root file)
   - Route           (directory = business/technical module node)
@@ -115,17 +159,113 @@ When writing or updating documentation, use these terms consistently:
 
 # Project context map (Routes)
   ## PRD & Vision
-  ## Project description
+  ## About (MANDATORY)
+     Directory Path: project-context/routes/about/README.md
 
 # Core Business Routes (Behavioral Rules)
   ## Route A
-     Directory Path: project-context/routes/route-a/
+     Directory Path: project-context/routes/route-a/README.md
   ## Route B
-     Directory Path: project-context/routes/route-b/
+     Directory Path: project-context/routes/route-b/README.md
+  ## Roadmap
+     Directory Path: project-context/routes/roadmap/README.md
   ## AI Skills and Agents
      Directory Path: .agents/skills/
 
 # Rules for this file (context-router.md)
+```
+
+## Route README.md required sections (in order)
+
+```
+# [Route Name] Domain
+
+## TL;DR
+- [Single declarative sentence ≤ 25 words with key domain terms]
+- [One searchable rule per bullet — no compound sentences]
+- [Each bullet independently findable by BM25 keyword search]
+- [Key files: list relevant source files]
+
+[One-sentence domain description]
+
+## Purpose
+## Core Concepts
+## Invariants
+## Route-Specific Constraints
+## Child Routes (optional — only if sub-areas exist)
+```
+
+The TL;DR section is mandatory for every route README. It must appear immediately after the `#` heading, before the one-sentence description. Agents read TL;DR first to decide whether to read the full document. Each bullet must be a single declarative sentence of ≤ 25 words — no compound sentences joining unrelated facts, no prose paragraphs. The format is a retrieval contract: `search_project_context` uses BM25 scoring on individual lines, so each bullet must be independently findable by keyword search.
+
+## Roadmap Route Template
+
+The Roadmap route follows the standard README contract but uses checkbox notation for all work items.
+Every item in every phase must use `- [ ]` (planned) or `- [x]` (completed) — no plain list items.
+Phases are ordered chronologically: completed phases first, active phase next, future phases last.
+Completed items must never be removed; they form a completion log agents can reference.
+
+```
+# Roadmap Route
+
+## TL;DR
+- Roadmap tracks planned and completed work organized by phase and milestone using checkbox notation.
+- Use - [ ] for planned or in-progress items and - [x] for completed items in every phase.
+- Phases are ordered chronologically: completed phases first, then active, then future phases.
+- Key file: project-context/routes/roadmap/README.md
+
+This route documents the project's planned and completed milestones, features, and release phases.
+
+## Purpose
+
+Track and communicate project progress. Gives AI agents and team members a single source of truth
+for what has shipped, what is in progress, and what is planned.
+
+## Core Concepts
+
+- Phase: A named grouping of related milestones (e.g., "v1.0 — Foundation", "v2.0 — Scale").
+- Milestone: A significant deliverable within a phase with a clear done state.
+- Item: A specific feature, fix, or improvement — always expressed as a checkbox line.
+
+## Invariants
+
+- Every item uses checkbox format: - [ ] planned, - [x] completed. No plain bullet items.
+- Completed items are never deleted; they serve as a permanent completion log.
+- Phases are sorted chronologically: oldest/completed phases at the top, future phases at the bottom.
+- Each item is a single actionable unit — compound items must be split into separate lines.
+
+## Route-Specific Constraints
+
+- Item format: - [ ] Feature name — brief description (why it matters or what it unlocks)
+- Completed item format: - [x] Feature name — brief description
+- Phase heading format: ## Phase Name (e.g., ## v1.0 — Foundation, ## v2.0 — Growth)
+- Each phase opens with a one-sentence description of its goal before listing items.
+- Speculative or wish-list items belong in a ## Backlog section, not in versioned phases.
+
+## Example
+
+### v1.0 — Foundation
+
+Core infrastructure and initial feature set.
+
+- [x] Project scaffolding and CI/CD pipeline
+- [x] User authentication and session management
+- [x] Core data model and database schema
+- [ ] Admin dashboard with user management
+
+### v2.0 — Growth
+
+Scale features and third-party integrations.
+
+- [ ] API rate limiting and quota management
+- [ ] Webhook support for external integrations
+- [ ] Exportable reports in CSV and PDF
+
+### Backlog
+
+Items not yet assigned to a phase.
+
+- [ ] Mobile app (iOS and Android)
+- [ ] Multi-language support
 ```
 
 ## File system structure produced by context-router
@@ -140,6 +280,8 @@ project-root/
 |   |   |-- files_tree.md          <- WHERE files are (the map)
 |   |
 |   |-- routes/
+|       |-- about/
+|       |   |-- README.md          <- MANDATORY: project overview (name, description, audience, stack)
 |       |-- route-a/
 |       |   |-- README.md          <- Sub-router for Route A
 |       |   |-- child-route-1/
@@ -151,7 +293,10 @@ project-root/
 |       |   |-- README.md          <- Sub-router for Route B
 |       |
 |       |-- route-c/
-|           |-- README.md          <- Sub-router for Route C
+|       |   |-- README.md          <- Sub-router for Route C
+|       |
+|       |-- roadmap/
+|           |-- README.md          <- Roadmap: - [ ] planned, - [x] completed items by phase
 |
 |-- .agents/
     |-- skills/                    <- AI Skills and Agents route
@@ -163,13 +308,13 @@ project-root/
 
 All Directory Paths MUST be relative to the repository root. This applies equally inside context-router.md and inside any sub-router README.md.
 
-In context-router.md (root router):
+In context-router.md (root router) — points directly to the README.md file:
 ```
 ## Route A
-Directory Path: project-context/routes/route-a/
+Directory Path: project-context/routes/route-a/README.md
 ```
 
-In project-context/routes/route-a/README.md (sub-router declaring child routes):
+In project-context/routes/route-a/README.md (sub-router declaring child routes) — points to the child route directory:
 ```
 ## Child Route 1
 Directory Path: project-context/routes/route-a/child-route-1/
@@ -205,6 +350,6 @@ NEVER use relative paths like `Directory Path: child-route-1/` in a sub-router.
 
 # Examples
 
-- See the actualizer skill's `examples/context-router-taskpilot.md` for a fully realized context-router from a production project. Use as reference for real-world route naming, project-specific rules, and proper structure.
-- See `examples/context-router-example/context-router.md` for a generic template with placeholders.
-- See the actualizer skill's `examples/scaling-example.md` for a step-by-step demonstration of how routing scales from tiny (2 routes) to huge (3+ levels deep) without changing any structural rules.
+- `examples/context-router-example/context-router.md` - A generic template with placeholders. Use as the starting point for new projects.
+- See the actualizer skill's `examples/context-router-taskpilot.md` for a fully realized context-router from a production project (Python Slack bot with Jira integration). Use as reference for real-world route naming, project-specific rules, and proper structure.
+- See the actualizer skill's `examples/scaling-example.md` for how the same routing system scales from a 2-route tiny project to a 3+ level deep project without changing any structural rules. Demonstrates the fractal contract, when to split, and when not to.

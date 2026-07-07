@@ -6,12 +6,34 @@
 - TRIGGER RULE: Whenever you work on a specific feature or entity, you MUST consult its corresponding route directory in this router to understand its business logic and constraints BEFORE making decisions, and completing the task.
 - We don't need any other context, history, memory. We're starting from scratch!
 
+# AI Agent Quick Start Protocol
+
+Follow these steps in order before writing any code:
+
+1. Read THIS file completely. The inline summaries below give you enough context to start.
+2. Identify which routes your task touches using the Route Selection Guide below.
+3. Read ONLY the README.md files for those routes (path given under each route entry).
+4. Each route README starts with a TL;DR section — read that first. Go deeper only if your task requires it.
+5. Use project-context/config/files_tree.md to locate specific implementation files.
+6. Begin implementation only after completing steps 1-5.
+
+Do NOT read all routes. Do NOT skip straight to code. The TL;DR sections exist so you can quickly assess relevance without reading entire documents.
+
+# Route Selection Guide
+
+Match your task keywords to the routes you need to read:
+
+| If your task involves... | Read these routes |
+|---|---|
+| [keyword group 1, e.g., users, auth, login, sessions] | [Route 1 Name] |
+| [keyword group 2, e.g., products, catalog, inventory] | [Route 2 Name] |
+| [combined workflow, e.g., checkout, purchase, payment] | [Route 1 Name] + [Route 2 Name] |
+
 # context-router.md terminology
 
 - Context Router: This root file, providing a high-level map of the entire project.
 - Route: A specific directory representing a business or technical module. It acts as a node in our architecture tree. Every route directory inherently contains its own context and must include a README.md file, which acts as its sub-router.
 - Sub-router: The README.md file located inside any route directory. It acts exactly like the root context router but is isolated to its specific route. A sub-router can declare its own child routes (sub-directories), creating an infinitely deep nested structure where every node follows the same routing contract.
-- Route: A named pointer from a router (root or sub-router) to a route directory. The directory contains a README.md sub-router that may itself declare further routes to child routes.
 
 # Hierarchical routing principle
 
@@ -27,7 +49,7 @@ The routing system is a recursive tree with no depth limit. The flow is always: 
 - Traverse the routing tree recursively. Every route directory may contain a README.md sub-router that declares its own child routes. Follow each relevant route downward, reading sub-routers at every level, until you reach the granularity required for the task. There is no depth limit; the hierarchy branches as deep as the project requires.
 - [PROJECT SPECIFIC RULE]: Add your absolute, non-negotiable project constraints here (e.g., "Always use UTC for dates", "Never mutate global state directly", "Data must be stored locally").
 - Load Selectively: Open ONLY the specific documentation directories strictly required for your task/role. Do not load the entire project context.
-- UPDATE TRIGGER (CRITICAL): If your task changes the fundamental business logic, data structure, or rules of a route (e.g., adding a new mandatory field to a core entity), you MUST update the corresponding route documentation in project-context/ to reflect this new reality.
+- UPDATE TRIGGER (CRITICAL): If your task changes the fundamental business logic, data structure, or rules of a route, OR produces any important finding (architectural constraint, bug root cause with systemic implications, technical behavior that future agents must know to avoid mistakes), you MUST update the corresponding route documentation in project-context/ to reflect this new reality.
 - Avoid files more than 500 strings in size for better performance and reliability.
 
 # Project context map (Routes)
@@ -37,19 +59,20 @@ The absolute source of truth for the product vision. It explains WHAT we are bui
 ALWAYS read this if your task involves planning new features, writing documentation, or understanding the product's core value proposition.
 File Path: PRD.md
 
-## Project description
-[Insert brief description of the project, target audience, core tech stack, and main value proposition here].
+## About
+High-level overview of what this project is, who it is for, and its core tech stack.
+Directory Path: project-context/routes/about/README.md
 
 # Core Business Routes (Behavioral Rules)
-ALWAYS read the corresponding route directory before proceeding with the task related to it. Use these to understand the required elements and business logic.
+ALWAYS read the corresponding route README.md before proceeding with the task related to it. Each README starts with a TL;DR — scan that first to confirm relevance, then read deeper sections as needed.
 
 ## [Route 1 Name] Route
 [Description of the route: e.g., Rules for user authentication, session management, and role-based access].
-Directory Path: project-context/routes/[route-1-name]/
+Directory Path: project-context/routes/[route-1-name]/README.md
 
 ## [Route 2 Name] Route
 [Description of the route: e.g., Rules for core entity structures, states, and validation logic].
-Directory Path: project-context/routes/[route-2-name]/
+Directory Path: project-context/routes/[route-2-name]/README.md
 
 ## AI Skills and Agents
 Available tools and automated skills for the AI agent (e.g., setup scripts, actualizers).

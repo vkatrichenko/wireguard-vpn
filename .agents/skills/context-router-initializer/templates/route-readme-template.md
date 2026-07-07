@@ -1,5 +1,11 @@
 # [Route Name] Route
 
+## TL;DR
+- [Single declarative sentence ≤ 25 words with key domain terms — the most critical rule for this route]
+- [One searchable rule per bullet — key data structure, storage location, or constraint]
+- [Each bullet independently findable by BM25 keyword search — main workflow or state transition rule]
+- Key files: [list 2-4 primary implementation files or directories]
+
 [One-sentence description of what this route governs.]
 
 This file is the sub-router for the [Route Name] route. It follows the same contract as the root context-router.md: it describes the business rules for this route, and if the route has child routes, it points to them so the agent can traverse deeper.

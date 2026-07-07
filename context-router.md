@@ -25,7 +25,7 @@ The routing system is a recursive tree with no depth limit. The flow is always: 
 - Always start context gathering from this file.
 - Never guess or hallucinate business logic. You must navigate to the relevant route directory and read its sub-router (README.md) to acquire the correct context.
 - Traverse the routing tree recursively. Every route directory may contain a README.md sub-router that declares its own child routes. Follow each relevant route downward, reading sub-routers at every level, until you reach the granularity required for the task. There is no depth limit; the hierarchy branches as deep as the project requires.
-- READ-ONLY DASHBOARD: The dashboard observes the VPN and host; it must never mutate clients or control the WireGuard service. Terraform `clients_config` is the single source of truth for clients, and service control is out of scope. The only sanctioned write path is the declared spec-004 "Refresh & Apply" reconcile, which applies declared state via `wg syncconf`, not free-form mutation.
+- SERVICE CONTROL IS OUT OF SCOPE: The dashboard observes the VPN and host and never restarts, stops, or reconfigures the WireGuard service. Peer management is different: since spec 019 the dashboard UI (and the on-box `wg-peer` CLI) is the sole authority for adding, editing, and removing WireGuard peers via `wg syncconf` — Terraform only seeds one anti-lockout `admin_peer` and is never the day-to-day mutation path. See the Clients & Connectivity route for peer-management rules.
 - STABILITY OVER FEATURES: This project's success metric is operational reliability. Prefer fail-fast on unrecoverable startup errors, graceful per-card degradation at request time, and read-only sampling that never destabilizes the host. Do not trade these for new surface area.
 - Load Selectively: Open ONLY the specific documentation directories strictly required for your task/role. Do not load the entire project context.
 - UPDATE TRIGGER (CRITICAL): If your task changes the fundamental business logic, data structure, or rules of a route (e.g., adding a new mandatory field to a core entity), you MUST update the corresponding route documentation in project-context/ to reflect this new reality.
@@ -39,13 +39,13 @@ ALWAYS read this if your task involves planning new features, writing documentat
 File Path: context/product/product-definition.md
 
 ## Project description
-A self-hosted WireGuard VPN on AWS EC2 (provisioned with Terraform) plus a read-only ops dashboard shipped as a single static Go binary deployed alongside the WireGuard server. The dashboard surfaces tunnel and host health — client connection status, CPU/memory/disk/network trends, service uptime, and server endpoint info — in one auto-refreshing, mobile-responsive page so the solo operator can answer "is the VPN healthy?" in seconds without an SSH session. Stack: Go standard-library HTTP + html/template + embed.FS, htmx server-rendered partials, Chart.js, modernc.org/sqlite for 24-hour trend storage, /proc and IMDSv2 reads, GeoLite2 for client geolocation; infrastructure is Terraform (AWS provider, exact-pinned). It binds the WireGuard tunnel IP and is reachable only over the VPN — no public edge or in-band auth. Audience: solo-maintained today, planned to be open-sourced later.
+A self-hosted WireGuard VPN on AWS EC2 (provisioned with Terraform) plus an ops dashboard shipped as a single static Go binary deployed alongside the WireGuard server. The dashboard surfaces tunnel and host health — client connection status, CPU/memory/disk/network trends, service uptime, and server endpoint info — in one auto-refreshing, mobile-responsive page, and is the sole authority for adding, editing, and removing WireGuard peers (spec 019), so the solo operator can run day-to-day VPN operations without an SSH session. Stack: Go standard-library HTTP + html/template + embed.FS, htmx server-rendered partials, Chart.js, modernc.org/sqlite for the 24-hour trend store and the runtime client store, /proc and IMDSv2 reads, an embedded DB-IP IP-to-City Lite database for client geolocation; infrastructure is Terraform (AWS provider, exact-pinned). It binds the WireGuard tunnel IP and is reachable only over the VPN — no public edge or in-band auth. Access to the host itself is via SSM Session Manager only (no SSH). Audience: solo-maintained today, planned to be open-sourced later.
 
 # Core Business Routes (Behavioral Rules)
 ALWAYS read the corresponding route directory before proceeding with the task related to it. Use these to understand the required elements and business logic.
 
 ## Clients & Connectivity Route
-Rules for joining the Terraform-declared client list with live WireGuard kernel state — online/offline classification, handshake recency, per-client traffic, GeoIP enrichment, and the planned runtime reconcile.
+Rules for the UI-authoritative peer store (SQLite, spec 019) joined with live WireGuard kernel state — peer add/edit/remove, online/offline classification, handshake recency, per-client traffic, and GeoIP enrichment.
 Directory Path: project-context/routes/clients-connectivity/
 
 ## Metrics & Monitoring Route
@@ -57,8 +57,12 @@ Rules for reporting WireGuard service status and uptime, server endpoint/identit
 Directory Path: project-context/routes/service-host-health/
 
 ## Web Delivery & UI Route
-Rules for the HTTP surface, view-models, htmx partials, embedded assets, auto-refresh, and the responsive read-only UI that presents the data routes.
+Rules for the HTTP surface, view-models, htmx partials, embedded assets, auto-refresh, and the responsive UI that presents the data routes and hosts the sanctioned client-management and webhook-management write endpoints.
 Directory Path: project-context/routes/web-delivery-ui/
+
+## MCP Server Route
+PLANNED, not yet implemented: rules for a laptop-side MCP server that wraps the dashboard's existing REST API so an LLM agent can manage peers and read metrics over the WireGuard tunnel.
+Directory Path: project-context/routes/mcp-server/
 
 ## AI Skills and Agents
 Available tools and automated skills for the AI agent (e.g., context-router initializer/actualizer setup scripts).

@@ -1,5 +1,11 @@
 # Web Delivery & UI Route
 
+## TL;DR
+- The HTTP surface is not fully read-only: `/api/clients*` (peer CRUD, spec 019) and `/api/webhook*` (spec 008) are sanctioned write endpoints.
+- Templates parse eagerly at startup from an embedded `web/` FS — a malformed template must fail boot, not a request.
+- A failed per-card view-model fetch degrades to an inline error block; it never turns into a whole-page 500.
+- Static assets are fully vendored and embedded — no CDN, no runtime disk reads, offline-capable by design.
+
 Governs how the dashboard is served — HTTP routing, view-models, server-rendered htmx partials, embedded assets, and the auto-refreshing responsive UI.
 
 This file is the sub-router for the Web Delivery & UI route. It follows the same contract as the root context-router.md: it describes the business rules for this route, and if the route has child routes, it points to them so the agent can traverse deeper.
@@ -24,7 +30,7 @@ These rules must never be violated:
 - A single failed card fetch degrades to a per-card error block — it never turns into a whole-page 500 once the page itself is renderable.
 - The dashboard auto-refreshes data every 10 seconds; on a failed refresh the previously rendered values stay visible behind a "Stale data" indicator until the next success.
 - Layout is mobile-responsive: no horizontal scroll at ≥360px, cards/charts re-flow to one column below ~600px, touch targets ≥44px.
-- The UI is read-only — no buttons that mutate clients or control the service (except the planned spec-004 "Refresh & Apply", which reconciles declared state, not free-form mutation).
+- The UI is read-only over metrics, service status, and connectivity views; it never issues service-control actions (restart/stop). The client-management (`/api/clients*`, spec 019) and webhook-management (`/api/webhook*`, spec 008) endpoints are the sanctioned write paths — see the Clients & Connectivity route for peer-mutation rules.
 
 ## Route-Specific Constraints
 
