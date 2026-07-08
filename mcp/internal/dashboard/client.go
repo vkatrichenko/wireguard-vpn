@@ -3,7 +3,11 @@
 // Client — this keeps the wrapper-only invariant (mcp-server route,
 // project-context/routes/mcp-server/README.md) mechanically true: there is
 // exactly one place a request could be built wrong, and it never touches
-// anything but the dashboard's already-public /api/* surface.
+// anything but the dashboard's already-public /api/* surface, plus the one
+// sibling non-API path this Client exposes deliberately: GET /metrics (see
+// GetMetrics) — the Prometheus text exposition, added by Task #11 so
+// get_host_metrics can surface disk-usage data that has no JSON /api/*
+// equivalent.
 package dashboard
 
 import (
@@ -70,6 +74,22 @@ func (e *StatusError) Error() string {
 // proxied through as-is for the tool handler to embed as text content.
 func (c *Client) Get(ctx context.Context, path string, query url.Values) ([]byte, error) {
 	return c.do(ctx, http.MethodGet, path, query, nil)
+}
+
+// GetMetrics issues GET http://<BaseAddr>/metrics — the dashboard's
+// Prometheus text exposition (dashboard/internal/server/handlers_metrics.go's
+// handleGetMetricsProm), a sibling of the JSON /api/* surface every other
+// method on this Client targets. It shares do() with every other verb here
+// (same timeout, same StatusError mapping on non-2xx, same tunnel-aware
+// dial-failure message) rather than standing up a second HTTP client, per the
+// package doc's "exactly one place a request could be built wrong" invariant.
+// Unlike Get, there is no query/path argument: /metrics takes none.
+//
+// get_host_metrics (internal/tools/host_metrics.go) is the only caller. It
+// parses the returned text itself — this method, like Get, returns the raw
+// body untouched.
+func (c *Client) GetMetrics(ctx context.Context) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, "/metrics", nil, nil)
 }
 
 // Post issues POST http://<BaseAddr><path> with body as the JSON request
