@@ -28,13 +28,14 @@ third-party or hand-rolled MCP implementation because:
 - Stdio transport is built into the SDK (`mcp.StdioTransport`) — no extra framing/transport code to write
   or maintain, which matters for a solo-maintained, soon-to-be-open-sourced repo.
 
-## Tool surface — 19 tools
+## Tool surface — 20 tools
 
-Every tool is a thin wrapper around exactly one dashboard `/api/*` endpoint (full design rationale,
-endpoint corrections, and the one-tool-per-endpoint decision are in `docs/tool-surface.md` — treat that
-file as the source of truth; the tables below mirror it).
+Every tool is a thin wrapper around exactly one dashboard endpoint (full design rationale, endpoint
+corrections, and the one-tool-per-endpoint decision are in `docs/tool-surface.md` — treat that file as the
+source of truth; the tables below mirror it). Every tool but one wraps a JSON `/api/*` endpoint;
+`get_host_metrics` is the exception — see below.
 
-### Read-only (13)
+### Read-only (14)
 
 | Tool | Endpoint |
 |---|---|
@@ -51,6 +52,7 @@ file as the source of truth; the tables below mirror it).
 | `get_snapshot` | `GET /api/snapshot` |
 | `get_geo` | `GET /api/geo` |
 | `get_health` | `GET /api/health` |
+| `get_host_metrics` | `GET /metrics` (Prometheus text exposition — not JSON `/api/*`) |
 
 ### Mutating (6)
 
@@ -83,6 +85,17 @@ query param verbatim, and return the dashboard's raw JSON response body as the t
 wrapper decoupled from every endpoint's JSON shape, so a dashboard response-shape change never requires a
 matching MCP-side change. All HTTP logic lives in one place, `internal/dashboard/client.go`, so there's
 exactly one code path that could get request-building wrong.
+
+**`get_host_metrics` is the one exception to "never re-typed."** Disk usage is collected by the poller but
+never exposed on a JSON `/api/*` route — the only place it's emitted is the dashboard's Prometheus text
+exposition at `GET /metrics` (`dashboard/internal/server/handlers_metrics.go`'s `handleGetMetricsProm`).
+There is no JSON shape there to proxy through, so `get_host_metrics` parses that text defensively (standard
+library only — `internal/tools/host_metrics.go`; unrecognized metric families are ignored, not fatal) into
+a typed `hostMetrics` result and returns it as the tool's structured output (`mcp.AddTool`'s `Out` type is
+`hostMetrics`, not `any`, so the SDK auto-populates both `StructuredContent` and a JSON text fallback).
+It still goes through `internal/dashboard.Client` like every other tool — `Client.GetMetrics` is a minimal
+addition alongside `Get`/`Post`/`Patch`/`Delete`, sharing the same `do()`, timeout, and `StatusError`
+handling rather than standing up a second HTTP client.
 
 On a non-2xx response, the tool call fails with a `dashboard.StatusError` naming the status code and a body
 snippet. On a connection failure (refused, timeout, DNS), the error message explicitly asks "is the
@@ -267,11 +280,12 @@ it at a different project's dashboard requires **no recompile and no code change
    the two servers.
 
 Everything else stays identical across every project this pattern is applied to: stdio transport, no
-Docker, the full 19-tool set (all of `docs/tool-surface.md`), the wrapper-only architecture (no SQLite/`wg`
-access, dashboard `/api/*` is the only thing ever called), and no application-layer auth (each project's
-dashboard would need to carry the same "WireGuard tunnel membership is the perimeter" posture for this to
-be an acceptable fit). If a target project's dashboard doesn't expose the same `/api/*` surface, the tool
-set itself would need porting — this template only covers same-shaped dashboards.
+Docker, the full 20-tool set (all of `docs/tool-surface.md`), the wrapper-only architecture (dashboard
+`/api/*` plus the one sibling `/metrics` scrape endpoint `get_host_metrics` uses are the only things ever
+called — no SQLite/`wg` access), and no application-layer auth (each project's dashboard would need to
+carry the same "WireGuard tunnel membership is the perimeter" posture for this to be an acceptable fit). If
+a target project's dashboard doesn't expose the same `/api/*` surface (and the same `/metrics` exposition
+shape), the tool set itself would need porting — this template only covers same-shaped dashboards.
 
 ## Validation status
 
@@ -281,7 +295,10 @@ passing; the one failure (`get_client_metrics` double-percent-encoding a pubkey 
 on any key containing `/`) was root-caused and fixed the same day (Task #6, in `internal/dashboard/client.go`'s
 `do()`). All 19 tools now pass, confirmed by live re-validation against a real `/`-containing pubkey.
 Full results, evidence, and the confirm-gate / delete-token-flow validation (including a real, non-mocked
-305-second token-expiry wait) are recorded in `docs/phase4-validation.md`.
+305-second token-expiry wait) are recorded in `docs/phase4-validation.md`. These numbers predate
+`get_host_metrics` (Task #11, added after Phase 4) — that tool has unit/httptest coverage
+(`internal/tools/host_metrics_test.go`) but has not yet been exercised against a real, running dashboard
+over a live tunnel; treat it as unvalidated-live until a Phase-4-style pass covers it too.
 
 ## Package layout
 
@@ -291,9 +308,17 @@ Full results, evidence, and the confirm-gate / delete-token-flow validation (inc
   own idiom).
 - `internal/dashboard/client.go` — the only HTTP client in this module; owns request-building,
   timeouts, and error classification (`StatusError` for non-2xx, a tunnel-aware message for connection
-  failures).
-- `internal/tools/tools.go` — registers the 13 read-only tools against the dashboard client. Handlers are
-  thin: build query params, call the client, wrap the raw body as text content.
+  failures). `Get`/`Post`/`Patch`/`Delete` target the dashboard's JSON `/api/*` surface; `GetMetrics`
+  (added for Task #11) is the one exception, targeting the sibling `GET /metrics` Prometheus endpoint —
+  it shares the same `do()` plumbing rather than adding a second HTTP client.
+- `internal/tools/tools.go` — registers 13 of the 14 read-only tools against the dashboard client (every
+  `/api/*` wrapper). Handlers are thin: build query params, call the client, wrap the raw body as text
+  content. `get_host_metrics` is registered here too (`addHostMetricsTool` call at the end of `Register`)
+  but implemented in `host_metrics.go` since it isn't an `/api/*` wrapper.
+- `internal/tools/host_metrics.go` — `get_host_metrics`: fetches `GET /metrics` via
+  `dashboard.Client.GetMetrics` and parses the Prometheus text exposition (standard library only, no new
+  dependency) into the structured `hostMetrics` result. The only tool whose `Out` type isn't `any`, and the
+  only one not proxying an existing JSON shape verbatim.
 - `internal/tools/mutating.go` — registers the 6 mutating `/api/clients*` tools (`add_client`,
   `edit_client`, `enable_client`, `disable_client`, `preview_delete_client`, `delete_client`) and their
   confirm/token gating logic.

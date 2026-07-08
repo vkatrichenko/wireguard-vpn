@@ -127,6 +127,13 @@ func Register(server *mcp.Server, client *dashboard.Client) {
 		"Mappable-peer snapshot (GeoIP-resolved endpoints) for the geo map.")
 	addNoArgTool(server, client, "get_health", "/api/health",
 		"Liveness/readiness probe, including client_store_ready. Call this first to sanity-check the MCP-to-dashboard round trip over the WireGuard tunnel before calling other tools.")
+
+	// get_host_metrics is the one exception to this file's "every tool wraps
+	// one /api/* endpoint" doc comment above — it wraps the sibling
+	// Prometheus /metrics endpoint instead (Task #11; see host_metrics.go).
+	// Registered here, not in host_metrics.go, so Register stays the single
+	// place every read-only tool this server exposes gets listed.
+	addHostMetricsTool(server, client)
 }
 
 // addRangeTool registers a param-less-except-range tool: GET path with an

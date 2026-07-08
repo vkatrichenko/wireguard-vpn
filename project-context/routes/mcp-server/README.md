@@ -2,6 +2,10 @@
 
 ## TL;DR
 - STATUS: ALL 5 PHASES DONE as of 2026-07-07 — the MCP server initiative is complete and shipped.
+- Task #11 (2026-07-08) added `get_host_metrics`, a post-roadmap tool exposing host disk usage previously unreachable via MCP.
+- `get_host_metrics` is the sole MCP tool that fetches the dashboard's Prometheus `/metrics` endpoint instead of a JSON `/api/*` route.
+- Host disk usage (`wireguard_host_disk_percent`) has no JSON `/api/*` endpoint; it is reachable via MCP only through `get_host_metrics`.
+- Tool surface is now 20 total tools (14 read-only, 6 mutating), up from 19 total (13 read-only) after Task #11.
 - Task #8 (2026-07-07) added public distribution post-roadmap: GoReleaser release CI + `go install` support, packaging only, no tool behavior changed.
 - Module renamed from bare `wireguard-mcp` to `github.com/vkatrichenko/wireguard-vpn/mcp` (Task #8) so `go install` resolves; binary name `wireguard-mcp` unchanged.
 - Release tags use scheme `mcp/vX.Y.Z`; GoReleaser config lives inside `mcp/` because its `monorepo:` tag-prefix feature is Pro-only.
@@ -15,10 +19,10 @@
 - `add_client`/`edit_client`/`enable_client`/`disable_client` require an explicit `confirm=true` boolean arg or the call makes no HTTP request.
 - `delete_client` is gated by a separate `preview_delete_client` tool that mints a single-use, 5-minute, per-peer-name token.
 - `mcp/` holds a separate Go module, `github.com/vkatrichenko/wireguard-vpn/mcp` (renamed from bare `wireguard-mcp` in Task #8), independent of the `dashboard/` Go module by design.
-- The MCP server is a thin external wrapper translating MCP tool calls into HTTP calls against the dashboard's existing `/api/*` endpoints.
+- The MCP server is a thin external wrapper mapping MCP tool calls onto the dashboard's `/api/*` endpoints, except `get_host_metrics`.
 - It runs laptop-side over the WireGuard tunnel like any client, never on the EC2 instance, and is never embedded in the dashboard binary.
 - Transport is MCP's native stdio subprocess with one hardcoded dashboard target per instance — no Docker, no always-on HTTP/SSE listener.
-- Key files: `mcp/cmd/mcp-server/main.go`, `mcp/internal/tools/tools.go`, `mcp/internal/tools/mutating.go`, `mcp/internal/tools/tokens.go`, `mcp/docs/tool-surface.md`, `mcp/docs/confirmation-gates.md`, `mcp/docs/phase4-validation.md`.
+- Key files: `mcp/cmd/mcp-server/main.go`, `mcp/internal/tools/tools.go`, `mcp/internal/tools/mutating.go`, `mcp/internal/tools/tokens.go`, `mcp/internal/tools/host_metrics.go`, `mcp/internal/dashboard/client.go`, `mcp/docs/tool-surface.md`, `mcp/docs/confirmation-gates.md`, `mcp/docs/phase4-validation.md`.
 
 Rules for an MCP (Model Context Protocol) integration that lets an LLM agent operate the dashboard's REST API on the operator's behalf; all 5 phases of its roadmap are done — code shipped, live-tunnel validated, and now packaged/wired — and the confirmation-gate design question is resolved.
 
@@ -30,7 +34,15 @@ This route owns the business rules for an MCP server that lets an LLM agent mana
 
 ## Core Concepts
 
-- Wrapper architecture — MCP tool calls map onto the dashboard's existing `/api/*` endpoints (`/api/clients`, `/api/metrics*`, `/api/service`, `/api/server`, `/api/alerts`, `/api/snapshot`, `/api/geo`, `/api/health`, all already implemented per specs 019/020) rather than any new dashboard code.
+- Wrapper architecture — MCP tool calls map onto the dashboard's existing `/api/*` endpoints (`/api/clients`, `/api/metrics*`, `/api/service`, `/api/server`, `/api/alerts`, `/api/snapshot`, `/api/geo`, `/api/health`, all already implemented per specs 019/020) rather than any new dashboard code, except `get_host_metrics` (Task #11), which fetches the dashboard's pre-existing `/metrics` endpoint instead.
+- Task #11 (2026-07-08) added `get_host_metrics`, the MCP server's first and only tool that does not wrap a JSON `/api/*` endpoint.
+- `get_host_metrics` fetches the dashboard's Prometheus text-exposition endpoint `GET /metrics`, handled by `dashboard/internal/server/handlers_metrics.go`'s `handleGetMetricsProm`.
+- Host disk usage (`wireguard_host_disk_percent{mount=...}`) is collected server-side but has no JSON `/api/*` route — `/metrics` is its only exposure, and was invisible through the MCP server until Task #11.
+- `get_host_metrics` closes the disk-usage visibility gap MCP-side only, with zero change to `dashboard/` or `terraform/`.
+- `get_host_metrics` returns structured parsed JSON: per-mount disk percent, host CPU/memory percent, total and online peer counts, per-peer rx/tx bytes and last-handshake age, active-alert count, and build version/sha.
+- The `/metrics` parser is defensive and Go-stdlib-only: it skips `#` comment lines, is brace/quote-aware when parsing labels, and ignores unknown metric families so it stays forward-compatible.
+- `mcp/internal/dashboard/client.go` gained one `GetMetrics(ctx)` method that reuses the existing `do()` helper — same timeout, same `dashboard.StatusError` mapping, same tunnel-aware dial-failure handling as every other tool.
+- `get_host_metrics` is the sole sanctioned non-`/api/*` path; adding it did not introduce a second HTTP client or a second place a request could be built wrong.
 - Application vs Agent boundary — context-router.md's Application/Agent-LLM split is the explicit rationale for keeping MCP transport out of the Go binary: embedding it would blur that line for no functional gain, since a wrapper can already reach every endpoint it needs.
 - Placement — a local process on the operator's own laptop, reached over the WireGuard tunnel like any other tunnel client; it is never deployed to the EC2 instance.
 - Repo location — the code lives inside this repo, in `mcp/`, not a standalone repo, because the project is solo-maintained and planning to open-source with a single source of truth. It inherits this repo's existing git conventions (PR-based workflow, commit prefixes, branch naming).
@@ -86,7 +98,9 @@ These rules must never be violated:
 - Homebrew distribution MUST NOT be assumed available — deferred by owner decision (Task #8); only `go install` and GoReleaser release binaries are supported today.
 - The MCP SDK dependency MUST stay pinned exactly at `v1.6.1` (`github.com/modelcontextprotocol/go-sdk`), per this repo's exact-version-pin convention.
 - stdout MUST be reserved exclusively for the MCP JSON-RPC wire — all logging MUST go to stderr, so protocol framing is never corrupted.
-- Tool response bodies MUST be passed through as raw JSON text, never re-modeled or re-typed, so a dashboard response-shape change never forces a matching MCP-side change.
+- Tool response bodies for `/api/*`-wrapping tools MUST be passed through as raw JSON text, never re-modeled or re-typed, so a dashboard response-shape change never forces a matching MCP-side change.
+- `get_host_metrics` is the sole exception to the raw-passthrough invariant — it MUST parse Prometheus text into structured JSON, since `/metrics` exposition text has no JSON schema to preserve byte-faithfully.
+- `get_host_metrics` MUST use `mcp/internal/dashboard/client.go`'s existing `do()` helper — no second HTTP client path may be introduced for non-`/api/*` tools.
 - All of `/api/clients*` (both read-only and mutating tools) MUST ship together in Phase 3 — the three read-only client endpoints are not to be pulled forward into Phase 2 individually.
 - `add_client`, `edit_client`, `enable_client`, `disable_client` MUST reject the call before making any HTTP request when `confirm` is missing or `false`.
 - `delete_client` MUST require a token minted by a prior `preview_delete_client` call for the exact same peer name.
@@ -129,3 +143,9 @@ These rules must never be violated:
 - Publish step: a separate `gh release create "${GITHUB_REF_NAME}"` workflow step publishes `dist/`'s archives, `checksums.txt`, and cosign `.sig`/`.pem` sidecars against the real `mcp/vX.Y.Z` tag, mirroring `dashboard-release.yml`'s `gh release create` pattern — this is what makes a plain-semver `go install ...@vX.Y.Z` selector resolve to the real `mcp/vX.Y.Z` tag without GoReleaser mangling the tag namespace.
 - INSTALL-COMMAND BUG (Task #9 amendment, 2026-07-07) — `mcp/README.md` and this route file previously showed `@mcp/vX.Y.Z`/`@mcp/v0.1.0` as the `go install` selector; the correct selector is plain semver, e.g. `@v0.0.3` — `@mcp/vX.Y.Z` fails with `invalid version: ... disallowed version string`. Fixed in both files same-day.
 - Task #9 also demoted checksum/cosign verification from mandatory to optional (a "Verify the download (recommended)" section) and dropped the mandatory `shasum -c` step from the release-binary happy path; `checksums.txt` and cosign sidecars are still published unchanged.
+- TASK #11 (2026-07-08, post-roadmap addendum) added `get_host_metrics`, a READ-ONLY tool, with zero change to `dashboard/` or `terraform/`.
+- MCP tool surface is now 20 total tools, 14 read-only, 6 mutating (previously 19 total, 13 read-only); mutating count is unchanged.
+- New files (Task #11): `mcp/internal/tools/host_metrics.go` (tool + parser), `mcp/internal/tools/host_metrics_test.go` (tests).
+- Modified files (Task #11): `mcp/internal/tools/tools.go` (tool registration), `mcp/internal/dashboard/client.go` (added `GetMetrics(ctx)`).
+- Disk usage (`wireguard_host_disk_percent{mount=...}`) is collected server-side but was exposed on no `/api/*` route — only on `/metrics` — making it invisible via MCP until Task #11.
+- `get_host_metrics`'s raw-passthrough departure is a deliberate, narrowly scoped exception, justified because `/metrics` is Prometheus exposition text with no JSON schema to preserve byte-faithfully — do not treat it as license to re-model other tools' responses.

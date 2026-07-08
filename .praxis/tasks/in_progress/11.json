@@ -1,0 +1,21 @@
+{
+  "id": 11,
+  "assignee": "jarvis.json",
+  "priority": "medium",
+  "status": "to_review",
+  "title": "[11] Expose host metrics (incl. disk) to the MCP via a /metrics-passthrough tool",
+  "why_we_need_this": "Disk usage is collected server-side (there is a disk service; it feeds the Prometheus `/metrics` endpoint and the high-disk alert) but it is exposed on NO JSON `/api/*` route — only on `GET /metrics` as `wireguard_host_disk_percent{mount=...}`. Every MCP tool wraps `/api/*`, so disk is invisible to an AI/DevOps agent through the MCP. Verified live: `get_system_metrics` returns only `cpu_pct`/`mem_pct`, and `get_server_info` has no disk. A DevOps agent asking \"how full is the VPN host's disk?\" cannot get an answer through the MCP today. The elegant fix is MCP-only: the disk data already exists at `/metrics`, so a new read-only tool that reads and parses that endpoint closes the gap with zero dashboard change — no new dashboard release, no terraform redeploy.",
+  "acceptance_criteria": "- Add ONE new read-only MCP tool (suggested name `get_host_metrics`) that performs `GET /metrics` against the dashboard and returns a STRUCTURED result (parsed JSON), not just raw text. At minimum surface: per-mount disk usage percent, CPU percent, memory percent, total/online peer counts, per-peer last-handshake age and RX/TX bytes, active-alert count, and build info (version/sha). Raw text may be included as an optional field, but parsed fields are the primary output (DevOps agents want queryable values).\n- Parse the Prometheus text exposition defensively: skip `# HELP`/`# TYPE` comment lines, handle labelled series (`metric{label=\"v\"} value`), and don't crash on an unrecognised metric family (forward-compatible).\n- Read-only, wrapper-only: NO mutation, and NO change to the dashboard, terraform, or any `/api/*` shape. Reuse the MCP's existing dashboard HTTP client and error handling (`dashboard.StatusError`) patterns; the client currently targets `/api/*` — extend it to also fetch the sibling `/metrics` path on the same host:port.\n- Register the tool and update docs: add it to `mcp/README.md`'s tool list and `mcp/docs/tool-surface.md`, bumping the surface from 19 → 20 tools (read-only 13 → 14).\n- Add a unit/handler test mirroring the existing MCP tool tests (feed a sample `/metrics` body, assert the parsed disk/cpu/mem fields).\n- Run `update_project_context` for the `mcp-server` route afterward (new tool, count change, \"disk now reachable via MCP\").",
+  "important_constraints": "- MCP module only (`mcp/`). Do NOT modify `dashboard/`, `terraform/`, or any `/api/*` handler. This is deliberately the MCP-only path.\n- Rejected-for-now alternative (record the rationale, don't implement): adding disk to a JSON route (e.g. `/api/snapshot`) and extending `get_snapshot`/`get_system_metrics`. It's viable but requires a dashboard code change + a new dashboard release tag + `dashboard_release_tag` bump + boot-time redeploy — far more churn than an MCP-only tool for data that already exists at `/metrics`.\n- Follow `mcp/docs/confirmation-gates.md`: a read-only tool takes no `confirm`/token gate.\n- Parse with the Go standard library; if any dependency is genuinely needed, pin it EXACTLY per repo convention.\n- The `/metrics` format is the dashboard's hand-rolled text exposition (not `client_golang`), so there is no guaranteed library-compatible structure — parse the text directly.",
+  "labels": [
+    "mcp-server",
+    "devops",
+    "observability",
+    "dx"
+  ],
+  "blocked_reason": "",
+  "contextRouterIncluded": false,
+  "PRDIncluded": false,
+  "created_at": 1783455631642,
+  "column_entered_at": 1783509241700
+}

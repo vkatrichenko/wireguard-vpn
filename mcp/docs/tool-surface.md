@@ -36,6 +36,7 @@ Endpoints below are confirmed against `dashboard/internal/server/server.go`'s mu
 | `GET /api/snapshot` | `get_snapshot` | Read-only | Fan-out snapshot across all backend services in parallel — a single "everything at once" read. |
 | `GET /api/geo` | `get_geo` | Read-only | Mappable-peer snapshot (GeoIP-resolved endpoints) for the geo map. |
 | `GET /api/health` | `get_health` | Read-only | Liveness/readiness probe, including `client_store_ready` (spec 020). Not named in the mcp-server route's endpoint list — see note below. |
+| `GET /metrics` | `get_host_metrics` | Read-only | Host metrics with no JSON `/api/*` equivalent (per-mount disk usage percent, host CPU/memory percent, per-peer rx/tx + handshake age, alert count, build version/sha), parsed from the Prometheus text exposition into structured JSON. Task #11 — see the out-of-scope note below for why this was originally excluded, and why that call was reversed. |
 
 ### Corrections against the mcp-server route's endpoint list
 
@@ -44,11 +45,13 @@ Endpoints below are confirmed against `dashboard/internal/server/server.go`'s mu
 - **`delete_client` is now two tools, not one.** Phase 1 listed `delete_client` as a single mutating call. Phase 3 hardened it into a token-gated dry-run flow — `preview_delete_client(name)` (read-only, issues a short-lived single-use token) followed by `delete_client(name, token)` (redeems the token, then calls `DELETE`) — because delete is the sole irreversible verb on this surface. Full mechanics (token TTL, single-use, most-recent-wins) are in `mcp/docs/confirmation-gates.md`, not repeated here.
 - **`GET /api/health` is unnamed in the route but exists in code.** Registered at `server.go:295`, ahead of every other `/api/*` entry, and it is a natural low-risk Phase 2 candidate (it is how the wrapper would sanity-check tunnel connectivity to the dashboard before calling anything else). Included above as `get_health`; flagging its absence from the route's endpoint list as a gap for the owner to bless in Phase 2, not a routes/code contradiction that needs resolving now.
 
-### Out-of-scope: `/api/webhook*` and `/metrics` (Prometheus)
+### Out-of-scope: `/api/webhook*`
 
 The web-delivery-ui route calls out `/api/webhook*` (`GET /api/webhook`, `POST /api/webhook`, `POST /api/webhook/test`, `POST /api/webhook/revert`) as the *other* sanctioned write surface alongside `/api/clients*`. The mcp-server route's endpoint enumeration does not mention it at all — the route was scoped explicitly around "manage WireGuard peers and read metrics/status," and webhook configuration (alert-delivery URL management) is neither peer management nor metrics/status reading. This document treats `/api/webhook*` as **out of scope for this tool surface** — it is a distinct concern (alerting configuration) that the mcp-server route never named, and adding it would silently grow the mission beyond what was approved. If the owner wants webhook management exposed to the agent, that should be a deliberate route/mission-scope amendment, not something Phase 1 backs into by default.
 
-`GET /metrics` (Prometheus text exposition, `server.go:311`) is likewise excluded: it is a scrape endpoint for external monitoring tooling, not an operator-facing read the agent needs, and it duplicates the JSON `/api/metrics*` data already covered above.
+### `GET /metrics` (Prometheus) — originally excluded, added back by Task #11
+
+Phase 1 originally excluded `GET /metrics` (Prometheus text exposition, `server.go:311`) as "a scrape endpoint for external monitoring tooling... duplicates the JSON `/api/metrics*` data already covered above." That duplication assumption turned out to be wrong for one metric family: **disk usage** (`wireguard_host_disk_percent{mount=...}`) is collected by the poller but was never wired onto any JSON `/api/*` route, so it was actually invisible through the MCP wrapper, not merely duplicated. Task #11 reversed the exclusion and added `get_host_metrics`, which fetches `/metrics` via a minimal extension to `internal/dashboard.Client` (`GetMetrics`, sharing the same `do()`/`StatusError` plumbing as every other verb) and parses the hand-rolled Prometheus text defensively (standard library only, unknown metric families ignored) into a structured result — see `internal/tools/host_metrics.go`. This is still the only tool in the surface that isn't a thin proxy of an existing JSON shape, because `/metrics` has no JSON shape to proxy.
 
 ## Tool granularity decision
 
@@ -79,6 +82,7 @@ Per the mcp-server route's roadmap (read-only before mutating is a deliberate ri
 | `get_snapshot` | `GET /api/snapshot` | Phase 2 |
 | `get_geo` | `GET /api/geo` | Phase 2 |
 | `get_health` | `GET /api/health` | Phase 2 (pending owner sign-off on scope, per note above) |
+| `get_host_metrics` | `GET /metrics` | Task #11 (post-Phase-5 addition; originally excluded as out-of-scope in Phase 1, see the note above) |
 | `list_clients` | `GET /api/clients` | Phase 3 (read-only, but held back from Phase 2 to ship with the rest of `/api/clients*`) |
 | `get_client_config` | `GET /api/clients/{name}/config` | Phase 3 (read-only, held back — same reason) |
 | `get_client_history` | `GET /api/clients/{name}/history` | Phase 3 (read-only, held back — same reason) |
