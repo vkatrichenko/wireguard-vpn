@@ -121,7 +121,7 @@ func RegisterMutating(server *mcp.Server, client *dashboard.Client, store *Store
 		// it twice with the same args either fails (duplicate name/key) or
 		// creates a second peer, never a no-op — so IdempotentHint is left
 		// unset/false.
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPtr(false)},
+		Annotations: reversibleAnnotations(false),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in addClientArgs) (*mcp.CallToolResult, any, error) {
 		if in.Name == "" {
 			return nil, nil, fmt.Errorf("name is required")
@@ -149,7 +149,7 @@ func RegisterMutating(server *mcp.Server, client *dashboard.Client, store *Store
 		Description: "Edit an existing peer's name/public_key/address/note. MUTATING: requires confirm=true (PATCH /api/clients/{name}). Use enable_client/disable_client to toggle enabled state.",
 		// Re-applying the same edit (same target fields, same values) PATCHes
 		// the peer to the identical state again, so IdempotentHint is true.
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPtr(false), IdempotentHint: true},
+		Annotations: reversibleAnnotations(true),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in editClientArgs) (*mcp.CallToolResult, any, error) {
 		if in.Name == "" {
 			return nil, nil, fmt.Errorf("name is required")
@@ -179,7 +179,7 @@ func RegisterMutating(server *mcp.Server, client *dashboard.Client, store *Store
 		Description: "Enable a peer. MUTATING: requires confirm=true (PATCH /api/clients/{name} with enabled=true).",
 		// Re-enabling an already-enabled peer PATCHes enabled=true onto a peer
 		// already enabled=true — a genuine no-op, so IdempotentHint is true.
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPtr(false), IdempotentHint: true},
+		Annotations: reversibleAnnotations(true),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in clientToggleArgs) (*mcp.CallToolResult, any, error) {
 		return toggleClient(ctx, client, in, true)
 	})
@@ -189,7 +189,7 @@ func RegisterMutating(server *mcp.Server, client *dashboard.Client, store *Store
 		Description: "Disable a peer. MUTATING: requires confirm=true (PATCH /api/clients/{name} with enabled=false).",
 		// Same reasoning as enable_client above, mirrored: re-disabling an
 		// already-disabled peer is a no-op.
-		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPtr(false), IdempotentHint: true},
+		Annotations: reversibleAnnotations(true),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in clientToggleArgs) (*mcp.CallToolResult, any, error) {
 		return toggleClient(ctx, client, in, false)
 	})

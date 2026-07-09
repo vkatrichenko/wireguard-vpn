@@ -98,6 +98,15 @@ Pre-commit is configured in [.pre-commit-config.yaml](.pre-commit-config.yaml) a
 
 Do not claim "done" without plan output. If infra can't be end-to-end tested in the session (e.g., you changed EC2 user-data but didn't actually apply + SSH in), say so explicitly — don't claim the WireGuard service will come up just because the plan succeeded.
 
+### Code-quality gate — after every Praxis task or AWOS spec slice
+
+When a Praxis task reaches `to_review`, or a slice of an AWOS spec is implemented (a unit of work from `awos:tasks` / `awos:implement`), run these two skills in order **before** presenting the work as done:
+
+1. `/simplify` — quality pass on the changed code (reuse, simplification, efficiency, altitude). Apply the fixes it surfaces; note anything skipped and why.
+2. `/code-review` — correctness pass on the same diff. Triage and address findings, or explicitly justify leaving them.
+
+Order is fixed: `/simplify` first (clean the code), then `/code-review` (verify the cleaned code). Run this gate per slice, not once at the very end of a multi-task session — a reviewed slice is a shippable slice. This is in addition to, not a replacement for, the Terraform checklist above and the Praxis lifecycle's `update_project_context` step.
+
 ## Workflow Orchestration
 
 ### 1. Plan Mode Default

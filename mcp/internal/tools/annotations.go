@@ -32,3 +32,16 @@ func boolPtr(b bool) *bool {
 func readOnlyAnnotations() *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{ReadOnlyHint: true}
 }
+
+// reversibleAnnotations is shared by the reversible mutating tools:
+// add_client, edit_client, enable_client, disable_client. All are non-read-only
+// and non-destructive — each can be undone by another call on the same
+// /api/clients* surface. idempotent is true where re-invoking with the same
+// arguments is a genuine no-op (edit_client re-patches identical values;
+// enable_client/disable_client re-apply the same enabled state) and false for
+// add_client (a second call either fails on the duplicate or creates a second
+// peer). delete_client is deliberately NOT covered here — it is the sole
+// DestructiveHint tool and keeps its own inline literal.
+func reversibleAnnotations(idempotent bool) *mcp.ToolAnnotations {
+	return &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPtr(false), IdempotentHint: idempotent}
+}
