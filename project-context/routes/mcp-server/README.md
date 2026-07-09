@@ -2,6 +2,12 @@
 
 ## TL;DR
 - STATUS: ALL 5 PHASES DONE as of 2026-07-07 — the MCP server initiative is complete and shipped.
+- Task #12 (2026-07-09) added MCP ToolAnnotations metadata to all 20 tools, additive only, no behavior change.
+- ToolAnnotations make the read-only-vs-mutating split machine-readable, previously expressed only in docs and confirmation-gate code.
+- delete_client is the sole tool with DestructiveHint true; ReadOnlyHint is false only on delete_client.
+- preview_delete_client carries ReadOnlyHint true since it only previews and issues a token, mutating nothing.
+- enable_client, disable_client, and edit_client carry IdempotentHint true; add_client does not, since repeats create new peers.
+- OpenWorldHint is left unset on every tool because all 20 tools only reach the closed dashboard API over the tunnel.
 - Task #11 (2026-07-08) added `get_host_metrics`, a post-roadmap tool exposing host disk usage previously unreachable via MCP.
 - `get_host_metrics` is the sole MCP tool that fetches the dashboard's Prometheus `/metrics` endpoint instead of a JSON `/api/*` route.
 - Host disk usage (`wireguard_host_disk_percent`) has no JSON `/api/*` endpoint; it is reachable via MCP only through `get_host_metrics`.
@@ -22,7 +28,7 @@
 - The MCP server is a thin external wrapper mapping MCP tool calls onto the dashboard's `/api/*` endpoints, except `get_host_metrics`.
 - It runs laptop-side over the WireGuard tunnel like any client, never on the EC2 instance, and is never embedded in the dashboard binary.
 - Transport is MCP's native stdio subprocess with one hardcoded dashboard target per instance — no Docker, no always-on HTTP/SSE listener.
-- Key files: `mcp/cmd/mcp-server/main.go`, `mcp/internal/tools/tools.go`, `mcp/internal/tools/mutating.go`, `mcp/internal/tools/tokens.go`, `mcp/internal/tools/host_metrics.go`, `mcp/internal/dashboard/client.go`, `mcp/docs/tool-surface.md`, `mcp/docs/confirmation-gates.md`, `mcp/docs/phase4-validation.md`.
+- Key files: `mcp/cmd/mcp-server/main.go`, `mcp/internal/tools/tools.go`, `mcp/internal/tools/mutating.go`, `mcp/internal/tools/tokens.go`, `mcp/internal/tools/host_metrics.go`, `mcp/internal/tools/annotations.go`, `mcp/internal/dashboard/client.go`, `mcp/docs/tool-surface.md`, `mcp/docs/confirmation-gates.md`, `mcp/docs/phase4-validation.md`.
 
 Rules for an MCP (Model Context Protocol) integration that lets an LLM agent operate the dashboard's REST API on the operator's behalf; all 5 phases of its roadmap are done — code shipped, live-tunnel validated, and now packaged/wired — and the confirmation-gate design question is resolved.
 
@@ -79,6 +85,18 @@ This route owns the business rules for an MCP server that lets an LLM agent mana
 - Scope decision (Phase 2 vs. Phase 3 for `/api/clients*`) — the read-only client endpoints (`list_clients`, `get_client_config`, `get_client_history`) were deliberately deferred out of Phase 2 into Phase 3, even though they are read-only, so the entire `/api/clients*` surface (read-only and mutating) shipped together in one reviewable unit instead of being split across two phases.
 - All mutating tools remain thin wrappers over `dashboard/internal/server/handlers_clients_admin.go` and `handlers_clients.go` — a rejected add/edit surfaces to the caller as the dashboard's own `dashboard.StatusError` body, never re-validated MCP-side.
 - Verification: `go build`/`go vet`/`go test` httptest-backed unit tests (confirm-gate makes zero calls when unset; token flow rejects wrong/expired/replayed tokens), PLUS Phase 4 live-dashboard round-trip validation (2026-07-07, `mcp/docs/phase4-validation.md`) — 18/19 tools passed against the real dashboard over the real tunnel; the 19th (`get_client_metrics`) now passes after the Task #6 fix.
+- Task #12 (2026-07-09) added MCP `ToolAnnotations` metadata to every tool's registration — additive only, no change to behavior, arguments, return shape, or the confirmation-gate code.
+- ToolAnnotations are the machine-readable expression of the read-only-vs-mutating split that previously lived only in docs and in `mutating.go`'s confirmation-gate logic; a host can now guard the destructive verb or skip confirm UX by reading metadata instead of parsing docs.
+- All 14 read-only tools (`get_metrics`, `get_system_metrics`, `get_traffic_metrics`, `get_client_metrics`, `list_clients`, `get_client_config`, `get_client_history`, `get_service_status`, `get_server_info`, `get_alerts`, `get_snapshot`, `get_geo`, `get_health`, `get_host_metrics`) carry `ReadOnlyHint: true`.
+- `preview_delete_client` also carries `ReadOnlyHint: true` even though it is code-categorized among the 6 mutating tools — it only previews and mints a token, and issues zero HTTP mutation.
+- `delete_client` is the sole tool with `DestructiveHint: true`; it is also the only tool with `ReadOnlyHint: false` paired with a destructive hint, reflecting that it is the sole irreversible verb on the whole tool surface.
+- `add_client`, `edit_client`, `enable_client`, `disable_client` are reversible mutations: `ReadOnlyHint: false`, `DestructiveHint: false`.
+- `edit_client`, `enable_client`, `disable_client` carry `IdempotentHint: true`; `add_client` deliberately does not, because repeated calls create additional distinct peers rather than converging on one state.
+- `OpenWorldHint` is left unset on all 20 tools — every tool talks only to the closed dashboard API over the tunnel, never an open/unbounded external system.
+- `mcp/internal/tools/annotations.go` centralizes annotation construction: a `boolPtr` helper (for the `*bool` fields) plus a shared `readOnlyAnnotations()` constructor reused by all 14 read-only tools plus `preview_delete_client`, so the read-only annotation shape is defined once, not repeated per tool.
+- The go-sdk v1.6.1 `ToolAnnotations` struct has mixed field types by design: `ReadOnlyHint`/`IdempotentHint` are plain `bool`, `DestructiveHint`/`OpenWorldHint` are `*bool` — this is why `annotations.go` needed a `boolPtr` helper.
+- REJECTED (Task #12): re-modeling every tool's return into typed Go structs was considered and rejected — the dashboard's `/api/*` JSON endpoints already return structured JSON, so passthrough is already structured, and re-typing would couple the MCP module to the dashboard's response schema and break the raw-passthrough/byte-faithful-wrapper invariant.
+- `get_host_metrics` remains the sole justified exception to raw-passthrough, because `/metrics` returns Prometheus text, not JSON — this exception is unrelated to and unaffected by the Task #12 annotations work.
 
 ## Invariants
 
@@ -109,6 +127,12 @@ These rules must never be violated:
 - Confirmation gates are a client-side safety mechanism against LLM over-eagerness, never an authentication or authorization boundary.
 - The confirmation-gate shape MUST be chosen by reversibility: inline `confirm` for reversible ops, token-gated dry run only for the sole irreversible op (`delete_client`).
 - The dashboard target MUST be retargetable via `-addr` flag or `MCP_DASHBOARD_ADDR` env with no recompile — this is what makes the cross-project template copy-paste-able.
+- Every tool registration MUST carry `ToolAnnotations` — annotations are additive metadata, never a substitute for the confirmation-gate/token logic, which MUST remain the actual enforcement mechanism.
+- `delete_client` MUST be the only tool with `DestructiveHint: true` — no other tool, including `preview_delete_client`, may carry a destructive hint.
+- `preview_delete_client` MUST carry `ReadOnlyHint: true` — it MUST NOT issue any HTTP mutation, only a preview + token mint.
+- `add_client` MUST NOT carry `IdempotentHint: true` — repeated calls create new peers, so idempotency MUST NOT be claimed.
+- `OpenWorldHint` MUST stay unset on every tool — the MCP server never talks to an open/unbounded external system, only the closed dashboard API.
+- Tool response bodies MUST NOT be re-modeled into typed Go structs solely to satisfy annotations work — the raw-passthrough invariant takes precedence; `get_host_metrics` remains the sole exception, unrelated to annotations.
 
 ## Route-Specific Constraints
 
@@ -149,3 +173,8 @@ These rules must never be violated:
 - Modified files (Task #11): `mcp/internal/tools/tools.go` (tool registration), `mcp/internal/dashboard/client.go` (added `GetMetrics(ctx)`).
 - Disk usage (`wireguard_host_disk_percent{mount=...}`) is collected server-side but was exposed on no `/api/*` route — only on `/metrics` — making it invisible via MCP until Task #11.
 - `get_host_metrics`'s raw-passthrough departure is a deliberate, narrowly scoped exception, justified because `/metrics` is Prometheus exposition text with no JSON schema to preserve byte-faithfully — do not treat it as license to re-model other tools' responses.
+- TASK #12 (2026-07-09, post-roadmap addendum) is a docs-alignment addendum to the confirmation-gate design (see the CONFIRMATION-GATE QUESTION resolution above): annotations surface the same read-only/destructive/idempotent split machine-readably, but the actual enforcement still lives entirely in `mutating.go`'s `confirm`-check and `tokens.go`'s token flow — annotations are advisory metadata for MCP hosts, never a second enforcement layer.
+- New files (Task #12): `mcp/internal/tools/annotations.go` (`boolPtr` helper + shared `readOnlyAnnotations()` constructor), `mcp/internal/tools/annotations_test.go`.
+- Modified files (Task #12): tool registration call sites across `mcp/internal/tools/tools.go` and `mcp/internal/tools/mutating.go` gained a `ToolAnnotations` field per tool; no handler logic changed.
+- Verified (Task #12): `go build`/`go vet`/`go test`/`gofmt` clean; `annotations_test.go` asserts the exact hint combination per tool (all 14 read-only tools + `preview_delete_client` → `ReadOnlyHint:true`; `delete_client` → `DestructiveHint:true`; `edit_client`/`enable_client`/`disable_client` → `IdempotentHint:true`; `add_client` → no idempotent hint; `OpenWorldHint` unset everywhere).
+- MCP tool COUNT is unchanged by Task #12: still 20 total tools, 14 read-only, 6 mutating.

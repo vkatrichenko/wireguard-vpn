@@ -74,6 +74,7 @@ func addHostMetricsTool(server *mcp.Server, client *dashboard.Client) {
 		Description: "Host metrics only available on the dashboard's Prometheus /metrics endpoint, not any JSON /api/* route: " +
 			"per-mount disk usage percent, host CPU/memory percent, per-peer rx/tx bytes and last-handshake age, " +
 			"peer/alert counts, and build version/sha. Returns parsed structured JSON, not raw Prometheus text.",
+		Annotations: readOnlyAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, hostMetrics, error) {
 		body, err := client.GetMetrics(ctx)
 		if err != nil {
