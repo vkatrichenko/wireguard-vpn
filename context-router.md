@@ -61,8 +61,12 @@ Rules for the HTTP surface, view-models, htmx partials, embedded assets, auto-re
 Directory Path: project-context/routes/web-delivery-ui/
 
 ## MCP Server Route
-PLANNED, not yet implemented: rules for a laptop-side MCP server that wraps the dashboard's existing REST API so an LLM agent can manage peers and read metrics over the WireGuard tunnel.
+Implemented and shipped: rules for a laptop-side MCP server that wraps the dashboard's existing REST API so an LLM agent can manage peers and read metrics over the WireGuard tunnel, live-tunnel validated and publicly distributable via go install.
 Directory Path: project-context/routes/mcp-server/
+
+## Alerting & Notifications Route
+Rules for the in-memory alert evaluator (service-down, high-disk, high-cpu, transfer-cap conditions with cooldown-suppressed re-notification) and the transport-agnostic outbound notifier (webhook, Slack bot, Telegram, Discord) plus its runtime-mutable webhook management endpoints.
+Directory Path: project-context/routes/alerting-notifications/
 
 ## AI Skills and Agents
 Available tools and automated skills for the AI agent (e.g., context-router initializer/actualizer setup scripts).

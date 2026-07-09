@@ -68,6 +68,7 @@ func Register(server *mcp.Server, client *dashboard.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_client_metrics",
 		Description: "Per-client rx/tx rate time-series, keyed by WireGuard public key.",
+		Annotations: readOnlyAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in clientMetricsArgs) (*mcp.CallToolResult, any, error) {
 		if in.Pubkey == "" {
 			return nil, nil, fmt.Errorf("pubkey is required")
@@ -92,6 +93,7 @@ func Register(server *mcp.Server, client *dashboard.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_client_config",
 		Description: "Downloadable wg-quick config text for one client, keyed by name.",
+		Annotations: readOnlyAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in clientNameArgs) (*mcp.CallToolResult, any, error) {
 		if in.Name == "" {
 			return nil, nil, fmt.Errorf("name is required")
@@ -103,6 +105,7 @@ func Register(server *mcp.Server, client *dashboard.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_client_history",
 		Description: "Per-client connection-history summary (sessions, online/offline, last-seen) over an optional ?range= window, keyed by name.",
+		Annotations: readOnlyAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in clientNameRangeArgs) (*mcp.CallToolResult, any, error) {
 		if in.Name == "" {
 			return nil, nil, fmt.Errorf("name is required")
@@ -137,9 +140,11 @@ func Register(server *mcp.Server, client *dashboard.Client) {
 }
 
 // addRangeTool registers a param-less-except-range tool: GET path with an
-// optional ?range= passthrough.
+// optional ?range= passthrough. Every caller of this helper is read-only, so
+// the ToolAnnotations are hardcoded here rather than threaded through as a
+// parameter — see readOnlyAnnotations (annotations.go).
 func addRangeTool(server *mcp.Server, client *dashboard.Client, name, path, desc string) {
-	mcp.AddTool(server, &mcp.Tool{Name: name, Description: desc},
+	mcp.AddTool(server, &mcp.Tool{Name: name, Description: desc, Annotations: readOnlyAnnotations()},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in rangeArgs) (*mcp.CallToolResult, any, error) {
 			q := url.Values{}
 			if in.Range != "" {
@@ -150,9 +155,10 @@ func addRangeTool(server *mcp.Server, client *dashboard.Client, name, path, desc
 }
 
 // addNoArgTool registers a tool with no input arguments at all: a bare GET
-// path.
+// path. Every caller of this helper is read-only, so the ToolAnnotations are
+// hardcoded here — see readOnlyAnnotations (annotations.go).
 func addNoArgTool(server *mcp.Server, client *dashboard.Client, name, path, desc string) {
-	mcp.AddTool(server, &mcp.Tool{Name: name, Description: desc},
+	mcp.AddTool(server, &mcp.Tool{Name: name, Description: desc, Annotations: readOnlyAnnotations()},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
 			return get(ctx, client, path, nil)
 		})

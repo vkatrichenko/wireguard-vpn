@@ -95,6 +95,22 @@ Per the mcp-server route's roadmap (read-only before mutating is a deliberate ri
 
 Phase 4 (live validation over the real tunnel, checked against Clients & Connectivity route invariants) and Phase 5 (MCP host wiring/packaging, no Docker) apply across the whole tool set once Phases 2 and 3 have shipped — they are not per-tool phases and are not re-litigated here.
 
+## Tool annotations (Praxis Task #12)
+
+Every one of the 20 tools in this surface (14 read-only + 6 mutating — the count is unchanged by this addition) now carries an `mcp.ToolAnnotations` hint alongside its name/description, so an MCP client can reason about read/write and reversibility without parsing the description text:
+
+- **Read-only tools → `ReadOnlyHint: true`.** All 14: `get_metrics`, `get_system_metrics`, `get_traffic_metrics`, `get_client_metrics`, `list_clients`, `get_client_config`, `get_client_history`, `get_service_status`, `get_server_info`, `get_alerts`, `get_snapshot`, `get_geo`, `get_health`, `get_host_metrics`. `preview_delete_client` also gets `ReadOnlyHint: true` even though it lives in mutating.go alongside the six mutating tools — it only reads and issues an in-process token, it never calls the dashboard's write verbs.
+- **`delete_client` → `DestructiveHint: true`, `ReadOnlyHint: false`.** The sole irreversible verb on the `/api/clients*` surface (see the confirmation-gates note below); once redeemed, the peer's keypair and history are gone for good.
+- **Reversible mutations (`add_client`, `edit_client`, `enable_client`, `disable_client`) → `ReadOnlyHint: false`, `DestructiveHint: false`.** Each can be undone by another call on this same surface (a bad add via `delete_client`, a bad edit via another `edit_client`, a toggle via the opposite toggle tool).
+- **`IdempotentHint: true`** is set only where re-invoking with the same arguments is a genuine no-op: `enable_client` and `disable_client` (re-applying the same enabled state), and `edit_client` (re-applying the same field values re-patches to the same state). `add_client` never gets this hint — calling it twice either fails (duplicate name/key) or creates a second peer, never a no-op.
+- **`OpenWorldHint` is left unset on every tool.** Every tool in this package talks only to the closed dashboard API over the WireGuard tunnel — there is no open-ended external interaction (e.g. web search) anywhere in this surface, so this hint is never set to true; see the doc comment in `internal/tools/annotations.go` for the one-time rationale.
+
+This is additive metadata only: no tool's arguments, return bytes, or the `add`/`edit`/`enable`/`disable` `confirm=true` gate / `preview_delete_client`→`delete_client` token gate changed. See `internal/tools/annotations.go` (the shared `readOnlyAnnotations()`/`boolPtr()` helpers) and the per-tool `Annotations:` fields in `internal/tools/tools.go`, `internal/tools/mutating.go`, and `internal/tools/host_metrics.go`.
+
+### Rejected sibling idea: re-typing every tool's return into typed Go structs
+
+Considered and rejected alongside Task #12. The dashboard's `/api/*` endpoints already return JSON, so every read-only tool's raw-body passthrough (`tools.go`'s `get` helper, mirrored by `post`/`patch`/`del` in `mutating.go`) is already structured — proxying the bytes through is not "unstructured" in any sense that re-typing would fix. Re-modeling every tool's output into typed Go structs would instead couple this package to the dashboard's exact JSON schema at every endpoint, which breaks the deliberate byte-faithful-wrapper invariant stated in `tools.go`'s package doc comment ("Handlers never re-model the dashboard's JSON response shapes"): any dashboard-side field addition/rename would require a lockstep MCP-side struct change instead of just working. `get_host_metrics` (`host_metrics.go`) is the sole justified exception, because its source (`GET /metrics`, Prometheus text exposition) has no JSON schema to begin with — parsing it into typed fields is the only way to make it consumable at all, not a stylistic choice this task should generalize from.
+
 ## Confirmation-gate question — resolved 2026-07-06
 
 Phase 1 carried an open question into Phase 3: whether mutating tools need an explicit confirmation parameter, a separate dry-run tool, or neither. The owner resolved this on 2026-07-06 with a split design rather than picking one option uniformly:
